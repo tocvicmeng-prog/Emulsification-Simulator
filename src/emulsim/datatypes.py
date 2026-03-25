@@ -145,13 +145,13 @@ class MaterialProperties:
 
     # Thermodynamic
     chi_0: float = 0.497                # Flory-Huggins χ at reference T
-    chi_T_coeffs: tuple = (150.0, 0.0)  # (A, B) for χ(T) = A/T + B
+    chi_T_coeffs: tuple = (500.0, -1.0)   # (A, B) for χ(T) = A/T + B; spinodal onset ~305 K
     kappa_CH: float = 1.0e-12           # [J/m] Cahn-Hilliard gradient coefficient
     M_0: float = 1.0e-14               # [m⁵/(J·s)] bare mobility
 
     # Gelation
     T_gel: float = 311.15               # [K] (~38°C)
-    k_gel_0: float = 0.01               # [1/s] Avrami rate prefactor
+    k_gel_0: float = 1.0                # [1/s] Avrami rate prefactor
     n_avrami: float = 2.5               # [-]
     gel_arrest_exponent: float = 2.5    # β
 

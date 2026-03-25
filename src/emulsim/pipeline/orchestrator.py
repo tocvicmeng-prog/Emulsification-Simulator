@@ -11,11 +11,13 @@ from typing import Optional
 
 from ..datatypes import (
     EmulsificationResult,
+    GelationResult,
     MaterialProperties,
     SimulationParameters,
 )
 from ..properties.database import PropertyDatabase
 from ..level1_emulsification.solver import PBESolver
+from ..level2_gelation.solver import CahnHilliardSolver
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,31 @@ class PipelineOrchestrator:
             emul_result.d32 * 1e6, emul_result.span, dt1,
         )
 
+        # ── Level 2: Gelation & Pore Formation ────────────────────────────
+        R_droplet = emul_result.d32 / 2.0
+        logger.info(
+            "Level 2: Gelation (R=%.2f µm, cooling=%.3f K/s)",
+            R_droplet * 1e6, params.formulation.cooling_rate,
+        )
+        t0 = time.perf_counter()
+
+        ch_solver = CahnHilliardSolver(
+            N_r=params.solver.l2_n_r,
+            dt_initial=params.solver.l2_dt_initial,
+            dt_max=params.solver.l2_dt_max,
+            arrest_exponent=params.solver.l2_arrest_exponent,
+        )
+        gel_result = ch_solver.solve(params, props, R_droplet=R_droplet)
+        dt2 = time.perf_counter() - t0
+
+        results["gelation"] = gel_result
+        results["level2_time"] = dt2
+        logger.info(
+            "Level 2 complete: pore=%.1f nm, porosity=%.2f, alpha=%.3f (%.1f s)",
+            gel_result.pore_size_mean * 1e9, gel_result.porosity,
+            gel_result.alpha_final, dt2,
+        )
+
         # Save summary
         summary = {
             "run_id": run_id,
@@ -83,8 +110,16 @@ class PipelineOrchestrator:
                 "d50_um": emul_result.d50 * 1e6,
                 "d90_um": emul_result.d90 * 1e6,
                 "span": emul_result.span,
-                "converged": emul_result.converged,
+                "converged": bool(emul_result.converged),
                 "elapsed_s": dt1,
+            },
+            "level2": {
+                "pore_size_mean_nm": gel_result.pore_size_mean * 1e9,
+                "pore_size_std_nm": gel_result.pore_size_std * 1e9,
+                "porosity": gel_result.porosity,
+                "alpha_final": gel_result.alpha_final,
+                "char_wavelength_nm": gel_result.char_wavelength * 1e9,
+                "elapsed_s": dt2,
             },
         }
         with open(run_dir / "summary.json", "w") as f:
