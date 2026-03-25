@@ -1,33 +1,36 @@
-"""Flory-Huggins free energy and chemical potential for Cahn-Hilliard solver."""
+"""Flory-Huggins free energy and chemical potential for Cahn-Hilliard solver.
+
+Core Flory-Huggins functions are delegated to :mod:`emulsim.properties.thermodynamic`
+(single source of truth). This module re-exports thin wrappers that accept ``chi``
+as a required positional argument (the solver always pre-computes chi) and adds the
+Eyre-splitting helper :func:`contractive_constant`.
+"""
 
 from __future__ import annotations
 import numpy as np
 
-K_BOLTZMANN = 1.38e-23  # J/K
+from ..properties.thermodynamic import (
+    flory_huggins_derivative as _fh_derivative,
+    flory_huggins_second_derivative as _fh_second_derivative,
+)
 
 
 def flory_huggins_mu(phi: np.ndarray, T: float, chi: float,
                      N_p: float = 100.0, v0: float = 1.8e-29) -> np.ndarray:
     """Chemical potential mu = df/dphi (without gradient term).
 
-    mu = (kT/v0) [ln(phi)/Np + 1/Np - ln(1-phi) - 1 + chi*(1-2*phi)]
+    Delegates to :func:`emulsim.properties.thermodynamic.flory_huggins_derivative`.
     """
-    phi_c = np.clip(phi, 1e-12, 1.0 - 1e-12)
-    pf = K_BOLTZMANN * T / v0
-    return pf * (np.log(phi_c) / N_p + 1.0 / N_p - np.log(1.0 - phi_c) - 1.0 + chi * (1.0 - 2.0 * phi_c))
+    return _fh_derivative(phi, T, N_p=N_p, chi=chi, v0=v0)
 
 
 def flory_huggins_d2f(phi: np.ndarray, T: float, chi: float,
                       N_p: float = 100.0, v0: float = 1.8e-29) -> np.ndarray:
     """Second derivative d^2f/dphi^2.
 
-    f'' = (kT/v0) [1/(Np*phi) + 1/(1-phi) - 2*chi]
-
-    Negative in the spinodal region.
+    Delegates to :func:`emulsim.properties.thermodynamic.flory_huggins_second_derivative`.
     """
-    phi_c = np.clip(phi, 1e-12, 1.0 - 1e-12)
-    pf = K_BOLTZMANN * T / v0
-    return pf * (1.0 / (N_p * phi_c) + 1.0 / (1.0 - phi_c) - 2.0 * chi)
+    return _fh_second_derivative(phi, T, N_p=N_p, chi=chi, v0=v0)
 
 
 def contractive_constant(phi_range: tuple, T: float, chi: float,

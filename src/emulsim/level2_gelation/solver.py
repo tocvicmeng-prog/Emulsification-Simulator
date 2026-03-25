@@ -251,7 +251,7 @@ class CahnHilliardSolver:
         pore_std = np.std(chords) if len(chords) > 1 else 0.0
         porosity = compute_porosity(phi, r)
 
-        T_hist_arr = np.array([t for t, _ in T_history]) if T_history else np.array([0.0])
+        T_hist_arr = np.array([T for _, T in T_history]) if T_history else np.array([0.0])
 
         return GelationResult(
             r_grid=r,

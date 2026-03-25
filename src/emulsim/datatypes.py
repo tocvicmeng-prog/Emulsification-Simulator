@@ -245,12 +245,13 @@ class FullResult:
     mechanical: MechanicalResult
 
     def objective_vector(self) -> np.ndarray:
-        """Compute the 3 objective values for optimization."""
-        f1 = abs(self.emulsification.d32 - 2.0e-6) / 2.0e-6
-        f2 = abs(self.gelation.pore_size_mean - 80e-9) / 80e-9
-        G_target = 1e4  # 10 kPa default target
-        f3 = abs(np.log10(max(self.mechanical.G_DN, 1.0)) - np.log10(G_target))
-        return np.array([f1, f2, f3])
+        """Compute the 3 objective values for optimization.
+
+        Delegates to the canonical implementation in
+        ``emulsim.optimization.objectives.compute_objectives``.
+        """
+        from emulsim.optimization.objectives import compute_objectives
+        return compute_objectives(self)
 
 
 @dataclass

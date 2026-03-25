@@ -151,6 +151,13 @@ class OptimizationEngine:
         params.run_id = f"opt_{len(self.X_observed):04d}"
         result = self.orchestrator.run_single(params)
         objectives = compute_objectives(result)
+
+        # Check feasibility constraints and penalise infeasible points
+        feasible, violations = check_constraints(result)
+        if not feasible:
+            logger.info("Infeasible point: %s", "; ".join(violations))
+            objectives = objectives * 10.0 + 5.0
+
         return objectives, result
 
     def _generate_initial_points(self) -> np.ndarray:
@@ -298,11 +305,26 @@ class OptimizationEngine:
         X_all = np.array(self.X_observed)
         Y_all = np.array(self.Y_observed)
 
-        # Find Pareto front
+        # Find Pareto front, filtering out infeasible (penalised) points.
+        # Penalised points have all objectives > 5.0; exclude them before
+        # computing non-dominated set so the front only contains feasible designs.
         Y_torch = torch.tensor(Y_all, **tkwargs)
-        neg_Y = -Y_torch
-        pareto_mask = is_non_dominated(neg_Y)
-        pareto_idx = pareto_mask.numpy()
+        feasible_mask = (Y_torch.max(dim=-1).values <= 5.0)
+        if feasible_mask.any():
+            Y_feasible = Y_torch[feasible_mask]
+            neg_Y_f = -Y_feasible
+            pareto_in_feasible = is_non_dominated(neg_Y_f)
+            # Map back to full index space
+            feasible_indices = torch.where(feasible_mask)[0]
+            pareto_full = torch.zeros(len(Y_all), dtype=torch.bool)
+            pareto_full[feasible_indices[pareto_in_feasible]] = True
+            pareto_idx = pareto_full.numpy()
+        else:
+            # All points infeasible — fall back to full non-dominated set
+            logger.warning("No feasible points found; Pareto front includes penalised points")
+            neg_Y = -Y_torch
+            pareto_mask = is_non_dominated(neg_Y)
+            pareto_idx = pareto_mask.numpy()
 
         state = OptimizationState(
             X_observed=X_all,

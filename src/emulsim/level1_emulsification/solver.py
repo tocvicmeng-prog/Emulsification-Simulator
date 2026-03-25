@@ -66,10 +66,13 @@ class PBESolver:
                 v_sum = self.v_pivots[j] + self.v_pivots[k]
                 d_sum = (6.0 * v_sum / np.pi) ** (1.0 / 3.0)
 
-                # Skip if product is outside grid
-                if d_sum > self.d_edges[-1] * 1.01:
-                    continue
+                # Skip if product is below grid
                 if d_sum < self.d_edges[0]:
+                    continue
+
+                # Clamp oversized products to the last bin (conservative)
+                if d_sum > self.d_edges[-1]:
+                    entries.append((j, k, n - 1, 1.0))
                     continue
 
                 # Find target bin via searchsorted on pivot diameters
@@ -165,11 +168,13 @@ class PBESolver:
         pdf = np.exp(-0.5 * ((log_d - log_d0) / sigma_premix) ** 2)
         pdf /= (self.d_pivots * sigma_premix * np.sqrt(2 * np.pi))
 
-        total_vol = np.sum(pdf * self.v_pivots * self.d_widths)
+        # N_i = n(d_i) * Δd_i  (total count per bin)
+        N = pdf * self.d_widths
+        total_vol = np.sum(N * self.v_pivots)
         if total_vol > 0:
-            pdf *= phi_d / total_vol
+            N *= phi_d / total_vol
 
-        return pdf
+        return N
 
     def solve(self, params: SimulationParameters,
               props: MaterialProperties,
@@ -230,33 +235,37 @@ class PBESolver:
         else:
             converged = False
 
-        total_vol = np.sum(N_final * self.v_pivots * self.d_widths)
+        total_vol = np.sum(N_final * self.v_pivots)
+
+        # Convert from total count per bin back to number density for output
+        n_d_output = N_final / self.d_widths
+        n_d_history = sol.y.T / self.d_widths[np.newaxis, :]
 
         return EmulsificationResult(
             d_bins=self.d_pivots.copy(),
-            n_d=N_final,
+            n_d=n_d_output,
             d32=d32, d43=d43, d10=d10, d50=d50, d90=d90, span=span,
             total_volume_fraction=total_vol,
             converged=converged,
             t_history=sol.t,
-            n_d_history=sol.y.T,
+            n_d_history=n_d_history,
         )
 
     # ── Statistics helpers ────────────────────────────────────────────────
 
     def _sauter_mean(self, N: np.ndarray) -> float:
-        num = np.sum(N * self.d_pivots**3 * self.d_widths)
-        den = np.sum(N * self.d_pivots**2 * self.d_widths)
+        num = np.sum(N * self.d_pivots**3)
+        den = np.sum(N * self.d_pivots**2)
         return num / den if den > 0 else 0.0
 
     def _compute_statistics(self, N: np.ndarray) -> tuple:
         d32 = self._sauter_mean(N)
 
-        num43 = np.sum(N * self.d_pivots**4 * self.d_widths)
-        den43 = np.sum(N * self.d_pivots**3 * self.d_widths)
+        num43 = np.sum(N * self.d_pivots**4)
+        den43 = np.sum(N * self.d_pivots**3)
         d43 = num43 / den43 if den43 > 0 else 0.0
 
-        vol_per_bin = N * self.v_pivots * self.d_widths
+        vol_per_bin = N * self.v_pivots
         total_vol = np.sum(vol_per_bin)
         if total_vol <= 0:
             return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
