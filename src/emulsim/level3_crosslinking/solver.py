@@ -66,9 +66,17 @@ def crosslinking_odes(t: float, y: np.ndarray, k: float,
 
 def crosslink_density_to_properties(
     X: float, c_chitosan: float, T: float, DDA: float, M_GlcN: float,
-    NH2_total: float,
+    NH2_total: float, f_bridge: float = 0.4,
 ) -> tuple[float, float, float, float]:
     """Convert crosslink density to network properties.
+
+    Parameters
+    ----------
+    f_bridge : float
+        Fraction of genipin-amine reactions that produce elastically
+        active inter-chain crosslinks (not pendant modifications or
+        intra-chain loops).  Literature range 0.3-0.5 for chitosan-
+        genipin systems.
 
     Returns (nu_e, Mc, xi, G_chitosan):
         nu_e: effective crosslink density [1/m³]
@@ -76,18 +84,22 @@ def crosslink_density_to_properties(
         xi: mesh size [m]
         G_chitosan: shear modulus of chitosan network [Pa]
     """
-    # Crosslinking fraction
-    p = X / NH2_total if NH2_total > 0 else 0.0
-    p = min(p, 1.0)
+    # Only a fraction f_bridge of reacted genipin produces elastically
+    # active inter-chain crosslinks (case 3).  The rest are pendant
+    # modifications (case 1) or intra-chain loops (case 2).
+    X_effective = f_bridge * X
 
     # Effective crosslink density (assuming tetrafunctional crosslinks)
-    # nu_e = X · N_A  (crosslinks per m³)
-    nu_e = X * N_AVOGADRO
+    # nu_e = X_eff · N_A  (elastically active crosslinks per m³)
+    nu_e = X_effective * N_AVOGADRO
 
-    # Molecular weight between crosslinks
-    # Mc = M_GlcN / (2·p)  for random crosslinking on a linear chain
-    if p > 1e-10:
-        Mc = M_GlcN / (2.0 * p)
+    # Molecular weight between crosslinks using effective conversion
+    p_effective = X_effective / NH2_total if NH2_total > 0 else 0.0
+    p_effective = min(p_effective, 1.0)
+
+    # Mc = M_GlcN / (2·p_eff)  for random crosslinking on a linear chain
+    if p_effective > 1e-10:
+        Mc = M_GlcN / (2.0 * p_effective)
     else:
         Mc = 1e10  # effectively infinite
 
@@ -160,6 +172,7 @@ def solve_crosslinking(params: SimulationParameters,
     for i in range(len(t_arr)):
         nu_e, Mc, xi, G_c = crosslink_density_to_properties(
             X_arr[i], c_chitosan, T, props.DDA, props.M_GlcN, NH2_total,
+            props.f_bridge,
         )
         nu_e_arr[i] = nu_e
         Mc_arr[i] = Mc

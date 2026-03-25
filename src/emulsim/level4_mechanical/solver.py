@@ -32,22 +32,32 @@ def agarose_modulus(c_agarose: float, G_prefactor: float = 3000.0,
     return G_prefactor * (c_agarose / c_ref) ** G_exponent
 
 
-def double_network_modulus(G_agarose: float, G_chitosan: float) -> float:
-    """Additive double-network shear modulus [Pa].
+def double_network_modulus(G_agarose: float, G_chitosan: float,
+                           eta_coupling: float = -0.15) -> float:
+    """IPN modulus with coupling term [Pa].
 
-    G_DN = G_agarose + G_chitosan
+    G_DN = G1 + G2 + eta * sqrt(G1 * G2)
 
-    Valid for semi-IPN where networks are independently load-bearing.
+    eta > 0: synergistic (DN gels with sacrificial bonds)
+    eta < 0: antagonistic (mutual swelling constraint)
+    eta = 0: simple additivity (upper bound)
+
+    Default eta = -0.15 for sequential IPN without sacrificial bonds.
     """
-    return G_agarose + G_chitosan
+    G_cross = eta_coupling * np.sqrt(max(G_agarose, 0) * max(G_chitosan, 0))
+    return max(G_agarose + G_chitosan + G_cross, 0.0)
 
 
 def effective_youngs_modulus(G: float, nu: float = 0.45) -> float:
-    """Effective Young's modulus from shear modulus [Pa].
+    """Reduced modulus for Hertz contact [Pa].
 
-    E* = 2·G·(1+ν) for incompressible-like hydrogels (ν ≈ 0.45-0.5).
+    E* = E / (1 - nu^2) = 2·G·(1+nu) / (1 - nu^2)
+
+    The Hertz contact equation F = (4/3)·E*·sqrt(R)·delta^(3/2) requires
+    the reduced modulus, not just Young's modulus.
     """
-    return 2.0 * G * (1.0 + nu)
+    E = 2.0 * G * (1.0 + nu)
+    return E / (1.0 - nu**2)
 
 
 def hertz_contact(E_star: float, R: float,
@@ -129,14 +139,19 @@ def solve_mechanical(params: SimulationParameters,
     # Chitosan network modulus from crosslinking
     G_chit = crosslinking.G_chitosan_final
 
-    # Double-network modulus
-    G_DN = double_network_modulus(G_agar, G_chit)
+    # Double-network modulus with IPN coupling
+    G_DN = double_network_modulus(G_agar, G_chit, props.eta_coupling)
 
     # Effective Young's modulus
     E_star = effective_youngs_modulus(G_DN)
 
     # Hertz contact curve
-    R = gelation.r_grid[-1] + (gelation.r_grid[1] - gelation.r_grid[0]) / 2.0
+    # Support both 1D radial (r_grid is radial) and 2D Cartesian (L_domain/2)
+    if gelation.L_domain > 0:
+        # 2D solver: R = L_domain / 2
+        R = gelation.L_domain / 2.0
+    else:
+        R = gelation.r_grid[-1] + (gelation.r_grid[1] - gelation.r_grid[0]) / 2.0
     delta_arr, F_arr = hertz_contact(E_star, R)
 
     # Ogston Kav for a range of protein sizes

@@ -66,6 +66,7 @@ class SolverSettings:
     l1_atol: float = 1e-8
     # Level 2
     l2_n_r: int = 1000
+    l2_n_grid: int = 128               # 2D grid side length (N×N)
     l2_dt_initial: float = 1e-4        # [s]
     l2_dt_max: float = 1.0             # [s]
     l2_arrest_exponent: float = 2.5
@@ -166,6 +167,12 @@ class MaterialProperties:
     G_agarose_prefactor: float = 3000.0  # [Pa] at 1% w/v
     G_agarose_exponent: float = 2.2      # power law exponent
 
+    # Crosslinking bridge efficiency
+    f_bridge: float = 0.4              # fraction of genipin reactions producing elastically active crosslinks
+
+    # IPN coupling
+    eta_coupling: float = -0.15        # IPN coupling coefficient
+
     # Network / pore
     r_fiber: float = 1.5e-9            # [m] agarose fiber radius
 
@@ -191,9 +198,14 @@ class EmulsificationResult:
 
 @dataclass
 class GelationResult:
-    """Output of Level 2: Phase-field solver."""
-    r_grid: np.ndarray                  # [m] (N_r,)
-    phi_field: np.ndarray               # [-] (N_r,)
+    """Output of Level 2: Phase-field solver.
+
+    Supports both 1D radial (legacy) and 2D Cartesian solvers.
+    For 1D: r_grid is (N_r,), phi_field is (N_r,).
+    For 2D: r_grid is (N,) coordinate array, phi_field is (N, N).
+    """
+    r_grid: np.ndarray                  # [m] (N_r,) or (N,) for 2D coords
+    phi_field: np.ndarray               # [-] (N_r,) or (N, N)
     pore_size_mean: float               # [m]
     pore_size_std: float                # [m]
     pore_size_distribution: np.ndarray  # [m]
@@ -202,6 +214,8 @@ class GelationResult:
     char_wavelength: float              # [m]
     T_history: Optional[np.ndarray] = None
     phi_snapshots: Optional[np.ndarray] = None
+    L_domain: float = 0.0              # [m] domain side length (2D solver)
+    grid_spacing: float = 0.0          # [m] uniform grid spacing
 
 
 @dataclass

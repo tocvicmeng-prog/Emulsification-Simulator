@@ -1,4 +1,7 @@
-"""Pore structure analysis from phase-field simulation results."""
+"""Pore structure analysis from phase-field simulation results.
+
+Supports both 1D radial and 2D Cartesian phase-field outputs.
+"""
 
 from __future__ import annotations
 import numpy as np
@@ -130,3 +133,143 @@ def compute_porosity(phi: np.ndarray, r: np.ndarray,
 
     pore_vol = np.sum(shell_vol[phi < threshold])
     return pore_vol / total_vol
+
+
+# ─── 2D Cartesian analysis ───────────────────────────────────────────────
+
+
+def structure_factor_2d(phi_2d: np.ndarray, h: float) -> tuple[np.ndarray, np.ndarray]:
+    """Compute radially averaged structure factor S(q) from a 2D composition field.
+
+    Uses 2D FFT and radial binning of |FFT|^2.
+
+    Parameters
+    ----------
+    phi_2d : np.ndarray
+        Composition field, shape (N, N).
+    h : float
+        Grid spacing [m].
+
+    Returns
+    -------
+    (q_bins, S_q) : tuple of 1D arrays
+        Radially averaged structure factor.
+    """
+    Ny, Nx = phi_2d.shape
+    dphi = phi_2d - np.mean(phi_2d)
+
+    ft = np.fft.fft2(dphi)
+    power = np.abs(ft) ** 2
+
+    # Wavenumber grids
+    qx = np.fft.fftfreq(Nx, d=h) * 2.0 * np.pi
+    qy = np.fft.fftfreq(Ny, d=h) * 2.0 * np.pi
+    QX, QY = np.meshgrid(qx, qy)
+    Q_mag = np.sqrt(QX**2 + QY**2)
+
+    # Radial binning
+    q_max = np.pi / h  # Nyquist
+    n_bins = min(Nx, Ny) // 2
+    q_edges = np.linspace(0, q_max, n_bins + 1)
+    q_bins = 0.5 * (q_edges[:-1] + q_edges[1:])
+    S_q = np.zeros(n_bins)
+
+    for ib in range(n_bins):
+        mask = (Q_mag >= q_edges[ib]) & (Q_mag < q_edges[ib + 1])
+        if np.any(mask):
+            S_q[ib] = np.mean(power[mask])
+
+    # Normalise
+    S_max = np.max(S_q)
+    if S_max > 0:
+        S_q /= S_max
+
+    return q_bins, S_q
+
+
+def characteristic_wavelength_2d(phi_2d: np.ndarray, h: float) -> float:
+    """Extract characteristic wavelength from 2D structure factor peak.
+
+    Returns lambda* = 2*pi/q* where q* is the peak wavenumber.
+    Returns 0.0 if no clear peak is found.
+    """
+    q, S_q = structure_factor_2d(phi_2d, h)
+
+    if len(q) < 3:
+        return 0.0
+
+    # Skip DC-adjacent bins
+    q_search = q[1:]
+    S_search = S_q[1:]
+
+    if len(S_search) == 0 or np.max(S_search) <= 0:
+        return 0.0
+
+    idx_peak = np.argmax(S_search)
+    q_star = q_search[idx_peak]
+
+    if q_star > 0:
+        return 2.0 * np.pi / q_star
+    return 0.0
+
+
+def chord_length_distribution_2d(phi_2d: np.ndarray, h: float,
+                                  threshold: float = None) -> np.ndarray:
+    """Compute chord lengths from a 2D composition field.
+
+    Scans all rows and all columns to collect pore-phase run lengths.
+
+    Parameters
+    ----------
+    phi_2d : np.ndarray
+        Composition field, shape (N, N).
+    h : float
+        Grid spacing [m].
+    threshold : float, optional
+        Binarization threshold. Default: midpoint of min/max phi.
+
+    Returns
+    -------
+    np.ndarray
+        Array of chord lengths [m].
+    """
+    if threshold is None:
+        threshold = 0.5 * (np.min(phi_2d) + np.max(phi_2d))
+
+    chords = []
+
+    # Scan rows
+    for row in phi_2d:
+        _collect_chords_1d(row < threshold, h, chords)
+
+    # Scan columns
+    for j in range(phi_2d.shape[1]):
+        _collect_chords_1d(phi_2d[:, j] < threshold, h, chords)
+
+    return np.array(chords) if chords else np.array([0.0])
+
+
+def _collect_chords_1d(is_pore: np.ndarray, h: float, chords: list) -> None:
+    """Helper: collect run lengths from a boolean array."""
+    current = 0
+    for val in is_pore:
+        if val:
+            current += 1
+        else:
+            if current > 0:
+                chords.append(current * h)
+                current = 0
+    if current > 0:
+        chords.append(current * h)
+
+
+def compute_porosity_2d(phi_2d: np.ndarray, threshold: float = None) -> float:
+    """Compute porosity (area fraction of pore space) from 2D field.
+
+    For a uniform grid, this is simply the fraction of grid points
+    below the threshold.
+    """
+    if threshold is None:
+        threshold = 0.5 * (np.min(phi_2d) + np.max(phi_2d))
+
+    return float(np.mean(phi_2d < threshold))

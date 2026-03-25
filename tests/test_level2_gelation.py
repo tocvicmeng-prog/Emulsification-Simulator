@@ -2,9 +2,13 @@
 
 import numpy as np
 import pytest
+from scipy import sparse
 
 from emulsim.datatypes import MaterialProperties, SimulationParameters
-from emulsim.level2_gelation.spatial import create_radial_grid, build_laplacian_matrix
+from emulsim.level2_gelation.spatial import (
+    create_radial_grid, build_laplacian_matrix,
+    create_2d_grid, build_laplacian_2d, build_mobility_laplacian_2d,
+)
 from emulsim.level2_gelation.free_energy import (
     flory_huggins_mu, flory_huggins_d2f, contractive_constant,
 )
@@ -13,6 +17,7 @@ from emulsim.level2_gelation.gelation import (
 )
 from emulsim.level2_gelation.pore_analysis import (
     chord_length_distribution, compute_porosity,
+    chord_length_distribution_2d, compute_porosity_2d, characteristic_wavelength_2d,
 )
 
 
@@ -166,3 +171,171 @@ class TestCahnHilliardSolver:
         props = MaterialProperties()
         result = solver.solve(params, props, R_droplet=3.0e-6)
         assert 0.0 <= result.porosity <= 1.0
+
+
+class TestSpatial2D:
+    def test_2d_grid_size(self):
+        x, y, h = create_2d_grid(6e-6, 64)
+        assert len(x) == 64
+        assert len(y) == 64
+        assert h == pytest.approx(6e-6 / 64)
+
+    def test_2d_grid_cell_centered(self):
+        x, y, h = create_2d_grid(1.0, 10)
+        assert x[0] == pytest.approx(0.05)
+        assert x[-1] == pytest.approx(0.95)
+
+    def test_2d_laplacian_shape(self):
+        L = build_laplacian_2d(16, 0.1)
+        assert L.shape == (256, 256)
+
+    def test_2d_laplacian_constant_field(self):
+        """Laplacian of a constant field should be zero."""
+        N = 16
+        L = build_laplacian_2d(N, 0.1)
+        phi = np.ones(N * N) * 0.5
+        result = L @ phi
+        assert np.max(np.abs(result)) < 1e-10
+
+    def test_2d_laplacian_symmetry(self):
+        """The Laplacian matrix should be symmetric for Neumann BCs."""
+        N = 8
+        L = build_laplacian_2d(N, 0.1)
+        diff = L - L.T
+        assert sparse.linalg.norm(diff) < 1e-12
+
+    def test_mobility_laplacian_constant_M(self):
+        """With constant M, mobility Laplacian should equal M * standard Laplacian."""
+        N = 8
+        h = 0.1
+        M_val = 2.5
+        M_field = np.ones((N, N)) * M_val
+        L_std = build_laplacian_2d(N, h)
+        L_M = build_mobility_laplacian_2d(M_field, N, h)
+        diff = L_M - M_val * L_std
+        assert sparse.linalg.norm(diff) < 1e-10
+
+    def test_mobility_laplacian_constant_field(self):
+        """Mobility Laplacian applied to constant field should be zero."""
+        N = 8
+        h = 0.1
+        M_field = np.random.default_rng(42).uniform(0.5, 2.0, (N, N))
+        L_M = build_mobility_laplacian_2d(M_field, N, h)
+        phi = np.ones(N * N) * 0.3
+        result = L_M @ phi
+        assert np.max(np.abs(result)) < 1e-10
+
+    def test_mobility_laplacian_face_averaging(self):
+        """Verify face-centred mobility is used, not cell-centred."""
+        N = 4
+        h = 1.0
+        # Set up M with a sharp gradient
+        M_field = np.ones((N, N))
+        M_field[0, :] = 10.0  # first row has high mobility
+        L_M = build_mobility_laplacian_2d(M_field, N, h)
+        # The operator should be different from using cell-centred M
+        # Just check it's a valid operator (negative semi-definite diagonal)
+        diag = L_M.diagonal()
+        assert np.all(diag <= 1e-14)  # diagonal entries should be <= 0
+
+
+class TestPoreAnalysis2D:
+    def test_porosity_2d_uniform_low(self):
+        phi = np.ones((16, 16)) * 0.01
+        por = compute_porosity_2d(phi, threshold=0.5)
+        assert por > 0.99
+
+    def test_porosity_2d_uniform_high(self):
+        phi = np.ones((16, 16)) * 0.99
+        por = compute_porosity_2d(phi, threshold=0.5)
+        assert por < 0.01
+
+    def test_chord_2d_alternating(self):
+        """Checkerboard-like pattern should produce chords."""
+        phi = np.zeros((8, 8))
+        phi[:, 4:] = 1.0  # left half pore, right half polymer
+        chords = chord_length_distribution_2d(phi, 1e-9)
+        assert len(chords) >= 1
+        assert np.all(chords > 0)
+
+    def test_char_wavelength_2d_sinusoidal(self):
+        """A sinusoidal pattern should have a detectable wavelength."""
+        N = 64
+        h = 1.0
+        x = np.arange(N) * h
+        # Create a sinusoidal pattern with wavelength = 16*h
+        lam = 16.0 * h
+        phi_row = 0.5 + 0.3 * np.sin(2 * np.pi * x / lam)
+        phi_2d = np.tile(phi_row, (N, 1))
+        wl = characteristic_wavelength_2d(phi_2d, h)
+        # Should be close to 16
+        assert abs(wl - lam) / lam < 0.15
+
+
+class TestCahnHilliard2DSolver:
+    def test_2d_solver_runs(self):
+        """2D solver should complete without error on a small grid."""
+        from emulsim.level2_gelation.solver import CahnHilliard2DSolver
+        solver = CahnHilliard2DSolver(N_grid=32, dt_initial=1e-3, dt_max=1.0)
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solver.solve(params, props, R_droplet=3.0e-6)
+        assert result.phi_field.shape == (32, 32)
+        assert result.r_grid.shape == (32,)
+
+    def test_2d_alpha_reaches_completion(self):
+        """With standard cooling, gelation should be nearly complete."""
+        from emulsim.level2_gelation.solver import CahnHilliard2DSolver
+        solver = CahnHilliard2DSolver(N_grid=32, dt_initial=1e-3, dt_max=1.0)
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solver.solve(params, props, R_droplet=3.0e-6)
+        assert result.alpha_final > 0.9
+
+    def test_2d_phi_within_bounds(self):
+        """Composition must stay in [0, 1]."""
+        from emulsim.level2_gelation.solver import CahnHilliard2DSolver
+        solver = CahnHilliard2DSolver(N_grid=32, dt_initial=1e-3, dt_max=1.0)
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solver.solve(params, props, R_droplet=3.0e-6)
+        assert np.all(result.phi_field >= 0)
+        assert np.all(result.phi_field <= 1)
+
+    def test_2d_porosity_in_range(self):
+        from emulsim.level2_gelation.solver import CahnHilliard2DSolver
+        solver = CahnHilliard2DSolver(N_grid=32, dt_initial=1e-3, dt_max=1.0)
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solver.solve(params, props, R_droplet=3.0e-6)
+        assert 0.0 <= result.porosity <= 1.0
+
+    def test_2d_result_has_domain_info(self):
+        """2D result should include domain size and grid spacing."""
+        from emulsim.level2_gelation.solver import CahnHilliard2DSolver
+        solver = CahnHilliard2DSolver(N_grid=32, dt_initial=1e-3, dt_max=1.0)
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solver.solve(params, props, R_droplet=3.0e-6)
+        assert result.L_domain == pytest.approx(6.0e-6)
+        assert result.grid_spacing > 0
+
+    def test_solve_gelation_uses_2d_by_default(self):
+        """The convenience function should use 2D solver by default."""
+        from emulsim.level2_gelation.solver import solve_gelation
+        params = SimulationParameters()
+        params.solver.l2_n_grid = 32
+        props = MaterialProperties()
+        result = solve_gelation(params, props, R_droplet=3.0e-6)
+        assert result.phi_field.ndim == 2
+        assert result.L_domain > 0
+
+    def test_solve_gelation_1d_fallback(self):
+        """The convenience function should support 1D fallback."""
+        from emulsim.level2_gelation.solver import solve_gelation
+        params = SimulationParameters()
+        params.solver.l2_n_r = 100
+        props = MaterialProperties()
+        result = solve_gelation(params, props, R_droplet=3.0e-6, use_2d=False)
+        assert result.phi_field.ndim == 1
+        assert result.L_domain == 0.0

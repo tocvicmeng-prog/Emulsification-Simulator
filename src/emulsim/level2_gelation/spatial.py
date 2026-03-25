@@ -1,4 +1,4 @@
-"""Spatial discretization utilities for 1D radial phase-field solver."""
+"""Spatial discretization utilities for 1D radial and 2D Cartesian phase-field solvers."""
 
 from __future__ import annotations
 import numpy as np
@@ -102,3 +102,151 @@ def apply_divergence_flux(J: np.ndarray, r: np.ndarray, dr: float) -> np.ndarray
         div[-1] = (-r_sq_J[-2]) / (dr * r[-1] ** 2)
 
     return div
+
+
+# ─── 2D Cartesian discretization ─────────────────────────────────────────
+
+
+def create_2d_grid(L_domain: float, N: int) -> tuple[np.ndarray, np.ndarray, float]:
+    """Create 2D Cartesian grid on [0, L_domain] x [0, L_domain].
+
+    Cell-centred grid with uniform spacing h = L_domain / N.
+
+    Returns (x, y, h) where x and y are 1D coordinate arrays of length N.
+    """
+    h = L_domain / N
+    coords = (np.arange(N) + 0.5) * h
+    return coords, coords, h
+
+
+def build_laplacian_2d(N: int, h: float) -> sparse.csr_matrix:
+    """Standard 5-point Laplacian on an N x N grid with Neumann (no-flux) BCs.
+
+    Uses Kronecker product: L_2D = I (x) L_1D + L_1D (x) I
+    where L_1D is the 1D second-derivative with Neumann BCs.
+
+    Unknowns are in row-major order: k = i*N + j.
+
+    Parameters
+    ----------
+    N : int
+        Grid points per side.
+    h : float
+        Uniform grid spacing [m].
+
+    Returns
+    -------
+    sparse.csr_matrix
+        Shape (N*N, N*N).
+    """
+    # 1D second derivative with Neumann BCs
+    e = np.ones(N)
+    L1d = sparse.diags([e[:-1], -2.0 * e, e[:-1]], [-1, 0, 1],
+                        shape=(N, N), format='lil')
+    # Neumann BCs: ghost value equals interior value -> fold into diagonal
+    L1d[0, 0] = -1.0
+    L1d[-1, -1] = -1.0
+    L1d = L1d.tocsr()
+
+    I_N = sparse.eye(N, format='csr')
+
+    L2d = sparse.kron(I_N, L1d, format='csr') + sparse.kron(L1d, I_N, format='csr')
+    return L2d / (h * h)
+
+
+def build_mobility_laplacian_2d(M_field: np.ndarray, N: int,
+                                 h: float) -> sparse.csr_matrix:
+    """Build div(M * grad(.)) operator with face-centred mobility averaging.
+
+    This is the correct conservative discretization for variable mobility:
+
+        div(M grad phi)_{i,j} = (1/h^2) * [
+            M_{i+1/2,j}*(phi_{i+1,j} - phi_{i,j}) - M_{i-1/2,j}*(phi_{i,j} - phi_{i-1,j})
+          + M_{i,j+1/2}*(phi_{i,j+1} - phi_{i,j}) - M_{i,j-1/2}*(phi_{i,j} - phi_{i,j-1})
+        ]
+
+    where M_{i+1/2,j} = 0.5*(M_{i,j} + M_{i+1,j}).
+
+    No-flux BCs: faces at domain boundary have zero flux (no neighbour term).
+
+    Parameters
+    ----------
+    M_field : np.ndarray
+        Mobility at each grid point, shape (N, N).
+    N : int
+        Grid points per side.
+    h : float
+        Uniform grid spacing [m].
+
+    Returns
+    -------
+    sparse.csr_matrix
+        Shape (N*N, N*N), the mobility-weighted Laplacian operator.
+    """
+    total = N * N
+    inv_h2 = 1.0 / (h * h)
+
+    # Pre-compute face-averaged mobilities
+    # x-direction faces: M_{i+1/2,j} for i=0..N-2, j=0..N-1
+    Mx_face = 0.5 * (M_field[:-1, :] + M_field[1:, :])  # (N-1, N)
+    # y-direction faces: M_{i,j+1/2} for i=0..N-1, j=0..N-2
+    My_face = 0.5 * (M_field[:, :-1] + M_field[:, 1:])   # (N, N-1)
+
+    # Vectorized assembly using COO format
+    # Each interior face contributes to 4 matrix entries (2 off-diagonal, 2 diagonal)
+    rows = []
+    cols = []
+    vals = []
+
+    # x-direction faces (between rows i and i+1)
+    for i in range(N - 1):
+        j_arr = np.arange(N)
+        k_lo = i * N + j_arr       # (i, j)
+        k_hi = (i + 1) * N + j_arr  # (i+1, j)
+        m_face = Mx_face[i, :] * inv_h2
+
+        # Off-diagonal: k_lo -> k_hi and k_hi -> k_lo
+        rows.extend(k_lo.tolist())
+        cols.extend(k_hi.tolist())
+        vals.extend(m_face.tolist())
+
+        rows.extend(k_hi.tolist())
+        cols.extend(k_lo.tolist())
+        vals.extend(m_face.tolist())
+
+        # Diagonal contributions: -m_face for both k_lo and k_hi
+        rows.extend(k_lo.tolist())
+        cols.extend(k_lo.tolist())
+        vals.extend((-m_face).tolist())
+
+        rows.extend(k_hi.tolist())
+        cols.extend(k_hi.tolist())
+        vals.extend((-m_face).tolist())
+
+    # y-direction faces (between columns j and j+1)
+    for j in range(N - 1):
+        i_arr = np.arange(N)
+        k_lo = i_arr * N + j       # (i, j)
+        k_hi = i_arr * N + (j + 1)  # (i, j+1)
+        m_face = My_face[:, j] * inv_h2
+
+        # Off-diagonal
+        rows.extend(k_lo.tolist())
+        cols.extend(k_hi.tolist())
+        vals.extend(m_face.tolist())
+
+        rows.extend(k_hi.tolist())
+        cols.extend(k_lo.tolist())
+        vals.extend(m_face.tolist())
+
+        # Diagonal
+        rows.extend(k_lo.tolist())
+        cols.extend(k_lo.tolist())
+        vals.extend((-m_face).tolist())
+
+        rows.extend(k_hi.tolist())
+        cols.extend(k_hi.tolist())
+        vals.extend((-m_face).tolist())
+
+    L_M = sparse.coo_matrix((vals, (rows, cols)), shape=(total, total))
+    return L_M.tocsr()
