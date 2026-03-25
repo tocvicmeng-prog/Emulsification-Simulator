@@ -582,15 +582,9 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
     N_r = 100
     r = np.linspace(R_droplet * 0.005, R_droplet * 0.995, N_r)
 
-    # Gelation kinetics (Avrami for reporting)
-    T_gel = props.T_gel
-    T_oil = params.formulation.T_oil
-    if cool_rate > 0:
-        t_to_gel = max(0, (T_oil - T_gel) / cool_rate)
-        k_gel = gelation_rate_constant(T_gel - 5.0, T_gel, props.k_gel_0)
-        alpha_final = avrami_gelation(60.0, k_gel, props.n_avrami)
-    else:
-        alpha_final = 0.99
+    # For the empirical model, gelation is assumed complete — the emulsion
+    # cools well below T_gel during microsphere formation.
+    alpha_final = 0.999
 
     return GelationResult(
         r_grid=r,

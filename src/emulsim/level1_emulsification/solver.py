@@ -21,7 +21,7 @@ from ..datatypes import (
 )
 import logging
 
-from .energy import emulsion_density, gap_shear_rate, max_dissipation
+from .energy import emulsion_density, gap_shear_rate, max_dissipation, average_dissipation
 from .kernels import (
     breakage_rate_alopaeus,
     coalescence_rate_ct,
@@ -105,7 +105,13 @@ class PBESolver:
         return entries
 
     def _build_breakage_matrix(self, g: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-        """Build breakage birth matrix using fixed-pivot redistribution."""
+        """Build breakage birth matrix using fixed-pivot redistribution.
+
+        Binary equal breakage is used (each daughter = v_parent/2).
+        A beta-distribution daughter size is available in kernels.daughter_beta_distribution
+        but requires additional redistribution logic. Binary breakage is the standard
+        Kumar-Ramkrishna default and matches most published PBE studies.
+        """
         n = self.n_bins
         birth_matrix = np.zeros((n, n))
 
@@ -190,7 +196,8 @@ class PBESolver:
 
         # Energy dissipation
         rho_emul = emulsion_density(props.rho_oil, props.rho_aq, phi_d)
-        epsilon = max_dissipation(mixer, rpm, rho_emul)
+        epsilon_max = max_dissipation(mixer, rpm, rho_emul)
+        epsilon_avg = average_dissipation(mixer, rpm, rho_emul)
 
         # Note: equilibrium interfacial tension (props.sigma) is used rather than
         # the dynamic σ(t) from properties/interfacial.py:dynamic_interfacial_tension().
@@ -206,18 +213,20 @@ class PBESolver:
         # does not require shear correction for Newtonian oils.
 
         # Breakage rates (use zero-shear mu_d for viscous resistance Vi)
+        # epsilon_max is used: breakage occurs in the high-shear rotor-stator gap
         nu_c = props.mu_oil / props.rho_oil
         g = breakage_rate_alopaeus(
-            self.d_pivots, epsilon, props.sigma, props.rho_oil,
-            props.mu_d, nu_c=nu_c,
+            self.d_pivots, epsilon_max, props.sigma, props.rho_oil,
+            props.mu_d, C3=props.breakage_C3, nu_c=nu_c,
         )
         birth_matrix, death_rate = self._build_breakage_matrix(g)
 
         # Coalescence rate matrix (vectorised construction)
+        # epsilon_avg is used: coalescence occurs in the bulk flow
         di_grid, dj_grid = np.meshgrid(self.d_pivots, self.d_pivots, indexing='ij')
         Q = coalescence_rate_ct(
             di_grid, dj_grid,
-            epsilon, props.sigma, props.rho_oil,
+            epsilon_avg, props.sigma, props.rho_oil,
             props.mu_oil, phi_d=phi_d,
         )
 

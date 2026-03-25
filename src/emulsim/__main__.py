@@ -36,6 +36,15 @@ def main():
     opt_p.add_argument("--max-iter", type=int, default=200)
     opt_p.add_argument("--output", "-o", default="output/optimization")
 
+    # uncertainty command
+    unc_p = sub.add_parser("uncertainty", help="Run Monte Carlo uncertainty propagation")
+    unc_p.add_argument("config", nargs="?", default=None,
+                        help="Path to TOML config file (default: configs/default.toml)")
+    unc_p.add_argument("--n-samples", type=int, default=20,
+                        help="Number of MC samples (default: 20)")
+    unc_p.add_argument("--seed", type=int, default=42,
+                        help="Random seed for reproducibility (default: 42)")
+
     # info command
     sub.add_parser("info", help="Show default parameters and material properties")
 
@@ -63,6 +72,8 @@ def main():
         _cmd_sweep(args)
     elif args.command == "optimize":
         _cmd_optimize(args)
+    elif args.command == "uncertainty":
+        _cmd_uncertainty(args)
     elif args.command == "info":
         _cmd_info(args)
     elif args.command == "ui":
@@ -141,6 +152,20 @@ def _cmd_optimize(args):
     idx = best_compromise(state)
     print(f"\nBest compromise: Pareto point #{idx+1}")
     print(f"  objectives = {state.pareto_Y[idx]}")
+    print()
+
+
+def _cmd_uncertainty(args):
+    from .uncertainty import UncertaintyPropagator
+
+    params = _load_params(args.config)
+    propagator = UncertaintyPropagator(n_samples=args.n_samples, seed=args.seed)
+
+    print(f"Running Monte Carlo uncertainty propagation ({args.n_samples} samples)...")
+    result = propagator.run(params)
+
+    print()
+    print(result.summary())
     print()
 
 

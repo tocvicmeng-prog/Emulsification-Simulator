@@ -20,6 +20,7 @@ from ..level1_emulsification.solver import PBESolver
 from ..level2_gelation.solver import solve_gelation
 from ..level3_crosslinking.solver import solve_crosslinking
 from ..level4_mechanical.solver import solve_mechanical
+from ..trust import assess_trust
 
 logger = logging.getLogger(__name__)
 
@@ -34,8 +35,15 @@ class PipelineOrchestrator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def run_single(self, params: SimulationParameters,
-                   phi_d: float = None) -> FullResult:
-        """Execute the full pipeline for a single parameter set."""
+                   phi_d: float = None,
+                   l2_mode: str = 'empirical') -> FullResult:
+        """Execute the full pipeline for a single parameter set.
+
+        Parameters
+        ----------
+        l2_mode : str
+            'empirical' (default) or 'ch_2d' for mechanistic phase-field.
+        """
         errors = params.validate()
         if errors:
             raise ValueError("Invalid parameters:\n" + "\n".join(f"  - {e}" for e in errors))
@@ -79,7 +87,7 @@ class PipelineOrchestrator:
         R_droplet = emul_result.d50 / 2.0
         logger.info("L2: Gelation (R=%.2f µm, d50-based)", R_droplet * 1e6)
         t0 = time.perf_counter()
-        gel_result = solve_gelation(params, props, R_droplet=R_droplet, mode='empirical')
+        gel_result = solve_gelation(params, props, R_droplet=R_droplet, mode=l2_mode)
         timings["L2"] = time.perf_counter() - t0
         logger.info("L2 done: pore=%.1f nm, porosity=%.2f (%.1fs)",
                      gel_result.pore_size_mean * 1e9, gel_result.porosity, timings["L2"])
@@ -110,6 +118,20 @@ class PipelineOrchestrator:
 
         total = sum(timings.values())
         logger.info("Pipeline complete: %.1fs total", total)
+
+        # Trust assessment
+        full_result = FullResult(
+            parameters=params,
+            emulsification=emul_result,
+            gelation=gel_result,
+            crosslinking=xlink_result,
+            mechanical=mech_result,
+        )
+        trust = assess_trust(full_result, params, props)
+        if not trust.trustworthy:
+            logger.warning("TRUST GATE: %s", trust.summary())
+        elif trust.warnings:
+            logger.info("TRUST GATE: %s", trust.summary())
 
         # Save summary
         summary = {
@@ -145,16 +167,16 @@ class PipelineOrchestrator:
                 "E_star_Pa": mech_result.E_star,
             },
         }
+        summary["trust"] = {
+            "level": trust.level,
+            "trustworthy": trust.trustworthy,
+            "warnings": trust.warnings,
+            "blockers": trust.blockers,
+        }
         with open(run_dir / "summary.json", "w") as f:
             json.dump(summary, f, indent=2)
 
-        return FullResult(
-            parameters=params,
-            emulsification=emul_result,
-            gelation=gel_result,
-            crosslinking=xlink_result,
-            mechanical=mech_result,
-        )
+        return full_result
 
     def run_rpm_sweep(self, rpms: list[float],
                       base_params: Optional[SimulationParameters] = None,

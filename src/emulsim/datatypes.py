@@ -60,9 +60,9 @@ class FormulationParameters:
 class SolverSettings:
     """Numerical solver settings."""
     # Level 1
-    l1_n_bins: int = 30
-    l1_d_min: float = 0.5e-6           # [m]
-    l1_d_max: float = 200e-6           # [m]
+    l1_n_bins: int = 20
+    l1_d_min: float = 1e-6             # [m]
+    l1_d_max: float = 100e-6           # [m]
     l1_rtol: float = 1e-6
     l1_atol: float = 1e-8
     # Level 2
@@ -216,6 +216,13 @@ class MaterialProperties:
 
     # IPN coupling
     eta_coupling: float = -0.15        # IPN coupling coefficient
+
+    # Breakage kernel
+    breakage_C3: float = 0.0           # [-] Alopaeus viscous correction constant.
+                                        # C3=0.0 disables viscous correction.
+                                        # C3=0.1-0.3 recommended for viscous dispersed phases
+                                        # (requires BDF solver tolerance of 1e-8+ and may
+                                        # increase runtime).
 
     # Network / pore
     r_fiber: float = 1.5e-9            # [m] agarose fiber radius

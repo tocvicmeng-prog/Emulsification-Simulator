@@ -20,6 +20,7 @@ if str(_root / "src") not in sys.path:
 from emulsim.datatypes import SimulationParameters, MaterialProperties, FormulationParameters, EmulsificationParameters, MixerGeometry, SolverSettings
 from emulsim.properties.database import PropertyDatabase
 from emulsim.pipeline.orchestrator import PipelineOrchestrator
+from emulsim.trust import assess_trust
 from emulsim.visualization.plots import (
     plot_droplet_size_distribution,
     plot_phase_field,
@@ -61,7 +62,17 @@ T_oil_C = st.sidebar.slider("Oil Temperature (°C)", 60, 95, 90)
 
 st.sidebar.subheader("Cooling & Gelation (L2)")
 cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (°C/min)", 1.0, 20.0, 10.0, step=0.5)
-grid_size = st.sidebar.select_slider("Phase-Field Grid", [32, 64, 128], value=64)
+l2_model = st.sidebar.radio(
+    "Pore Structure Model",
+    ["Empirical (fast, calibrated)", "Cahn-Hilliard 2D (mechanistic)"],
+    index=0,
+    help="Empirical: literature-calibrated power law (~1 ms). "
+         "CH 2D: phase-field spinodal decomposition (slower, requires parameter tuning).",
+)
+l2_mode = "empirical" if "Empirical" in l2_model else "ch_2d"
+grid_size = 64
+if l2_mode == "ch_2d":
+    grid_size = st.sidebar.select_slider("Phase-Field Grid", [32, 64, 128], value=64)
 
 st.sidebar.subheader("Crosslinking (L3)")
 c_genipin_mM = st.sidebar.slider("Genipin Concentration (mM)", 0.5, 10.0, 2.0, step=0.5)
@@ -112,7 +123,7 @@ if run_btn:
         progress = st.progress(0, text="Level 1: Emulsification (PBE solver)...")
 
         try:
-            result = orch.run_single(params)
+            result = orch.run_single(params, l2_mode=l2_mode)
         except Exception as ex:
             st.error(f"Simulation failed: {ex}")
             st.stop()
@@ -124,6 +135,14 @@ if run_btn:
     st.session_state["elapsed"] = elapsed
     st.session_state["params"] = params
     st.session_state["targets"] = (target_d32, target_pore, target_G)
+
+    # Compute trust assessment
+    db_trust = PropertyDatabase()
+    props_trust = db_trust.update_for_conditions(
+        params.formulation.T_oil, params.formulation.c_agarose,
+        params.formulation.c_chitosan, params.formulation.c_span80,
+    )
+    st.session_state["trust"] = assess_trust(result, params, props_trust)
 
 # ─── Display Results ──────────────────────────────────────────────────────
 
@@ -282,6 +301,31 @@ if "result" in st.session_state:
     else:
         for i, rec in enumerate(recs, 1):
             st.write(f"{i}. {rec}")
+
+    # ── Trust Assessment ───────────────────────────────────────────────
+
+    if "trust" in st.session_state:
+        st.divider()
+        st.header("Trust Assessment")
+
+        trust = st.session_state["trust"]
+
+        if trust.level == "TRUSTWORTHY":
+            st.success(f"**{trust.level}** -- All checks passed.")
+        elif trust.level == "CAUTION":
+            st.warning(f"**{trust.level}** -- Some conditions are outside ideal range.")
+        else:
+            st.error(f"**{trust.level}** -- Results should not be used for decisions.")
+
+        if trust.blockers:
+            st.subheader("Blockers")
+            for b in trust.blockers:
+                st.error(b)
+
+        if trust.warnings:
+            st.subheader("Warnings")
+            for w in trust.warnings:
+                st.warning(w)
 
 # ─── Footer ───────────────────────────────────────────────────────────────
 
