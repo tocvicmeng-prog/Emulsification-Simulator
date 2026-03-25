@@ -39,6 +39,10 @@ def main():
     # info command
     sub.add_parser("info", help="Show default parameters and material properties")
 
+    # ui command
+    ui_p = sub.add_parser("ui", help="Launch the Streamlit web interface")
+    ui_p.add_argument("--port", type=int, default=8501)
+
     args = parser.parse_args()
 
     if args.command is None:
@@ -61,6 +65,8 @@ def main():
         _cmd_optimize(args)
     elif args.command == "info":
         _cmd_info(args)
+    elif args.command == "ui":
+        _cmd_ui(args)
 
 
 def _load_params(config_path):
@@ -165,6 +171,18 @@ def _cmd_info(args):
     print(f"  Bridge eff:       {props.f_bridge:.1%}")
     print(f"  IPN coupling:     eta = {props.eta_coupling}")
     print()
+
+
+def _cmd_ui(args):
+    import subprocess
+    app_path = Path(__file__).parent / "visualization" / "app.py"
+    print(f"Launching EmulSim UI on port {args.port}...")
+    print(f"Open http://localhost:{args.port} in your browser")
+    subprocess.run([
+        sys.executable, "-m", "streamlit", "run", str(app_path),
+        "--server.port", str(args.port),
+        "--server.headless", "true",
+    ])
 
 
 if __name__ == "__main__":
