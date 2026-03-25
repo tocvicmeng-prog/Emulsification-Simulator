@@ -1,0 +1,48 @@
+[simulation]
+run_id = "default_run"
+notes = "Baseline simulation with default parameters"
+
+[emulsification]
+rpm = 10000
+t_emulsification = 600.0  # 10 minutes [s]
+
+[emulsification.mixer]
+rotor_diameter = 0.025    # [m] (25 mm rotor)
+stator_diameter = 0.026   # [m]
+gap_width = 0.0005        # [m] (0.5 mm gap)
+tank_volume = 0.0005      # [m³] (500 mL)
+power_number = 1.5
+dissipation_ratio = 50.0
+
+[formulation]
+c_agarose = 42.0          # [kg/m³] (4.2% w/v for 7:3 ratio with total 6%)
+c_chitosan = 18.0          # [kg/m³] (1.8% w/v)
+c_span80 = 20.0            # [kg/m³] (~2% w/v)
+c_genipin = 2.0            # [mol/m³] (~2 mM)
+T_oil = 363.15             # [K] (90°C)
+cooling_rate = 0.167        # [K/s] (~10°C/min)
+T_crosslink = 310.15       # [K] (37°C)
+t_crosslink = 86400.0      # [s] (24 hours)
+
+[solver.level1]
+n_bins = 50
+d_min = 0.1e-6             # [m]
+d_max = 500e-6             # [m]
+rtol = 1e-6
+atol = 1e-8
+
+[solver.level2]
+n_r = 1000
+dt_initial = 1e-4          # [s]
+dt_max = 1.0               # [s]
+arrest_exponent = 2.5
+
+[solver.level3]
+method = "Radau"
+rtol = 1e-8
+atol = 1e-10
+
+[optimization]
+n_initial = 20
+max_iterations = 200
+convergence_tol = 0.01

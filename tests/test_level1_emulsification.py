@@ -1,0 +1,196 @@
+"""Tests for Level 1 emulsification simulation."""
+
+import numpy as np
+import pytest
+
+from emulsim.datatypes import MaterialProperties, SimulationParameters
+from emulsim.level1_emulsification.energy import (
+    average_dissipation,
+    emulsion_density,
+    kolmogorov_length_scale,
+    max_dissipation,
+    power_draw,
+)
+from emulsim.level1_emulsification.kernels import (
+    breakage_rate_alopaeus,
+    breakage_rate_coulaloglou,
+    coalescence_rate_ct,
+    hinze_dmax,
+    hinze_dmax_viscous,
+)
+from emulsim.level1_emulsification.solver import PBESolver
+from emulsim.level1_emulsification.validation import (
+    check_non_negative,
+    check_physical_bounds,
+)
+
+
+# ─── Energy dissipation tests ────────────────────────────────────────────
+
+
+class TestEnergyDissipation:
+    def test_power_draw_positive(self, default_mixer):
+        P = power_draw(default_mixer, 10000, 850.0)
+        assert P > 0
+
+    def test_power_scales_with_rpm_cubed(self, default_mixer):
+        P1 = power_draw(default_mixer, 5000, 850.0)
+        P2 = power_draw(default_mixer, 10000, 850.0)
+        assert pytest.approx(P2 / P1, rel=1e-6) == 8.0  # (10000/5000)^3
+
+    def test_max_exceeds_average(self, default_mixer):
+        eps_avg = average_dissipation(default_mixer, 10000, 850.0)
+        eps_max = max_dissipation(default_mixer, 10000, 850.0)
+        assert eps_max > eps_avg
+        assert eps_max == pytest.approx(eps_avg * default_mixer.dissipation_ratio)
+
+    def test_kolmogorov_scale(self):
+        eta = kolmogorov_length_scale(1e4, 5e-6)
+        assert 1e-6 < eta < 1e-3  # micron to mm range
+
+    def test_emulsion_density_limits(self):
+        assert emulsion_density(850, 1020, 0.0) == 850.0
+        assert emulsion_density(850, 1020, 1.0) == 1020.0
+
+
+# ─── Breakage kernel tests ────────────────────────────────────────────────
+
+
+class TestBreakageKernels:
+    def test_breakage_positive(self):
+        d = np.array([10e-6, 50e-6, 100e-6])
+        g = breakage_rate_alopaeus(d, 1e4, 5e-3, 850.0, 0.1)
+        assert np.all(g >= 0)
+
+    def test_breakage_zero_at_zero_epsilon(self):
+        d = np.array([10e-6, 50e-6])
+        g = breakage_rate_alopaeus(d, 0.0, 5e-3, 850.0, 0.1)
+        assert np.all(g == 0)
+
+    def test_breakage_increases_with_epsilon(self):
+        d = np.array([50e-6])
+        g1 = breakage_rate_alopaeus(d, 1e3, 5e-3, 850.0, 0.1)
+        g2 = breakage_rate_alopaeus(d, 1e5, 5e-3, 850.0, 0.1)
+        assert g2[0] > g1[0]
+
+    def test_breakage_increases_with_diameter(self):
+        d_small = np.array([5e-6])
+        d_large = np.array([100e-6])
+        g_small = breakage_rate_alopaeus(d_small, 1e4, 5e-3, 850.0, 0.1)
+        g_large = breakage_rate_alopaeus(d_large, 1e4, 5e-3, 850.0, 0.1)
+        assert g_large[0] > g_small[0]
+
+    def test_viscous_correction_reduces_breakage(self):
+        d = np.array([50e-6])
+        g_low = breakage_rate_alopaeus(d, 1e4, 5e-3, 850.0, 0.001, C3=0.3)
+        g_high = breakage_rate_alopaeus(d, 1e4, 5e-3, 850.0, 1.0, C3=0.3)
+        assert g_low[0] >= g_high[0]
+
+    def test_coulaloglou_matches_trend(self):
+        d = np.array([50e-6])
+        g1 = breakage_rate_coulaloglou(d, 1e3, 5e-3, 850.0)
+        g2 = breakage_rate_coulaloglou(d, 1e5, 5e-3, 850.0)
+        assert g2[0] > g1[0]
+
+
+# ─── Coalescence kernel tests ─────────────────────────────────────────────
+
+
+class TestCoalescenceKernels:
+    def test_coalescence_symmetric(self):
+        q12 = coalescence_rate_ct(
+            np.array([10e-6]), np.array([50e-6]), 1e4, 5e-3, 850.0, 0.005
+        )
+        q21 = coalescence_rate_ct(
+            np.array([50e-6]), np.array([10e-6]), 1e4, 5e-3, 850.0, 0.005
+        )
+        assert q12 == pytest.approx(q21, rel=1e-10)
+
+    def test_coalescence_positive(self):
+        q = coalescence_rate_ct(
+            np.array([10e-6]), np.array([50e-6]), 1e4, 5e-3, 850.0, 0.005
+        )
+        assert np.all(q >= 0)
+
+    def test_coalescence_zero_at_zero_epsilon(self):
+        q = coalescence_rate_ct(
+            np.array([10e-6]), np.array([50e-6]), 0.0, 5e-3, 850.0, 0.005
+        )
+        assert np.all(q == 0.0)
+
+
+# ─── Hinze predictions ────────────────────────────────────────────────────
+
+
+class TestHinzePredictions:
+    def test_hinze_decreases_with_epsilon(self):
+        d1 = hinze_dmax(1e3, 5e-3, 850.0)
+        d2 = hinze_dmax(1e5, 5e-3, 850.0)
+        assert d2 < d1
+
+    def test_hinze_viscous_larger_than_inviscid(self):
+        eps = 1e4
+        d_inv = hinze_dmax(eps, 5e-3, 850.0)
+        d_visc = hinze_dmax_viscous(eps, 5e-3, 850.0, 1.0)
+        assert d_visc >= d_inv
+
+    def test_hinze_scaling(self):
+        """d_max ~ epsilon^(-0.4)"""
+        eps1, eps2 = 1e3, 1e5
+        d1 = hinze_dmax(eps1, 5e-3, 850.0)
+        d2 = hinze_dmax(eps2, 5e-3, 850.0)
+        ratio = d1 / d2
+        expected_ratio = (eps2 / eps1) ** 0.4
+        assert ratio == pytest.approx(expected_ratio, rel=0.01)
+
+
+# ─── PBE Solver tests ─────────────────────────────────────────────────────
+
+
+class TestPBESolver:
+    @pytest.fixture
+    def solver(self):
+        return PBESolver(n_bins=30, d_min=0.5e-6, d_max=200e-6)
+
+    @pytest.fixture
+    def fast_result(self, solver):
+        """Quick solve with reduced time for testing."""
+        params = SimulationParameters()
+        params.emulsification.t_emulsification = 60.0  # 1 min only
+        props = MaterialProperties(sigma=5e-3)
+        return solver.solve(params, props)
+
+    def test_result_shapes(self, fast_result, solver):
+        assert fast_result.d_bins.shape == (solver.n_bins,)
+        assert fast_result.n_d.shape == (solver.n_bins,)
+
+    def test_non_negative_distribution(self, fast_result):
+        assert check_non_negative(fast_result)
+
+    def test_d32_in_range(self, fast_result):
+        passed, msg = check_physical_bounds(fast_result)
+        assert passed, msg
+
+    def test_percentiles_monotonic(self, fast_result):
+        assert fast_result.d10 <= fast_result.d50 <= fast_result.d90
+
+    def test_span_positive(self, fast_result):
+        assert fast_result.span >= 0
+
+    def test_d32_decreases_with_rpm(self):
+        """Higher RPM should produce smaller droplets."""
+        solver = PBESolver(n_bins=25, d_min=1e-6, d_max=200e-6)
+        props = MaterialProperties(sigma=5e-3)
+
+        params_low = SimulationParameters()
+        params_low.emulsification.rpm = 5000
+        params_low.emulsification.t_emulsification = 60.0
+
+        params_high = SimulationParameters()
+        params_high.emulsification.rpm = 20000
+        params_high.emulsification.t_emulsification = 60.0
+
+        r_low = solver.solve(params_low, props)
+        r_high = solver.solve(params_high, props)
+
+        assert r_high.d32 < r_low.d32

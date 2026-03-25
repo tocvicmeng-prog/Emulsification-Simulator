@@ -1,0 +1,35 @@
+# Material Property Database for Emulsification Simulation
+# Sources cited in docs/01_scientific_advisor_report.md
+
+[oil_phase]
+rho_oil = { value = 850.0, unit = "kg/m3", uncertainty = 20.0, source = "CRC Handbook, liquid paraffin at 20°C" }
+mu_oil_90C = { value = 0.005, unit = "Pa·s", uncertainty = 0.001, source = "Estimated, light liquid paraffin at 90°C" }
+
+[aqueous_phase]
+rho_aq = { value = 1020.0, unit = "kg/m3", uncertainty = 10.0, source = "Estimated for 6% polymer solution" }
+
+[interfacial]
+sigma_bare = { value = 0.045, unit = "N/m", source = "Water/paraffin, no surfactant" }
+sigma_span80_2pct = { value = 0.005, unit = "N/m", uncertainty = 0.002, source = "Opawale & Burgess 1998" }
+gamma_inf = { value = 3.5e-6, unit = "mol/m2", source = "Span-80 max surface excess" }
+K_L = { value = 200.0, unit = "m3/mol", source = "Span-80 Langmuir constant" }
+
+[thermodynamic]
+chi_agarose_water = { value = 0.497, unit = "-", source = "Normand et al. 2000" }
+kappa_CH = { value = 1.0e-12, unit = "J/m", source = "Estimated from interface width ~5 nm" }
+
+[gelation]
+T_gel_agarose = { value = 311.15, unit = "K", uncertainty = 3.0, source = "Standard agarose, 36-42°C" }
+n_avrami = { value = 2.5, unit = "-", source = "Aymard et al. 2001" }
+E_a_gelation = { value = 300000.0, unit = "J/mol", source = "Estimated, high cooperativity" }
+
+[crosslinking]
+k_37C = { value = 0.005, unit = "L/(mol·s)", source = "Butler et al. 2003, Dimida et al. 2017" }
+E_a_xlink = { value = 52000.0, unit = "J/mol", source = "Mi et al. 2005" }
+
+[agarose_mechanics]
+G_prefactor = { value = 3000.0, unit = "Pa", source = "At 1% w/v, Normand et al. 2000" }
+G_exponent = { value = 2.2, unit = "-", source = "Ross-Murphy 1991" }
+
+[network]
+r_fiber = { value = 1.5e-9, unit = "m", source = "Agarose double helix radius" }
