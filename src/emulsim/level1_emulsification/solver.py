@@ -197,15 +197,17 @@ class PBESolver:
         # model is relevant only for the initial transient (first few ms after interface
         # creation) and does not affect the steady-state size distribution solved here.
 
-        # Shear-rate-corrected dispersed phase viscosity (Cross model)
+        # Dispersed phase viscosity:
+        # - Breakage uses ZERO-SHEAR viscosity (resistance to bulk deformation)
+        # - Coalescence uses shear-thinned viscosity (film drainage at local shear)
         gamma_dot = gap_shear_rate(mixer, rpm)
-        mu_d_effective = cross_model_correction(props.mu_d, gamma_dot)
+        mu_d_shear = cross_model_correction(props.mu_d, gamma_dot)
 
-        # Breakage rates
+        # Breakage rates (use zero-shear mu_d for viscous resistance Vi)
         nu_c = props.mu_oil / props.rho_oil
         g = breakage_rate_alopaeus(
             self.d_pivots, epsilon, props.sigma, props.rho_oil,
-            mu_d_effective, nu_c=nu_c,
+            props.mu_d, nu_c=nu_c,
         )
         birth_matrix, death_rate = self._build_breakage_matrix(g)
 

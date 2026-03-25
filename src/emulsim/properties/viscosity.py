@@ -82,8 +82,8 @@ def martin_viscosity(eta_intrinsic: float, c: float, k_M: float = 0.28) -> float
 
 
 def cross_model_correction(mu_0: float, shear_rate: float,
-                           lambda_cross: float = 0.01,
-                           m_cross: float = 0.7) -> float:
+                           lambda_cross: float = 0.001,
+                           m_cross: float = 0.6) -> float:
     """Cross model for shear-thinning viscosity.
 
     mu(gamma_dot) = mu_0 / (1 + (lambda * gamma_dot)^m)

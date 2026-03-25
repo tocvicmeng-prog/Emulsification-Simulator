@@ -25,7 +25,7 @@ class MixerGeometry:
 class EmulsificationParameters:
     """Process parameters for Level 1."""
     rpm: float = 10000.0                # [rev/min]
-    t_emulsification: float = 600.0     # [s]
+    t_emulsification: float = 60.0      # [s] (1 min — sufficient for steady state)
     mixer: MixerGeometry = field(default_factory=MixerGeometry)
 
 
@@ -60,9 +60,9 @@ class FormulationParameters:
 class SolverSettings:
     """Numerical solver settings."""
     # Level 1
-    l1_n_bins: int = 50
-    l1_d_min: float = 0.1e-6           # [m]
-    l1_d_max: float = 500e-6           # [m]
+    l1_n_bins: int = 30
+    l1_d_min: float = 0.5e-6           # [m]
+    l1_d_max: float = 200e-6           # [m]
     l1_rtol: float = 1e-6
     l1_atol: float = 1e-8
     # Level 2
@@ -147,7 +147,7 @@ class MaterialProperties:
 
     # Thermodynamic
     chi_0: float = 0.497                # Flory-Huggins χ at reference T
-    chi_T_coeffs: tuple = (505.0, -0.891)  # (A, B) for χ(T) = A/T + B; spinodal onset ~330 K (57°C)
+    chi_T_coeffs: tuple = (515.5, -0.720)  # (A, B) for χ(T) = A/T + B; spinodal ~325 K for Np=10
     kappa_CH: float = 5.0e-12           # [J/m] Cahn-Hilliard gradient coefficient
     M_0: float = 1.0e-9                # [m⁵/(J·s)] bare mobility (calibrated for 50-100 nm coarsening)
 
