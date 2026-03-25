@@ -17,7 +17,7 @@ from ..datatypes import (
 )
 from ..properties.database import PropertyDatabase
 from ..level1_emulsification.solver import PBESolver
-from ..level2_gelation.solver import CahnHilliard2DSolver
+from ..level2_gelation.solver import solve_gelation
 from ..level3_crosslinking.solver import solve_crosslinking
 from ..level4_mechanical.solver import solve_mechanical
 
@@ -79,13 +79,7 @@ class PipelineOrchestrator:
         R_droplet = emul_result.d50 / 2.0
         logger.info("L2: Gelation (R=%.2f µm, d50-based)", R_droplet * 1e6)
         t0 = time.perf_counter()
-        ch = CahnHilliard2DSolver(
-            N_grid=params.solver.l2_n_grid,
-            dt_initial=params.solver.l2_dt_initial,
-            dt_max=params.solver.l2_dt_max,
-            arrest_exponent=params.solver.l2_arrest_exponent,
-        )
-        gel_result = ch.solve(params, props, R_droplet=R_droplet)
+        gel_result = solve_gelation(params, props, R_droplet=R_droplet, mode='empirical')
         timings["L2"] = time.perf_counter() - t0
         logger.info("L2 done: pore=%.1f nm, porosity=%.2f (%.1fs)",
                      gel_result.pore_size_mean * 1e9, gel_result.porosity, timings["L2"])
