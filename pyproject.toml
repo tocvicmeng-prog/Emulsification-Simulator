@@ -21,6 +21,9 @@ interactive = ["plotly>=5.18", "jupyter"]
 dev = ["pytest>=7.4", "hypothesis>=6.90", "rich>=13.0", "numba>=0.59"]
 all = ["emulsim[optimization,interactive,dev]"]
 
+[project.scripts]
+emulsim = "emulsim.__main__:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

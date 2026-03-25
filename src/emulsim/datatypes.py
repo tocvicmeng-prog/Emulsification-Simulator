@@ -40,6 +40,7 @@ class FormulationParameters:
     cooling_rate: float = 0.167         # [K/s] (~10°C/min)
     T_crosslink: float = 310.15         # [K] (37°C)
     t_crosslink: float = 86400.0        # [s] (24 hours)
+    phi_d: float = 0.05                 # [-] dispersed phase volume fraction
 
     @property
     def agarose_fraction(self) -> float:

@@ -23,6 +23,7 @@ T_oil = 363.15             # [K] (90°C)
 cooling_rate = 0.167        # [K/s] (~10°C/min)
 T_crosslink = 310.15       # [K] (37°C)
 t_crosslink = 86400.0      # [s] (24 hours)
+phi_d = 0.05               # [-] dispersed phase volume fraction
 
 [solver.level1]
 n_bins = 50

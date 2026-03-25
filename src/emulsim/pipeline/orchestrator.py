@@ -34,8 +34,10 @@ class PipelineOrchestrator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def run_single(self, params: SimulationParameters,
-                   phi_d: float = 0.05) -> FullResult:
+                   phi_d: float = None) -> FullResult:
         """Execute the full pipeline for a single parameter set."""
+        if phi_d is None:
+            phi_d = params.formulation.phi_d
         run_id = params.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
         run_dir = self.output_dir / f"run_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -158,9 +160,11 @@ class PipelineOrchestrator:
 
     def run_rpm_sweep(self, rpms: list[float],
                       base_params: Optional[SimulationParameters] = None,
-                      phi_d: float = 0.05) -> list[dict]:
+                      phi_d: float = None) -> list[dict]:
         """Run Level 1 for a list of RPM values."""
         base_params = base_params or SimulationParameters()
+        if phi_d is None:
+            phi_d = base_params.formulation.phi_d
         results = []
 
         props = self.db.update_for_conditions(
