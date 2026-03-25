@@ -19,11 +19,12 @@ from ..datatypes import (
     MaterialProperties,
     SimulationParameters,
 )
-from .energy import emulsion_density, max_dissipation
+from .energy import emulsion_density, gap_shear_rate, max_dissipation
 from .kernels import (
     breakage_rate_alopaeus,
     coalescence_rate_ct,
 )
+from ..properties.viscosity import cross_model_correction
 
 
 class PBESolver:
@@ -188,11 +189,23 @@ class PBESolver:
         rho_emul = emulsion_density(props.rho_oil, props.rho_aq, phi_d)
         epsilon = max_dissipation(mixer, rpm, rho_emul)
 
+        # Note: equilibrium interfacial tension (props.sigma) is used rather than
+        # the dynamic σ(t) from properties/interfacial.py:dynamic_interfacial_tension().
+        # At steady state (t >> τ_ads), σ_dynamic → σ_equilibrium.  The adsorption
+        # timescale τ_ads = Γ_∞² / (D · c²) ~ O(ms) for typical Span-80 concentrations,
+        # which is much shorter than the emulsification time (~minutes).  The dynamic
+        # model is relevant only for the initial transient (first few ms after interface
+        # creation) and does not affect the steady-state size distribution solved here.
+
+        # Shear-rate-corrected dispersed phase viscosity (Cross model)
+        gamma_dot = gap_shear_rate(mixer, rpm)
+        mu_d_effective = cross_model_correction(props.mu_d, gamma_dot)
+
         # Breakage rates
         nu_c = props.mu_oil / props.rho_oil
         g = breakage_rate_alopaeus(
             self.d_pivots, epsilon, props.sigma, props.rho_oil,
-            props.mu_d, nu_c=nu_c,
+            mu_d_effective, nu_c=nu_c,
         )
         birth_matrix, death_rate = self._build_breakage_matrix(g)
 

@@ -174,7 +174,10 @@ def coalescence_rate_ct(d_i: np.ndarray, d_j: np.ndarray,
     if epsilon <= 0:
         return np.zeros(np.broadcast_shapes(d_i.shape, d_j.shape))
 
-    # Collision frequency
+    # Collision frequency following Coulaloglou & Tavlarides (1977), Eq. 17.
+    # h(d_i, d_j) = C4 * eps^(1/3) * (d_i^2 + d_j^2) * (d_i^(2/3) + d_j^(2/3))^(1/2) / (1+phi_d)
+    # The (d_i^2 + d_j^2) term is the collision cross-section and
+    # (d_i^(2/3) + d_j^(2/3))^(1/2) is the relative turbulent velocity.
     h = (C4 * epsilon**(1.0/3.0) / (1.0 + phi_d)
          * (d_i**2 + d_j**2)
          * np.sqrt(d_i**(2.0/3.0) + d_j**(2.0/3.0)))

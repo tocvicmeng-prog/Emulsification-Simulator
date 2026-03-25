@@ -134,8 +134,8 @@ class PropertyValue:
 class MaterialProperties:
     """Aggregated material properties for the simulation."""
     # Oil phase
-    rho_oil: float = 850.0              # [kg/m³] at T_oil
-    mu_oil: float = 0.005               # [Pa·s] at T_oil (90°C)
+    rho_oil: float = 850.0              # [kg/m³] at 20°C reference (interpolated to T_oil by PropertyDatabase)
+    mu_oil: float = 0.005               # [Pa·s] at 90°C reference (interpolated to T_oil by PropertyDatabase)
 
     # Aqueous / dispersed phase
     rho_aq: float = 1020.0              # [kg/m³]

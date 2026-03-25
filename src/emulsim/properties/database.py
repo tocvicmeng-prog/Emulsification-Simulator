@@ -51,11 +51,14 @@ class PropertyDatabase:
         E_a_over_R = 2500.0
         return mu_ref * np.exp(E_a_over_R * (1.0 / T - 1.0 / T_ref))
 
-    def dispersed_viscosity(self, T: float, c_agarose: float, c_chitosan: float) -> float:
+    def dispersed_viscosity(self, T: float, c_agarose: float, c_chitosan: float,
+                            shear_rate: float = 0.0) -> float:
         """Dispersed phase (agarose + chitosan solution) viscosity [Pa·s].
 
         Uses Mark-Houwink for agarose intrinsic viscosity, Huggins equation
         for concentration dependence, and logarithmic mixing rule for blend.
+        When a non-zero ``shear_rate`` is supplied the zero-shear viscosity
+        is corrected for shear-thinning via the Cross model.
 
         Parameters
         ----------
@@ -65,9 +68,15 @@ class PropertyDatabase:
             Agarose concentration [kg/m³].
         c_chitosan : float
             Chitosan concentration [kg/m³].
+        shear_rate : float, optional
+            Shear rate [1/s].  If > 0, apply Cross model correction.
         """
         from .viscosity import solution_viscosity
-        return solution_viscosity(T, c_agarose, c_chitosan)
+        mu_0 = solution_viscosity(T, c_agarose, c_chitosan)
+        if shear_rate > 0:
+            from .viscosity import cross_model_correction
+            return cross_model_correction(mu_0, shear_rate)
+        return mu_0
 
     def interfacial_tension(self, T: float, c_span80: float) -> float:
         """Interfacial tension [N/m] for Span-80 stabilized W/O interface.

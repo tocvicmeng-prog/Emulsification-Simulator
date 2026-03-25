@@ -4,21 +4,53 @@ Models the evolution of crosslink density, mesh size, and modulus
 during genipin crosslinking of the chitosan network within the
 already-gelled microsphere.
 
-Thiele modulus << 1 for 2 µm spheres → diffusion NOT limiting →
-uniform crosslinking → simple ODE system (no spatial PDE needed).
+The Thiele modulus is computed from actual L1/L2 outputs (droplet radius,
+porosity) to validate the ODE assumption.  When Φ << 1 the system is
+reaction-limited and the simple ODE is valid; when Φ >> 1 a spatially
+resolved reaction-diffusion PDE would be needed.
 """
 
 from __future__ import annotations
+
+import logging
+from typing import Optional
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
 from ..datatypes import CrosslinkingResult, MaterialProperties, SimulationParameters
 
+logger = logging.getLogger(__name__)
+
 # Constants
 R_GAS = 8.314       # J/(mol·K)
 K_BOLTZMANN = 1.38e-23  # J/K
 N_AVOGADRO = 6.022e23
+
+
+def compute_thiele_modulus(R: float, k: float, NH2: float,
+                           D_genipin: float = 1e-10) -> float:
+    """Thiele modulus for genipin diffusion into microsphere.
+
+    Phi = R * sqrt(k * [NH2] / D_genipin)
+
+    Phi << 1: reaction-limited (uniform crosslinking, ODE valid)
+    Phi >> 1: diffusion-limited (need reaction-diffusion PDE)
+
+    Parameters
+    ----------
+    R : float
+        Microsphere radius [m].
+    k : float
+        Second-order rate constant [m3/(mol*s)].
+    NH2 : float
+        Available amine concentration [mol/m3].
+    D_genipin : float
+        Effective diffusivity of genipin in gel [m2/s].
+    """
+    if D_genipin <= 0 or R <= 0:
+        return 0.0
+    return R * np.sqrt(k * NH2 / D_genipin)
 
 
 def genipin_rate_constant(T: float, k0: float, E_a: float) -> float:
@@ -122,7 +154,9 @@ def crosslink_density_to_properties(
 
 
 def solve_crosslinking(params: SimulationParameters,
-                       props: MaterialProperties) -> CrosslinkingResult:
+                       props: MaterialProperties,
+                       R_droplet: Optional[float] = None,
+                       porosity: Optional[float] = None) -> CrosslinkingResult:
     """Solve the crosslinking kinetics ODE system.
 
     Parameters
@@ -131,6 +165,12 @@ def solve_crosslinking(params: SimulationParameters,
         Contains crosslinking temperature, time, genipin concentration.
     props : MaterialProperties
         Contains kinetic constants, chitosan properties.
+    R_droplet : float, optional
+        Microsphere radius [m] from L1 (d50/2).  Used to compute the
+        Thiele modulus and validate the lumped-ODE assumption.
+    porosity : float, optional
+        Gel porosity from L2.  Adjusts effective genipin diffusivity
+        via D_eff = D_genipin * porosity**2 (tortuosity ~ 1/porosity).
     """
     T = params.formulation.T_crosslink
     t_xlink = params.formulation.t_crosslink
@@ -142,6 +182,31 @@ def solve_crosslinking(params: SimulationParameters,
 
     # Available amine groups
     NH2_total = available_amine_concentration(c_chitosan, props.DDA, props.M_GlcN)
+
+    # ── Thiele modulus check (couples L3 to L1/L2 outputs) ───────────
+    D_genipin_bare = 1e-10  # m²/s, genipin in water
+    if R_droplet is not None and R_droplet > 0:
+        if porosity is not None and porosity > 0:
+            # Effective diffusivity: D_eff = D_bare * porosity²
+            # (tortuosity ~ 1/porosity for random porous media)
+            D_eff = D_genipin_bare * porosity ** 2
+        else:
+            D_eff = D_genipin_bare
+
+        thiele = compute_thiele_modulus(R_droplet, k, NH2_total, D_eff)
+        logger.info("L3 Thiele modulus: %.4f  (R=%.2f um, D_eff=%.2e m2/s)",
+                     thiele, R_droplet * 1e6, D_eff)
+
+        if thiele > 1.0:
+            logger.warning(
+                "Thiele modulus %.2f >> 1: diffusion-limited regime. "
+                "A reaction-diffusion PDE model is recommended.", thiele)
+        elif thiele > 0.3:
+            logger.warning(
+                "Thiele modulus %.2f in borderline range (0.3-1.0). "
+                "Uniform-crosslinking assumption may lose accuracy.", thiele)
+    else:
+        logger.debug("L3: R_droplet not supplied; skipping Thiele check.")
 
     # Initial conditions: X=0, G_free=c_genipin, NH2_free=NH2_total
     y0 = np.array([0.0, c_genipin, NH2_total])

@@ -81,6 +81,32 @@ def martin_viscosity(eta_intrinsic: float, c: float, k_M: float = 0.28) -> float
     return c * np.exp(log_eta_sp_over_c)
 
 
+def cross_model_correction(mu_0: float, shear_rate: float,
+                           lambda_cross: float = 0.01,
+                           m_cross: float = 0.7) -> float:
+    """Cross model for shear-thinning viscosity.
+
+    mu(gamma_dot) = mu_0 / (1 + (lambda * gamma_dot)^m)
+
+    Parameters
+    ----------
+    mu_0 : float
+        Zero-shear viscosity [Pa*s].
+    shear_rate : float
+        Shear rate [1/s]. Use gap_shear_rate from energy.py.
+    lambda_cross : float
+        Cross time constant [s].
+    m_cross : float
+        Cross exponent (0.5-0.9 for polymer solutions).
+
+    Returns
+    -------
+    float
+        Shear-rate-corrected viscosity [Pa*s].
+    """
+    return mu_0 / (1.0 + (lambda_cross * shear_rate) ** m_cross)
+
+
 def water_viscosity(T: float) -> float:
     """Dynamic viscosity of water [Pa·s] at temperature T [K].
 

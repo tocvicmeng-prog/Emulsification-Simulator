@@ -96,10 +96,13 @@ def hertz_contact(E_star: float, R: float,
 def ogston_kav(rh: np.ndarray, r_fiber: float, phi_fiber: float) -> np.ndarray:
     """Ogston partition coefficient for size-exclusion chromatography.
 
-    Kav = exp(-π · (rh + r_f)² · n_f · L_f)
+    Kav = exp(-phi_f * ((rh/r_f) + 1)^2)
 
-    Simplified Ogston model:
-    Kav = exp(-phi_f · ((rh/r_f) + 1)²)
+    The fiber volume fraction ``phi_fiber`` should be derived from the
+    actual polymer concentration divided by the dry polymer density
+    (phi = c_polymer / rho_polymer), **not** from ``1 - porosity``.
+    The thresholded porosity treats the entire polymer-rich phase as
+    solid fiber, but that phase is still mostly water.
 
     Parameters
     ----------
@@ -108,7 +111,8 @@ def ogston_kav(rh: np.ndarray, r_fiber: float, phi_fiber: float) -> np.ndarray:
     r_fiber : float
         Gel fiber radius [m].
     phi_fiber : float
-        Fiber volume fraction [-].
+        Fiber (polymer) volume fraction [-].  Should be computed as
+        (c_agarose + c_chitosan) / rho_polymer with rho_polymer ~ 1400 kg/m3.
     """
     ratio = rh / r_fiber + 1.0
     return np.exp(-phi_fiber * ratio ** 2)
@@ -156,7 +160,10 @@ def solve_mechanical(params: SimulationParameters,
 
     # Ogston Kav for a range of protein sizes
     rh_arr = np.logspace(np.log10(1e-9), np.log10(50e-9), 50)  # 1-50 nm
-    phi_fiber = 1.0 - gelation.porosity  # polymer volume fraction
+    # Fiber volume fraction from actual polymer concentration
+    # (not from thresholded porosity, which includes water in polymer-rich phase)
+    rho_polymer = 1400.0  # kg/m³ (dry polymer density for agarose/chitosan)
+    phi_fiber = (params.formulation.c_agarose + params.formulation.c_chitosan) / rho_polymer
     Kav_arr = ogston_kav(rh_arr, props.r_fiber, phi_fiber)
 
     return MechanicalResult(

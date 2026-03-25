@@ -65,8 +65,13 @@ class PipelineOrchestrator:
                      emul_result.d32 * 1e6, emul_result.span, timings["L1"])
 
         # ── Level 2: Gelation & Pore Formation ───────────────────────────
-        R_droplet = emul_result.d32 / 2.0
-        logger.info("L2: Gelation (R=%.2f µm)", R_droplet * 1e6)
+        # Use d50 (volume median) as the representative droplet size for L2.
+        # d32 (Sauter mean) overweights large droplets; d50 better represents the
+        # population center.  The full size distribution (d10–d90) is recorded in
+        # the summary so downstream users can estimate pore-size spread via the
+        # Cahn-Hilliard scaling λ* ~ sqrt(R).
+        R_droplet = emul_result.d50 / 2.0
+        logger.info("L2: Gelation (R=%.2f µm, d50-based)", R_droplet * 1e6)
         t0 = time.perf_counter()
         ch = CahnHilliard2DSolver(
             N_grid=params.solver.l2_n_grid,
@@ -85,7 +90,11 @@ class PipelineOrchestrator:
                      params.formulation.T_crosslink - 273.15,
                      params.formulation.t_crosslink / 3600)
         t0 = time.perf_counter()
-        xlink_result = solve_crosslinking(params, props)
+        xlink_result = solve_crosslinking(
+            params, props,
+            R_droplet=R_droplet,
+            porosity=gel_result.porosity,
+        )
         timings["L3"] = time.perf_counter() - t0
         logger.info("L3 done: p=%.2f, G_chit=%.0f Pa, xi=%.1f nm (%.3fs)",
                      xlink_result.p_final, xlink_result.G_chitosan_final,
@@ -112,6 +121,12 @@ class PipelineOrchestrator:
                 "d50_um": emul_result.d50 * 1e6,
                 "span": emul_result.span,
                 "converged": bool(emul_result.converged),
+                "size_spread": {
+                    "R_d10_um": emul_result.d10 * 0.5e6,
+                    "R_d50_um": emul_result.d50 * 0.5e6,
+                    "R_d90_um": emul_result.d90 * 0.5e6,
+                    "note": "L2 run on d50; pore size scales ~sqrt(R) across distribution",
+                },
             },
             "level2": {
                 "pore_size_mean_nm": gel_result.pore_size_mean * 1e9,
