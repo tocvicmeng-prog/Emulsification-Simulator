@@ -146,9 +146,9 @@ class MaterialProperties:
 
     # Thermodynamic
     chi_0: float = 0.497                # Flory-Huggins χ at reference T
-    chi_T_coeffs: tuple = (500.0, -1.0)   # (A, B) for χ(T) = A/T + B; spinodal onset ~305 K
-    kappa_CH: float = 1.0e-12           # [J/m] Cahn-Hilliard gradient coefficient
-    M_0: float = 1.0e-14               # [m⁵/(J·s)] bare mobility
+    chi_T_coeffs: tuple = (505.0, -0.891)  # (A, B) for χ(T) = A/T + B; spinodal onset ~330 K (57°C)
+    kappa_CH: float = 5.0e-12           # [J/m] Cahn-Hilliard gradient coefficient
+    M_0: float = 1.0e-9                # [m⁵/(J·s)] bare mobility (calibrated for 50-100 nm coarsening)
 
     # Gelation
     T_gel: float = 311.15               # [K] (~38°C)
@@ -157,7 +157,7 @@ class MaterialProperties:
     gel_arrest_exponent: float = 2.5    # β
 
     # Crosslinking
-    k_xlink_0: float = 1.33e4          # [m³/(mol·s)] prefactor (calibrated to k(37°C)=5e-3 L/(mol·s))
+    k_xlink_0: float = 2806.0          # [m³/(mol·s)] calibrated: k(37°C)=5e-3 L/(mol·s)
     E_a_xlink: float = 52000.0         # [J/mol]
     DDA: float = 0.90                   # degree of deacetylation
     M_GlcN: float = 161.16             # [g/mol] glucosamine molar mass

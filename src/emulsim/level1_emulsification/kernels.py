@@ -16,11 +16,12 @@ import numpy as np
 def breakage_rate_alopaeus(d: np.ndarray, epsilon: float, sigma: float,
                             rho_c: float, mu_d: float,
                             C1: float = 0.986, C2: float = 0.0115,
-                            C3: float = 0.0, nu_c: float = None) -> np.ndarray:
+                            C3: float = 0.3, nu_c: float = None) -> np.ndarray:
     """Alopaeus et al. (2002) breakage rate with viscosity correction [1/s].
 
     g(d) = C₁·(ε/ν_c)^(1/2)·exp(-C₂·σ/(ρ_c·ε^(2/3)·d^(5/3))
-                                  - C₃·µ_d/(ρ_c^(1/2)·ε^(1/3)·d^(4/3)·σ^(1/2)))
+                                  - C₃·Vi)
+    where Vi = µ_d / sqrt(ρ_c·σ·d) is the dimensionless viscosity group.
 
     Parameters
     ----------
@@ -61,11 +62,13 @@ def breakage_rate_alopaeus(d: np.ndarray, epsilon: float, sigma: float,
         exp_arg1 = -C2 * sigma / (rho_c * epsilon**(2.0/3.0) * d**(5.0/3.0))
 
     # Viscous resistance (Alopaeus extension)
+    # Vi = mu_d / sqrt(rho_c * sigma * d) is the dimensionless viscosity group
+    # that measures the ratio of viscous to capillary resistance to deformation.
     exp_arg2 = np.zeros_like(d)
     if C3 > 0 and mu_d > 0:
         with np.errstate(divide='ignore', invalid='ignore'):
-            denom = np.sqrt(rho_c) * epsilon**(1.0/3.0) * d**(4.0/3.0) * np.sqrt(sigma)
-            exp_arg2 = np.where(denom > 0, -C3 * mu_d / denom, -np.inf)
+            Vi = mu_d / np.sqrt(rho_c * sigma * np.maximum(d, 1e-15))
+            exp_arg2 = -C3 * Vi
 
     g = prefactor * np.exp(exp_arg1 + exp_arg2)
 

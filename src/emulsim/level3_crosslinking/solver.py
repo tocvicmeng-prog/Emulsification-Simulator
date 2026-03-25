@@ -83,9 +83,9 @@ def crosslinking_odes(t: float, y: np.ndarray, k: float,
 
     dX/dt = k · G_free · NH2_free
     dG_free/dt = -k · G_free · NH2_free
-    dNH2_free/dt = -k · G_free · NH2_free
+    dNH2_free/dt = -2 · k · G_free · NH2_free
 
-    Each crosslink consumes 1 genipin and 1 amine.
+    Each crosslink bridge consumes 1 genipin and 2 amines (one on each chain).
     """
     X, G_free, NH2_free = y
     # Ensure non-negative
@@ -93,7 +93,7 @@ def crosslinking_odes(t: float, y: np.ndarray, k: float,
     NH2_free = max(NH2_free, 0.0)
 
     rate = k * G_free * NH2_free
-    return np.array([rate, -rate, -rate])
+    return np.array([rate, -rate, -2.0 * rate])
 
 
 def crosslink_density_to_properties(

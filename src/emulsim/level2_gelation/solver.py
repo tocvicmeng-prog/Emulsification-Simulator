@@ -315,7 +315,9 @@ class CahnHilliard2DSolver:
         total = N * N
 
         # -- Setup ----------------------------------------------------------
-        L_domain = 2.0 * R_droplet
+        # Cap domain at 1.5 µm so grid spacing h ≤ 11.7 nm at N=128,
+        # giving ≥ 6 points per 80 nm pore wavelength.
+        L_domain = min(2.0 * R_droplet, 1.5e-6)
         x, y, h = create_2d_grid(L_domain, N)
         L_std = build_laplacian_2d(N, h)      # standard (constant-coeff) Laplacian
         L_std_csc = L_std.tocsc()
