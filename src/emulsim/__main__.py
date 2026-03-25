@@ -84,7 +84,7 @@ def _cmd_run(args):
 
     params = _load_params(args.config)
 
-    if args.rpm:
+    if args.rpm is not None:
         params.emulsification.rpm = args.rpm
 
     phi_d = args.phi_d if args.phi_d is not None else params.formulation.phi_d
@@ -111,6 +111,8 @@ def _cmd_sweep(args):
     from .pipeline.orchestrator import PipelineOrchestrator
 
     params = _load_params(args.config)
+    if args.rpm_steps < 1:
+        args.rpm_steps = 1
     rpms = np.linspace(args.rpm_min, args.rpm_max, args.rpm_steps).tolist()
 
     orch = PipelineOrchestrator()

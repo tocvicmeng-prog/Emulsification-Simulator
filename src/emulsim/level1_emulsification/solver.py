@@ -19,12 +19,15 @@ from ..datatypes import (
     MaterialProperties,
     SimulationParameters,
 )
+import logging
+
 from .energy import emulsion_density, gap_shear_rate, max_dissipation
 from .kernels import (
     breakage_rate_alopaeus,
     coalescence_rate_ct,
 )
-from ..properties.viscosity import cross_model_correction
+
+logger = logging.getLogger(__name__)
 
 
 class PBESolver:
@@ -198,10 +201,9 @@ class PBESolver:
         # creation) and does not affect the steady-state size distribution solved here.
 
         # Dispersed phase viscosity:
-        # - Breakage uses ZERO-SHEAR viscosity (resistance to bulk deformation)
-        # - Coalescence uses shear-thinned viscosity (film drainage at local shear)
-        gamma_dot = gap_shear_rate(mixer, rpm)
-        mu_d_shear = cross_model_correction(props.mu_d, gamma_dot)
+        # Breakage uses ZERO-SHEAR viscosity (resistance to bulk deformation).
+        # Coalescence uses mu_oil (continuous phase) for film drainage, which
+        # does not require shear correction for Newtonian oils.
 
         # Breakage rates (use zero-shear mu_d for viscous resistance Vi)
         nu_c = props.mu_oil / props.rho_oil
@@ -237,6 +239,9 @@ class PBESolver:
             t_eval=t_eval,
             max_step=t_emul / 10,
         )
+
+        if not sol.success:
+            logger.warning("PBE solver did not converge: %s", sol.message)
 
         N_final = np.maximum(sol.y[:, -1], 0.0)
         d32, d43, d10, d50, d90, span = self._compute_statistics(N_final)

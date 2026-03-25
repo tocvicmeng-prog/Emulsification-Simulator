@@ -8,7 +8,7 @@ from ..datatypes import EmulsificationResult
 
 
 def check_mass_conservation(result: EmulsificationResult,
-                            initial_volume: float = None,
+                            initial_phi_d: float = 0.05,
                             tol: float = 1e-3) -> tuple[bool, float]:
     """Check that total droplet volume is conserved.
 
@@ -16,8 +16,8 @@ def check_mass_conservation(result: EmulsificationResult,
     ----------
     result : EmulsificationResult
         Simulation result.
-    initial_volume : float, optional
-        Expected total volume fraction. If None, uses result.total_volume_fraction.
+    initial_phi_d : float
+        Expected total volume fraction (initial phi_d).
     tol : float
         Relative tolerance.
 
@@ -26,11 +26,7 @@ def check_mass_conservation(result: EmulsificationResult,
     passed : bool
     relative_error : float
     """
-    if initial_volume is None:
-        # Can't check without reference; just verify non-zero
-        return result.total_volume_fraction > 0, result.total_volume_fraction
-
-    rel_err = abs(result.total_volume_fraction - initial_volume) / max(initial_volume, 1e-30)
+    rel_err = abs(result.total_volume_fraction - initial_phi_d) / max(initial_phi_d, 1e-30)
     return rel_err < tol, rel_err
 
 
@@ -70,7 +66,29 @@ def check_steady_state(result: EmulsificationResult,
 
     Returns (converged, relative_variation).
     """
-    return result.converged, 0.0  # converged flag already computed in solver
+    if result.n_d_history is None or len(result.n_d_history) < 2:
+        return False, float('inf')
+
+    # Compute d32 at last 10% of time steps
+    n_steps = len(result.n_d_history)
+    n_check = max(1, n_steps // 10)
+    d32_vals = []
+    for k in range(-n_check, 0):
+        n_d_k = np.maximum(result.n_d_history[k] * (result.d_bins[1:] - result.d_bins[:-1]
+                           if len(result.d_bins) > len(result.n_d_history[k]) else
+                           np.ones_like(result.n_d_history[k])), 0.0)
+        # Use raw n_d_history (already number density) to compute d32
+        N_k = np.maximum(result.n_d_history[k], 0.0)
+        d3 = np.sum(N_k * result.d_bins**3)
+        d2 = np.sum(N_k * result.d_bins**2)
+        d32_k = d3 / d2 if d2 > 0 else 0.0
+        d32_vals.append(d32_k)
+
+    if not d32_vals or max(d32_vals) == 0:
+        return False, float('inf')
+
+    variation = (max(d32_vals) - min(d32_vals)) / max(max(d32_vals), 1e-15)
+    return variation < tol, variation
 
 
 def validate_result(result: EmulsificationResult) -> dict:

@@ -47,5 +47,7 @@ def pareto_summary(state: OptimizationState) -> str:
 
 def best_compromise(state: OptimizationState) -> int:
     """Find the best compromise Pareto point (min sum of objectives)."""
+    if len(state.pareto_Y) == 0:
+        return 0  # fallback
     sums = np.sum(state.pareto_Y, axis=1)
     return int(np.argmin(sums))

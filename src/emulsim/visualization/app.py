@@ -111,7 +111,11 @@ if run_btn:
         # Progress tracking
         progress = st.progress(0, text="Level 1: Emulsification (PBE solver)...")
 
-        result = orch.run_single(params)
+        try:
+            result = orch.run_single(params)
+        except Exception as ex:
+            st.error(f"Simulation failed: {ex}")
+            st.stop()
         elapsed = time.time() - t_start
 
         progress.progress(100, text=f"Complete in {elapsed:.1f}s")
@@ -229,15 +233,19 @@ if "result" in st.session_state:
     st.divider()
     st.header("🎯 Optimization Assessment")
 
-    obj = result.objective_vector()
+    # Compute objectives inline using sidebar targets instead of hardcoded ones
+    d32_dev_obj = abs(e.d32 * 1e6 - target_d32) / target_d32
+    pore_dev_obj = abs(g.pore_size_mean * 1e9 - target_pore) / target_pore
+    G_dev_obj = abs(np.log10(max(m.G_DN, 1)) - np.log10(target_G * 1000))
+    obj = np.array([d32_dev_obj, pore_dev_obj, G_dev_obj])
 
     st.write("**Objective Values** (lower = closer to target):")
     oc1, oc2, oc3 = st.columns(3)
-    oc1.metric("f₁ (d32 deviation)", f"{obj[0]:.3f}",
-               help=f"|d32 - {target_d32} µm| / {target_d32} µm")
-    oc2.metric("f₂ (pore deviation)", f"{obj[1]:.3f}",
+    oc1.metric("f_1 (d32 deviation)", f"{obj[0]:.3f}",
+               help=f"|d32 - {target_d32} um| / {target_d32} um")
+    oc2.metric("f_2 (pore deviation)", f"{obj[1]:.3f}",
                help=f"|pore - {target_pore} nm| / {target_pore} nm")
-    oc3.metric("f₃ (modulus deviation)", f"{obj[2]:.3f}",
+    oc3.metric("f_3 (modulus deviation)", f"{obj[2]:.3f}",
                help=f"|log10(G_DN) - log10({target_G*1000})|")
 
     overall = np.mean(obj)

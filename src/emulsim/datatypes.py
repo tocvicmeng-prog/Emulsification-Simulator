@@ -86,6 +86,49 @@ class SimulationParameters:
     run_id: str = ""
     notes: str = ""
 
+    def validate(self) -> list[str]:
+        """Validate parameters. Returns list of error messages (empty = valid)."""
+        errors = []
+        e = self.emulsification
+        f = self.formulation
+        s = self.solver
+        m = e.mixer
+        if e.rpm <= 0:
+            errors.append(f"RPM must be positive, got {e.rpm}")
+        if e.t_emulsification <= 0:
+            errors.append("Emulsification time must be positive")
+        if m.gap_width <= 0:
+            errors.append("Mixer gap_width must be positive")
+        if m.tank_volume <= 0:
+            errors.append("Mixer tank_volume must be positive")
+        if m.rotor_diameter <= 0:
+            errors.append("Mixer rotor_diameter must be positive")
+        if f.c_agarose < 0:
+            errors.append("c_agarose must be non-negative")
+        if f.c_chitosan < 0:
+            errors.append("c_chitosan must be non-negative")
+        if f.c_span80 < 0:
+            errors.append("c_span80 must be non-negative")
+        if f.c_genipin < 0:
+            errors.append("c_genipin must be non-negative")
+        if f.T_oil <= 0:
+            errors.append(f"T_oil must be positive (Kelvin), got {f.T_oil}")
+        if f.T_crosslink <= 0:
+            errors.append(f"T_crosslink must be positive (Kelvin), got {f.T_crosslink}")
+        if f.cooling_rate <= 0:
+            errors.append("cooling_rate must be positive")
+        if f.t_crosslink <= 0:
+            errors.append("t_crosslink must be positive")
+        if not (0 < f.phi_d < 1):
+            errors.append(f"phi_d must be in (0, 1), got {f.phi_d}")
+        if s.l1_n_bins < 5:
+            errors.append("l1_n_bins must be >= 5")
+        if s.l1_d_min <= 0:
+            errors.append("l1_d_min must be positive")
+        if s.l1_d_max <= s.l1_d_min:
+            errors.append("l1_d_max must exceed l1_d_min")
+        return errors
+
     def to_optimization_vector(self) -> np.ndarray:
         """Flatten to 7D vector for BoTorch."""
         return np.array([

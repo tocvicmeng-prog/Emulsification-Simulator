@@ -36,9 +36,13 @@ class PipelineOrchestrator:
     def run_single(self, params: SimulationParameters,
                    phi_d: float = None) -> FullResult:
         """Execute the full pipeline for a single parameter set."""
+        errors = params.validate()
+        if errors:
+            raise ValueError("Invalid parameters:\n" + "\n".join(f"  - {e}" for e in errors))
+
         if phi_d is None:
             phi_d = params.formulation.phi_d
-        run_id = params.run_id or datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = params.run_id or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         run_dir = self.output_dir / f"run_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
 

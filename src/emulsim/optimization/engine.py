@@ -228,6 +228,10 @@ class OptimizationEngine:
         for iteration in range(max_iter):
             X_torch = torch.tensor(np.array(self.X_observed), **tkwargs)
             Y_torch = torch.tensor(np.array(self.Y_observed), **tkwargs)
+            # Replace NaN/Inf with penalty values
+            nan_mask = ~torch.isfinite(Y_torch)
+            if nan_mask.any():
+                Y_torch[nan_mask] = 10.0
 
             # Compute hypervolume
             hv = self._compute_hypervolume(Y_torch)
@@ -267,9 +271,14 @@ class OptimizationEngine:
                 )
 
                 # Find next candidate
+                d = self.bounds.shape[1]
+                standard_bounds = torch.stack([
+                    torch.zeros(d, **tkwargs),
+                    torch.ones(d, **tkwargs),
+                ])
                 candidates, _ = optimize_acqf(
                     acq_function=acqf,
-                    bounds=torch.zeros_like(self.bounds),  # normalised [0,1]
+                    bounds=standard_bounds,
                     q=1,
                     num_restarts=5,
                     raw_samples=128,

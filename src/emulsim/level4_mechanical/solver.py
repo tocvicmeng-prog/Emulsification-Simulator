@@ -88,6 +88,7 @@ def hertz_contact(E_star: float, R: float,
     if delta_max is None:
         delta_max = 0.1 * R
 
+    R = max(R, 1e-9)  # prevent sqrt(0)
     delta = np.linspace(0, delta_max, n_points)
     F = (4.0 / 3.0) * E_star * np.sqrt(R) * delta ** 1.5
     return delta, F
@@ -163,7 +164,7 @@ def solve_mechanical(params: SimulationParameters,
     # Fiber volume fraction from actual polymer concentration
     # (not from thresholded porosity, which includes water in polymer-rich phase)
     rho_polymer = 1400.0  # kg/m³ (dry polymer density for agarose/chitosan)
-    phi_fiber = (params.formulation.c_agarose + params.formulation.c_chitosan) / rho_polymer
+    phi_fiber = max((params.formulation.c_agarose + params.formulation.c_chitosan) / rho_polymer, 0.0)
     Kav_arr = ogston_kav(rh_arr, props.r_fiber, phi_fiber)
 
     return MechanicalResult(

@@ -104,6 +104,7 @@ def cross_model_correction(mu_0: float, shear_rate: float,
     float
         Shear-rate-corrected viscosity [Pa*s].
     """
+    shear_rate = max(shear_rate, 0.0)
     return mu_0 / (1.0 + (lambda_cross * shear_rate) ** m_cross)
 
 

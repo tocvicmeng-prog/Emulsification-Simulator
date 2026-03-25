@@ -11,12 +11,13 @@ from ..datatypes import EmulsificationResult, GelationResult, CrosslinkingResult
 
 def plot_droplet_size_distribution(result: EmulsificationResult) -> go.Figure:
     """Volume-weighted droplet size distribution from Level 1."""
+    d_bins_safe = np.maximum(result.d_bins * 1e6, 1e-6)
     vol = result.n_d * (np.pi / 6.0 * result.d_bins**3)
     vol_pct = vol / np.sum(vol) * 100 if np.sum(vol) > 0 else vol
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=result.d_bins * 1e6,
+        x=d_bins_safe,
         y=vol_pct,
         marker_color="steelblue",
         name="Volume %",
@@ -130,7 +131,8 @@ def plot_results_dashboard(result: FullResult) -> go.Figure:
     e = result.emulsification
     vol = e.n_d * (np.pi / 6.0 * e.d_bins**3)
     vol_norm = vol / np.max(vol) if np.max(vol) > 0 else vol
-    fig.add_trace(go.Bar(x=e.d_bins * 1e6, y=vol_norm, marker_color="steelblue",
+    d_bins_safe_dash = np.maximum(e.d_bins * 1e6, 1e-6)
+    fig.add_trace(go.Bar(x=d_bins_safe_dash, y=vol_norm, marker_color="steelblue",
                          showlegend=False), row=1, col=1)
 
     # L2: Phase field (1D or diagonal slice of 2D)

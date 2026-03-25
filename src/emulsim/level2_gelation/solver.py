@@ -229,6 +229,14 @@ class CahnHilliardSolver:
                     break
                 continue
 
+            if not np.all(np.isfinite(phi_new)):
+                dt *= 0.25
+                cached_factor = None
+                cached_dm = -1.0
+                if dt < 1e-10:
+                    break
+                continue
+
             # Clip to physical bounds
             phi_new = np.clip(phi_new, 1e-6, 1.0 - 1e-6)
 
@@ -461,6 +469,12 @@ class CahnHilliard2DSolver:
                     break
                 continue
 
+            if not np.all(np.isfinite(phi_new)):
+                dt *= 0.25
+                if dt < 1e-10:
+                    break
+                continue
+
             # Clip to physical bounds
             phi_new = np.clip(phi_new, 1e-6, 1.0 - 1e-6)
 
@@ -528,6 +542,8 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
     c_agar = params.formulation.c_agarose  # kg/m³
     c_chit = params.formulation.c_chitosan
     cool_rate = params.formulation.cooling_rate  # K/s
+    if cool_rate <= 0:
+        cool_rate = 0.001  # fallback: very slow cooling
 
     # Empirical pore diameter [m] for agarose gels
     # d_pore = A * c^(-alpha) * (dT/dt)^(-beta)
@@ -620,7 +636,7 @@ def solve_gelation(params: SimulationParameters, props: MaterialProperties,
             arrest_exponent=params.solver.l2_arrest_exponent,
         )
         return solver.solve(params, props, R_droplet)
-    else:
+    elif mode == 'ch_1d':
         solver = CahnHilliardSolver(
             N_r=params.solver.l2_n_r,
             dt_initial=params.solver.l2_dt_initial,
@@ -628,3 +644,5 @@ def solve_gelation(params: SimulationParameters, props: MaterialProperties,
             arrest_exponent=params.solver.l2_arrest_exponent,
         )
         return solver.solve(params, props, R_droplet)
+    else:
+        raise ValueError(f"Unknown gelation mode: {mode!r}. Use 'empirical', 'ch_2d', or 'ch_1d'.")

@@ -174,14 +174,19 @@ def solve_crosslinking(params: SimulationParameters,
     """
     T = params.formulation.T_crosslink
     t_xlink = params.formulation.t_crosslink
-    c_genipin = params.formulation.c_genipin  # mol/m³
+    c_genipin = max(params.formulation.c_genipin, 0.0)  # mol/m³
     c_chitosan = params.formulation.c_chitosan  # kg/m³
+
+    if T <= 0:
+        raise ValueError(f"Crosslinking temperature must be positive, got {T} K")
+    if props.M_GlcN <= 0:
+        raise ValueError("M_GlcN must be positive")
 
     # Rate constant
     k = genipin_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
 
     # Available amine groups
-    NH2_total = available_amine_concentration(c_chitosan, props.DDA, props.M_GlcN)
+    NH2_total = max(available_amine_concentration(c_chitosan, props.DDA, props.M_GlcN), 0.0)
 
     # ── Thiele modulus check (couples L3 to L1/L2 outputs) ───────────
     D_genipin_bare = 1e-10  # m²/s, genipin in water
@@ -223,6 +228,9 @@ def solve_crosslinking(params: SimulationParameters,
         atol=params.solver.l3_atol,
         t_eval=t_eval,
     )
+
+    if not sol.success:
+        logger.warning("Crosslinking ODE solver did not converge: %s", sol.message)
 
     # Extract time histories
     t_arr = sol.t

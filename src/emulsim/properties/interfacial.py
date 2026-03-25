@@ -41,7 +41,7 @@ def interfacial_tension_span80(T: float, c_span80: float) -> float:
         Interfacial tension [N/m]. Clipped to minimum of 1e-4 N/m.
     """
     # Convert to molar concentration
-    c_mol = c_span80 / M_SPAN80 * 1000.0  # mol/m3
+    c_mol = max(c_span80, 0.0) / M_SPAN80 * 1000.0  # mol/m3
 
     sigma_0 = sigma_bare(T)
 
