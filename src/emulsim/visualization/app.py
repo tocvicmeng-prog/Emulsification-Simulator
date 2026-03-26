@@ -327,6 +327,22 @@ if "result" in st.session_state:
             for w in trust.warnings:
                 st.warning(w)
 
+    # ── Calibration Protocol Link ─────────────────────────────────────
+
+    st.divider()
+    st.header("📋 Calibration & Validation")
+    cal_path = Path(__file__).resolve().parents[3] / "docs" / "04_calibration_protocol.md"
+    if cal_path.exists():
+        with st.expander("View Calibration Wet-Lab Protocol"):
+            st.markdown(cal_path.read_text(encoding="utf-8"))
+    st.info(
+        "The simulation uses literature-estimated constants that should be calibrated "
+        "against your specific materials. See **docs/04_calibration_protocol.md** for "
+        "a 5-study, ~30-preparation wet-lab protocol covering: interfacial tension "
+        "(K_L, Γ∞), chitosan viscosity (η_intr), breakage dynamics (C3), "
+        "pore structure (empirical coefficients), and IPN mechanics (η_coupling)."
+    )
+
 # ─── Footer ───────────────────────────────────────────────────────────────
 
 st.divider()
