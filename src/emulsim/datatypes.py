@@ -62,7 +62,7 @@ class SolverSettings:
     # Level 1
     l1_n_bins: int = 20
     l1_d_min: float = 1e-6             # [m]
-    l1_d_max: float = 100e-6           # [m]
+    l1_d_max: float = 500e-6           # [m] (must exceed premix d32 by ≥3σ)
     l1_rtol: float = 1e-6
     l1_atol: float = 1e-8
     # Level 2
