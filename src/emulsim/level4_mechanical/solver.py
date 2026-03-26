@@ -141,7 +141,12 @@ def solve_mechanical(params: SimulationParameters,
         props.G_agarose_exponent,
     )
 
-    # Chitosan network modulus from crosslinking
+    # Chitosan network modulus from crosslinking.
+    # NOTE: G_chitosan_final represents the crosslinked network modulus regardless
+    # of which polymer it actually targets (chitosan-NH2, agarose-OH, or independent
+    # PEGDA network).  This is a known simplification -- the DN model
+    # G_DN = G_agar + G_xlink + eta*sqrt(G_agar*G_xlink) still works because the
+    # coupling term captures the interaction between the two interpenetrating networks.
     G_chit = crosslinking.G_chitosan_final
 
     # Double-network modulus with IPN coupling

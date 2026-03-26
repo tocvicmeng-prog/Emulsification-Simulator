@@ -18,6 +18,7 @@ resolved reaction-diffusion PDE would be needed.
 from __future__ import annotations
 
 import logging
+import math
 from typing import Optional
 
 import numpy as np
@@ -217,7 +218,8 @@ def _build_result_arrays(t_arr, X_arr, c_polymer, T, DDA, M_GlcN,
         xi_arr[i] = xi
         G_arr[i] = G
 
-    p_final = X_arr[-1] / reactive_total if reactive_total > 0 else 0.0
+    # Fix 2: Each bridge consumes 2 reactive groups, so p = 2*X / reactive_total
+    p_final = 2.0 * X_arr[-1] / reactive_total if reactive_total > 0 else 0.0
 
     return CrosslinkingResult(
         t_array=t_arr,
@@ -234,11 +236,33 @@ def _build_result_arrays(t_arr, X_arr, c_polymer, T, DDA, M_GlcN,
     )
 
 
+def _build_zero_result(params):
+    """Return a CrosslinkingResult with all zeros (no crosslinking)."""
+    t_xlink = params.formulation.t_crosslink
+    t_arr = np.array([0.0, max(t_xlink, 1.0)])
+    zeros = np.zeros_like(t_arr)
+    xi_default = np.full_like(t_arr, 1e-6)  # 1 um uncrosslinked default
+    Mc_default = np.full_like(t_arr, 1e10)
+    return CrosslinkingResult(
+        t_array=t_arr,
+        X_array=zeros,
+        nu_e_array=zeros,
+        Mc_array=Mc_default,
+        xi_array=xi_default,
+        G_chitosan_array=zeros,
+        p_final=0.0,
+        nu_e_final=0.0,
+        Mc_final=1e10,
+        xi_final=1e-6,
+        G_chitosan_final=0.0,
+    )
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  Per-mechanism solver implementations
 # ═══════════════════════════════════════════════════════════════════════════
 
-def _solve_second_order_amine(params, props, R_droplet, porosity):
+def _solve_second_order_amine(params, props, xl, R_droplet, porosity):
     """Second-order kinetics targeting chitosan -NH2 groups.
 
     Used by: genipin, glutaraldehyde, EDC/NHS.
@@ -253,7 +277,16 @@ def _solve_second_order_amine(params, props, R_droplet, porosity):
     if props.M_GlcN <= 0:
         raise ValueError("M_GlcN must be positive")
 
-    k = arrhenius_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
+    # Fix 1: Prefer crosslinker profile values over props when xl is provided
+    k0 = xl.k_xlink_0 if xl else props.k_xlink_0
+    Ea = xl.E_a_xlink if xl else props.E_a_xlink
+    fb = xl.f_bridge if xl else props.f_bridge
+
+    # Fix 6: Clamp to non-negative
+    k0 = max(k0, 0.0)
+    fb = max(fb, 0.0)
+
+    k = arrhenius_rate_constant(T, k0, Ea)
     NH2_total = max(available_amine_concentration(c_chitosan, props.DDA, props.M_GlcN), 0.0)
 
     _thiele_check(R_droplet, porosity, k, NH2_total)
@@ -275,7 +308,7 @@ def _solve_second_order_amine(params, props, R_droplet, porosity):
 
     return _build_result_arrays(
         sol.t, sol.y[0], c_chitosan, T, props.DDA, props.M_GlcN,
-        NH2_total, props.f_bridge,
+        NH2_total, fb,
     )
 
 
@@ -285,6 +318,11 @@ def _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity):
     Used by: epichlorohydrin (ECH), divinyl sulfone (DVS), citric acid.
     Same ODE structure as amine but reactive groups are agarose hydroxyl
     groups and the modulus contribution goes to the agarose network.
+
+    NOTE: This model is simplified -- it treats all hydroxyl crosslinkers
+    as bifunctional targeting agarose-OH only.  The actual chemistry of
+    ECH (epoxide ring-opening) and citric acid (ester/amide formation)
+    is more complex and may involve chitosan -NH2 as well.
     """
     T = params.formulation.T_crosslink
     t_xlink = params.formulation.t_crosslink
@@ -294,7 +332,22 @@ def _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity):
     if T <= 0:
         raise ValueError(f"Crosslinking temperature must be positive, got {T} K")
 
-    k = arrhenius_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
+    # Fix 1: Prefer crosslinker profile values over props when xl is provided
+    k0 = xl.k_xlink_0 if xl else props.k_xlink_0
+    Ea = xl.E_a_xlink if xl else props.E_a_xlink
+    fb = xl.f_bridge if xl else props.f_bridge
+
+    # Fix 6: Clamp to non-negative
+    k0 = max(k0, 0.0)
+    fb = max(fb, 0.0)
+
+    # Fix 3: Log simplification note for hydroxyl-reactive crosslinkers
+    logger.info("L3 hydroxyl model: using simplified bifunctional agarose-OH model "
+                "for '%s'. Actual chemistry (epoxide ring-opening / ester formation) "
+                "is more complex and may also target chitosan -NH2.",
+                xl.name if xl else "unknown")
+
+    k = arrhenius_rate_constant(T, k0, Ea)
     OH_total = max(available_hydroxyl_concentration(c_agarose), 0.0)
 
     _thiele_check(R_droplet, porosity, k, OH_total)
@@ -318,7 +371,7 @@ def _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity):
     M_repeat = 306.0  # g/mol, agarose disaccharide
     return _build_result_arrays(
         sol.t, sol.y[0], c_agarose, T, props.DDA, M_repeat,
-        OH_total, props.f_bridge,
+        OH_total, fb,
     )
 
 
@@ -341,13 +394,44 @@ def _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity):
     if T <= 0:
         raise ValueError(f"Crosslinking temperature must be positive, got {T} K")
 
+    # Fix 1: Prefer crosslinker profile values over props when xl is provided
+    k0 = xl.k_xlink_0 if xl else props.k_xlink_0
+    Ea = xl.E_a_xlink if xl else props.E_a_xlink
+    fb = xl.f_bridge if xl else props.f_bridge
+
+    # Fix 6: Clamp to non-negative
+    k0 = max(k0, 0.0)
+    fb = max(fb, 0.0)
+
+    # Fix 4: UV=0 should give zero conversion, not coerce to 0.001
+    if uv_intensity <= 0:
+        logger.info("L3 UV dose model: I_uv=0 -- no UV, returning zero conversion.")
+        t_arr = np.linspace(0.0, t_xlink, 200)
+        X_arr = np.zeros_like(t_arr)
+
+        M_pegda_repeat = 700.0
+        c_pegda_kg = c_pegda * M_pegda_repeat / 1000.0
+        return _build_result_arrays(
+            t_arr, X_arr, max(c_pegda_kg, 0.001), T, 1.0, M_pegda_repeat,
+            c_pegda, fb,
+        )
+
+    # Fix 4: Check t_crosslink > 0
+    if t_xlink <= 0:
+        logger.warning("L3 UV dose model: t_crosslink <= 0, returning zero conversion.")
+        return _build_zero_result(params)
+
     # k_eff = k_uv * sqrt(I_uv) where I_uv is in mW/cm2
-    k_uv = arrhenius_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
-    I_uv = max(uv_intensity, 0.001)
-    k_eff = k_uv * np.sqrt(I_uv)
+    k_uv = arrhenius_rate_constant(T, k0, Ea)
+    k_eff = k_uv * np.sqrt(uv_intensity)
+
+    # Fix 4: Check k_eff is finite
+    if not np.isfinite(k_eff):
+        logger.warning("L3 UV dose model: k_eff is not finite (%.3e), clamping to 0.", k_eff)
+        k_eff = 0.0
 
     logger.info("L3 UV dose model: k_uv=%.3e, I_uv=%.1f mW/cm2, k_eff=%.3e",
-                k_uv, I_uv, k_eff)
+                k_uv, uv_intensity, k_eff)
 
     # Time array
     t_arr = np.linspace(0.0, t_xlink, 200)
@@ -364,7 +448,7 @@ def _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity):
 
     return _build_result_arrays(
         t_arr, X_arr, max(c_pegda_kg, 0.001), T, 1.0, M_pegda_repeat,
-        c_pegda, props.f_bridge,
+        c_pegda, fb,
     )
 
 
@@ -389,6 +473,17 @@ def _solve_ionic_instant(params, props, xl, R_droplet, porosity):
 
     NH2_total = max(available_amine_concentration(c_chitosan, props.DDA, props.M_GlcN), 0.0)
 
+    # Fix 5: When NH2_total <= 0, return zero crosslinking result directly
+    if NH2_total <= 1e-10:
+        logger.info("L3 ionic model: NH2_total ~ 0, no reactive groups for ionic crosslinking.")
+        return _build_zero_result(params)
+
+    # Fix 1: Prefer crosslinker profile values over props when xl is provided
+    fb = xl.f_bridge if xl else props.f_bridge
+
+    # Fix 6: Clamp to non-negative
+    fb = max(fb, 0.0)
+
     # TPP has 5 negative charges (P3O10^5-), each can bind one NH3+
     z_tpp = 5.0
     equivalents = c_tpp * z_tpp / max(NH2_total, 1e-10)
@@ -409,7 +504,7 @@ def _solve_ionic_instant(params, props, xl, R_droplet, porosity):
     X_arr = np.array([X_final, X_final])  # already at equilibrium at t=0
 
     # Compute properties with ionic stability factor applied to f_bridge
-    f_bridge_ionic = props.f_bridge * f_ionic_strength
+    f_bridge_ionic = fb * f_ionic_strength
 
     nu_e_arr = np.zeros_like(t_arr)
     Mc_arr = np.zeros_like(t_arr)
@@ -426,7 +521,8 @@ def _solve_ionic_instant(params, props, xl, R_droplet, porosity):
         xi_arr[i] = xi
         G_arr[i] = G
 
-    p_final = X_final / NH2_total if NH2_total > 0 else 0.0
+    # Fix 2: Each bridge consumes 2 reactive groups, so p = 2*X / reactive_total
+    p_final = 2.0 * X_final / NH2_total if NH2_total > 0 else 0.0
 
     return CrosslinkingResult(
         t_array=t_arr,
@@ -473,13 +569,23 @@ def solve_crosslinking(params: SimulationParameters,
     """
     from ..reagent_library import CROSSLINKERS
 
+    # Fix 6: Validate T_crosslink at the dispatcher level
+    T = params.formulation.T_crosslink
+    if not math.isfinite(T) or T <= 0:
+        raise ValueError(f"T_crosslink must be finite and positive, got {T}")
+
     xl = CROSSLINKERS.get(crosslinker_key)
 
-    if xl is None or xl.kinetics_model == 'second_order':
-        if xl and xl.mechanism in _HYDROXYL_MECHANISMS:
+    # Fix 1: Unknown crosslinker key raises ValueError instead of silent fallthrough
+    if xl is None:
+        raise ValueError(f"Unknown crosslinker_key: {crosslinker_key!r}. "
+                         f"Valid keys: {list(CROSSLINKERS.keys())}")
+
+    if xl.kinetics_model == 'second_order':
+        if xl.mechanism in _HYDROXYL_MECHANISMS:
             return _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity)
         else:
-            return _solve_second_order_amine(params, props, R_droplet, porosity)
+            return _solve_second_order_amine(params, props, xl, R_droplet, porosity)
     elif xl.kinetics_model == 'uv_dose':
         return _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity)
     elif xl.kinetics_model == 'ionic_instant':
@@ -489,8 +595,10 @@ def solve_crosslinking(params: SimulationParameters,
         # second-order amine kinetics as an approximation until a
         # dedicated solver is implemented.
         logger.info("L3: michaelis_menten model not yet implemented; "
-                    "falling back to second_order amine kinetics for '%s'.",
+                    "falling back to second_order amine kinetics for '%s'. "
+                    "NOTE: results are approximate -- EDC/NHS kinetics involve "
+                    "competitive hydrolysis not captured by simple second-order model.",
                     crosslinker_key)
-        return _solve_second_order_amine(params, props, R_droplet, porosity)
+        return _solve_second_order_amine(params, props, xl, R_droplet, porosity)
     else:
         raise ValueError(f"Unknown kinetics model: {xl.kinetics_model}")

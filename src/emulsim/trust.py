@@ -35,10 +35,16 @@ class TrustAssessment:
 
 
 def assess_trust(result: FullResult, params: SimulationParameters,
-                 props: MaterialProperties) -> TrustAssessment:
+                 props: MaterialProperties,
+                 crosslinker_key: str = 'genipin') -> TrustAssessment:
     """Evaluate whether the simulation results should be trusted.
 
     Checks for conditions where the model assumptions break down.
+
+    Parameters
+    ----------
+    crosslinker_key : str
+        Key into CROSSLINKERS library, used for chemistry-specific warnings.
     """
     warnings = []
     blockers = []
@@ -125,6 +131,26 @@ def assess_trust(result: FullResult, params: SimulationParameters,
         warnings.append(
             f"Agarose={c_agar_pct:.1f}% -- outside empirical pore model calibration range (1-8%)"
         )
+
+    # Fix 7: Crosslinker chemistry-specific warnings
+    from .reagent_library import CROSSLINKERS
+    xl = CROSSLINKERS.get(crosslinker_key)
+    if xl:
+        if xl.mechanism == 'amine_bridge' and xl.name.startswith('EDC/NHS'):
+            warnings.append("EDC/NHS requires carboxyl (-COOH) groups that standard chitosan lacks. "
+                            "Results may not be physically meaningful.")
+        if xl.kinetics_model == 'uv_dose':
+            warnings.append("PEGDA+UV requires photoinitiator and UV penetration -- "
+                            "verify these are present in your formulation.")
+        if xl.kinetics_model == 'ionic_instant':
+            warnings.append("TPP ionic crosslinks are reversible and unstable in buffered "
+                            "salt solutions used in chromatography.")
+        if xl.mechanism in ('hydroxyl', 'michael_addition'):
+            warnings.append(f"{xl.name} requires alkaline conditions (pH 11-12) that may "
+                            "partially dissolve agarose helices.")
+        if xl.mechanism == 'ester_bond':
+            warnings.append("Citric acid heat cure (80-120C) may partially melt agarose gel. "
+                            "Ester bonds are hydrolytically unstable at pH>10.")
 
     trustworthy = len(blockers) == 0
 

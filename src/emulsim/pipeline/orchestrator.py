@@ -143,7 +143,7 @@ class PipelineOrchestrator:
             crosslinking=xlink_result,
             mechanical=mech_result,
         )
-        trust = assess_trust(full_result, params, props)
+        trust = assess_trust(full_result, params, props, crosslinker_key=crosslinker_key)
         if not trust.trustworthy:
             logger.warning("TRUST GATE: %s", trust.summary())
         elif trust.warnings:

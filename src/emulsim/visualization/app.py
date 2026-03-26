@@ -306,7 +306,8 @@ if run_btn:
         params.formulation.T_oil, params.formulation.c_agarose,
         params.formulation.c_chitosan, params.formulation.c_span80,
     )
-    st.session_state["trust"] = assess_trust(result, params, props_trust)
+    st.session_state["trust"] = assess_trust(result, params, props_trust,
+                                                crosslinker_key=_xl_sel_key)
 
 # ─── Display Results ──────────────────────────────────────────────────────
 

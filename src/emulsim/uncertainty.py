@@ -93,8 +93,20 @@ class UncertaintyPropagator:
         return p
 
     def run(self, params: SimulationParameters,
-            db: Optional[PropertyDatabase] = None) -> UncertaintyResult:
-        """Run Monte Carlo uncertainty propagation."""
+            db: Optional[PropertyDatabase] = None,
+            crosslinker_key: str = 'genipin',
+            uv_intensity: float = 0.0) -> UncertaintyResult:
+        """Run Monte Carlo uncertainty propagation.
+
+        Parameters
+        ----------
+        params : SimulationParameters
+        db : PropertyDatabase, optional
+        crosslinker_key : str
+            Key into CROSSLINKERS library to pass through to L3 solver.
+        uv_intensity : float
+            UV intensity [mW/cm2] for UV-initiated crosslinkers.
+        """
         db = db or PropertyDatabase()
 
         # Get base properties
@@ -142,8 +154,11 @@ class UncertaintyPropagator:
                 R = emul.d50 / 2.0
                 gel = solve_gelation(params_i, props_i, R_droplet=R, mode='empirical')
 
-                # L3
-                xl = solve_crosslinking(params_i, props_i, R_droplet=R, porosity=gel.porosity)
+                # L3 -- Fix 8: pass crosslinker_key and uv_intensity through
+                xl = solve_crosslinking(params_i, props_i, R_droplet=R,
+                                        porosity=gel.porosity,
+                                        crosslinker_key=crosslinker_key,
+                                        uv_intensity=uv_intensity)
 
                 # L4
                 mech = solve_mechanical(params_i, props_i, gel, xl)
