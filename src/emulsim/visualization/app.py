@@ -84,57 +84,98 @@ target_d32 = st.sidebar.number_input("Target d32 (µm)", 0.5, 50.0, 2.0, step=0.
 target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 80, step=10)
 target_G = st.sidebar.number_input("Target G_DN (kPa)", 1.0, 500.0, 10.0, step=1.0)
 
-# ─── Material Constants (per-constant Literature / Custom toggle) ─────────
+# ─── Material Constants (per-constant Literature / Custom + protocol link) ─
 
 st.sidebar.divider()
 st.sidebar.subheader("Material Constants")
-st.sidebar.caption("For each constant: use the literature value or enter your own.")
+st.sidebar.caption("For each constant: use literature or enter your own. Click name to view calibration protocol.")
 
 from emulsim.literature_constants import ALL_CONSTANTS
 
-def _const_input(label, key, lit_val, unit, source_short, lo, hi, step, fmt="%.3f"):
-    """Render a per-constant Literature/Custom selector."""
+# Load the calibration protocol and extract per-study sections
+_proto_path = Path(__file__).resolve().parents[3] / "docs" / "04_calibration_protocol.md"
+_proto_sections = {}
+if _proto_path.exists():
+    _proto_text = _proto_path.read_text(encoding="utf-8")
+    import re as _re
+    # Extract each study section by heading
+    _study_map = {
+        "K_L":        ("Study 1 -- Interfacial Tension", "## 2. Study 1", "## 3. Study 2"),
+        "Gamma_inf":  ("Study 1 -- Interfacial Tension", "## 2. Study 1", "## 3. Study 2"),
+        "eta_chit":   ("Study 2 -- Chitosan Viscosity",  "## 3. Study 2", "## 4. Study 3"),
+        "C3":         ("Study 3 -- Viscous Breakage",     "## 4. Study 3", "## 5. Study 4"),
+        "pore":       ("Study 4 -- Pore Structure",       "## 5. Study 4", "## 6. Study 5"),
+        "eta_coup":   ("Study 5 -- IPN Coupling",         "## 6. Study 5", "## 7. Inputting"),
+    }
+    for key, (title, start_marker, end_marker) in _study_map.items():
+        s_idx = _proto_text.find(start_marker)
+        e_idx = _proto_text.find(end_marker)
+        if s_idx >= 0:
+            section = _proto_text[s_idx:e_idx] if e_idx > s_idx else _proto_text[s_idx:]
+            _proto_sections[key] = (title, section)
+
+
+def _const_input(label, key, lit_val, unit, source_short, lo, hi, step,
+                  proto_key, fmt="%.3f"):
+    """Render per-constant selector with protocol link."""
+    # Clickable protocol popover
+    if proto_key in _proto_sections:
+        title, section_md = _proto_sections[proto_key]
+        with st.sidebar.popover(f"📋 {label}"):
+            st.markdown(f"### Calibration Protocol: {title}")
+            st.markdown(section_md[:3000])  # first 3000 chars to fit popover
+            if len(section_md) > 3000:
+                st.caption("... (see full protocol in docs/04_calibration_protocol.md)")
+    else:
+        st.sidebar.markdown(f"**{label}**")
+
     src = st.sidebar.radio(
-        label,
+        "Source",
         ["Literature", "Custom"],
         index=0, horizontal=True, key=f"src_{key}",
+        label_visibility="collapsed",
     )
     if src == "Literature":
         st.sidebar.caption(f"  = {lit_val} {unit}  ({source_short})")
         return lit_val
     else:
         return st.sidebar.number_input(
-            f"{label} ({unit})", lo, hi, float(lit_val), step=step, format=fmt, key=f"val_{key}",
+            f"{label} ({unit})", lo, hi, float(lit_val), step=step,
+            format=fmt, key=f"val_{key}",
         )
 
 _kl = ALL_CONSTANTS["K_L"]
 custom_K_L = _const_input(
     "K_L (Span-80 adsorption)", "K_L",
-    _kl.value, "m³/mol", "Santini 2007", 0.01, 10.0, 0.05,
+    _kl.value, "m³/mol", "Santini 2007", 0.01, 10.0, 0.05, "K_L",
 )
 
 _gi = ALL_CONSTANTS["Gamma_inf"]
 custom_Gamma_inf = _const_input(
     "Γ∞ (max surface excess)", "Gamma_inf",
-    _gi.value * 1e6, "×10⁻⁶ mol/m²", "Santini 2007", 1.0, 10.0, 0.1, "%.1f",
+    _gi.value * 1e6, "×10⁻⁶ mol/m²", "Santini 2007", 1.0, 10.0, 0.1,
+    "Gamma_inf", "%.1f",
 )
 
 _ec = ALL_CONSTANTS["eta_intr_chit"]
 custom_eta_chit = _const_input(
     "[η] chitosan", "eta_chit",
-    _ec.value, "mL/g", "Rinaudo 1993", 100.0, 2000.0, 50.0, "%.0f",
+    _ec.value, "mL/g", "Rinaudo 1993", 100.0, 2000.0, 50.0,
+    "eta_chit", "%.0f",
 )
 
 _c3 = ALL_CONSTANTS["breakage_C3"]
 custom_C3 = _const_input(
     "C3 (viscous breakage)", "C3",
-    _c3.value, "-", "Alopaeus 2002", 0.0, 1.0, 0.05, "%.2f",
+    _c3.value, "-", "Alopaeus 2002", 0.0, 1.0, 0.05,
+    "C3", "%.2f",
 )
 
 _et = ALL_CONSTANTS["eta_coupling"]
 custom_eta_coup = _const_input(
     "η coupling (IPN)", "eta_coup",
-    _et.value, "-", "Gong 2010 est.", -0.5, 0.5, 0.05, "%.2f",
+    _et.value, "-", "Gong 2010 est.", -0.5, 0.5, 0.05,
+    "eta_coup", "%.2f",
 )
 
 # ─── Build Parameters ─────────────────────────────────────────────────────
