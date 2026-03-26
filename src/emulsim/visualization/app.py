@@ -19,8 +19,10 @@ if str(_root / "src") not in sys.path:
 
 # Force reload of core modules to avoid Streamlit's import cache
 import importlib
-import emulsim.pipeline.orchestrator as _orch_mod
-importlib.reload(_orch_mod)
+import emulsim.datatypes as _dt_mod; importlib.reload(_dt_mod)
+import emulsim.pipeline.orchestrator as _orch_mod; importlib.reload(_orch_mod)
+import emulsim.trust as _trust_mod; importlib.reload(_trust_mod)
+import emulsim.level3_crosslinking.solver as _xl_mod; importlib.reload(_xl_mod)
 
 from emulsim.datatypes import SimulationParameters, MaterialProperties, FormulationParameters, EmulsificationParameters, MixerGeometry, SolverSettings
 from emulsim.properties.database import PropertyDatabase
