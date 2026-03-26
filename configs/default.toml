@@ -4,7 +4,7 @@ notes = "Baseline simulation with default parameters"
 
 [emulsification]
 rpm = 10000
-t_emulsification = 600.0  # 10 minutes [s]
+t_emulsification = 60.0  # [s] (1 min — sufficient for steady state)
 
 [emulsification.mixer]
 rotor_diameter = 0.025    # [m] (25 mm rotor)
@@ -26,16 +26,17 @@ t_crosslink = 86400.0      # [s] (24 hours)
 phi_d = 0.05               # [-] dispersed phase volume fraction
 
 [solver.level1]
-n_bins = 50
-d_min = 0.1e-6             # [m]
-d_max = 500e-6             # [m]
+n_bins = 20
+d_min = 1e-6              # [m]
+d_max = 500e-6            # [m]
 rtol = 1e-6
 atol = 1e-8
 
 [solver.level2]
 n_r = 1000
-dt_initial = 1e-4          # [s]
-dt_max = 1.0               # [s]
+n_grid = 128              # 2D grid side length (N×N)
+dt_initial = 1e-4         # [s]
+dt_max = 1.0              # [s]
 arrest_exponent = 2.5
 
 [solver.level3]
