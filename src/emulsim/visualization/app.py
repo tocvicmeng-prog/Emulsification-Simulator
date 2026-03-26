@@ -12,10 +12,15 @@ from pathlib import Path
 import numpy as np
 import streamlit as st
 
-# Ensure the package is importable
+# Ensure the package is importable and force-reload to pick up code changes
 _root = Path(__file__).resolve().parents[3]
 if str(_root / "src") not in sys.path:
     sys.path.insert(0, str(_root / "src"))
+
+# Force reload of core modules to avoid Streamlit's import cache
+import importlib
+import emulsim.pipeline.orchestrator as _orch_mod
+importlib.reload(_orch_mod)
 
 from emulsim.datatypes import SimulationParameters, MaterialProperties, FormulationParameters, EmulsificationParameters, MixerGeometry, SolverSettings
 from emulsim.properties.database import PropertyDatabase
