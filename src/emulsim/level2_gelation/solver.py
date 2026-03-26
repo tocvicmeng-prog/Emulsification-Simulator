@@ -584,6 +584,7 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
 
     # For the empirical model, gelation is assumed complete — the emulsion
     # cools well below T_gel during microsphere formation.
+    T_gel = props.T_gel
     alpha_final = 0.999
 
     return GelationResult(

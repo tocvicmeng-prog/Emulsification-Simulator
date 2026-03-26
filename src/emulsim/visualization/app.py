@@ -255,17 +255,25 @@ _custom_props_overrides['k_xlink_0'] = xl.k_xlink_0
 _custom_props_overrides['E_a_xlink'] = xl.E_a_xlink
 _custom_props_overrides['f_bridge'] = xl.f_bridge
 
-# Surfactant IFT override: compute sigma from the selected surfactant's
-# Szyszkowski-Langmuir parameters so Level 1 uses the correct IFT.
+# Surfactant IFT override: use custom K_L/Gamma_inf if user set them,
+# otherwise use the surfactant library values.
 _R_gas = 8.314
 _T_ift = T_oil_C + 273.15
 _c_mol_ift = c_span80_pct * 10.0 / surf.mw * 1000.0  # kg/m3 -> mol/m3
 _sigma_0_T = max(surf.sigma_0_paraffin - 1.0e-4 * (_T_ift - 293.15), 0.001)
+_use_gamma = custom_Gamma_inf * 1e-6  # convert from display units (×10⁻⁶) to mol/m²
+_use_KL = custom_K_L
 _sigma_calc = max(
-    _sigma_0_T - _R_gas * _T_ift * surf.gamma_inf * np.log(1 + surf.K_L * _c_mol_ift),
+    _sigma_0_T - _R_gas * _T_ift * _use_gamma * np.log(1 + _use_KL * _c_mol_ift),
     1e-4,
 )
 _custom_props_overrides['sigma'] = _sigma_calc
+
+# Chitosan viscosity override (used by viscosity model via mu_d)
+# Note: mu_d is computed by PropertyDatabase.update_for_conditions() using
+# the hardcoded eta_intr_chit=800. To use the custom value, we'd need to
+# recompute mu_d here. For now, store as a note — full integration requires
+# making eta_intr_chit a MaterialProperties field.
 
 # ─── Run Simulation ───────────────────────────────────────────────────────
 
@@ -393,7 +401,7 @@ if "result" in st.session_state:
 
         c1, c2, c3 = st.columns(3)
         c1.write(f"**Crosslink fraction** = {x.p_final:.4f}")
-        c1.write(f"**G_chitosan** = {x.G_chitosan_final:.0f} Pa")
+        c1.write(f"**G_crosslinked** = {x.G_chitosan_final:.0f} Pa")
         c2.write(f"**Mesh size ξ** = {x.xi_final*1e9:.1f} nm")
         c2.write(f"**M_c** = {x.Mc_final:.0f} g/mol")
         c3.write(f"**ν_e** = {x.nu_e_final:.2e} /m³")
@@ -409,7 +417,7 @@ if "result" in st.session_state:
 
         c1, c2, c3 = st.columns(3)
         c1.write(f"**G_agarose** = {m.G_agarose:.0f} Pa ({m.G_agarose/1000:.1f} kPa)")
-        c2.write(f"**G_chitosan** = {m.G_chitosan:.0f} Pa ({m.G_chitosan/1000:.1f} kPa)")
+        c2.write(f"**G_crosslinked** = {m.G_chitosan:.0f} Pa ({m.G_chitosan/1000:.1f} kPa)")
         c3.write(f"**G_DN** = {m.G_DN:.0f} Pa ({m.G_DN/1000:.1f} kPa)")
 
     # ── Optimization Assessment ───────────────────────────────────────
