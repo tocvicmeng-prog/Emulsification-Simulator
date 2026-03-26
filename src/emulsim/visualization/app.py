@@ -105,8 +105,20 @@ xl = CROSSLINKERS[_xl_sel_key]
 st.sidebar.caption(f"{xl.mechanism} | k\u2080={xl.k_xlink_0:.1e} | Score: {xl.suitability}/10")
 
 c_genipin_mM = st.sidebar.slider("Crosslinker Concentration (mM)", 0.5, 10.0, 2.0, step=0.5)
-T_xlink_C = st.sidebar.slider("Crosslinking Temperature (°C)", 25, 50, 37)
-t_xlink_h = st.sidebar.slider("Crosslinking Time (hours)", 1, 48, 24)
+
+# Adapt slider defaults and ranges from crosslinker profile
+_T_xlink_default = int(xl.T_crosslink_default - 273.15)
+_t_xlink_default_h = max(1, int(xl.t_crosslink_default / 3600))
+T_xlink_C = st.sidebar.slider("Crosslinking Temperature (°C)", 0, 120,
+                                min(max(_T_xlink_default, 0), 120))
+t_xlink_h = st.sidebar.slider("Crosslinking Time (hours)", 1, 48,
+                                min(_t_xlink_default_h, 48))
+
+# UV intensity slider (only relevant for UV-initiated crosslinkers)
+if xl.kinetics_model == 'uv_dose':
+    uv_intensity = st.sidebar.slider("UV Intensity (mW/cm\u00b2)", 1.0, 100.0, 20.0, step=1.0)
+else:
+    uv_intensity = 0.0
 
 st.sidebar.subheader("Optimization Targets")
 target_d32 = st.sidebar.number_input("Target d32 (µm)", 0.5, 50.0, 2.0, step=0.5)
@@ -272,7 +284,10 @@ if run_btn:
         progress = st.progress(0, text="Level 1: Emulsification (PBE solver)...")
 
         try:
-            result = orch.run_single(params, l2_mode=l2_mode, props_overrides=_custom_props_overrides)
+            result = orch.run_single(params, l2_mode=l2_mode,
+                                     props_overrides=_custom_props_overrides,
+                                     crosslinker_key=_xl_sel_key,
+                                     uv_intensity=uv_intensity)
         except Exception as ex:
             st.error(f"Simulation failed: {ex}")
             st.stop()
@@ -440,8 +455,8 @@ if "result" in st.session_state:
 
     if obj[2] > 0.5:
         if m.G_DN / 1000 < target_G:
-            recs.append(f"**Increase genipin** or crosslinking time — G_DN ({m.G_DN/1000:.1f} kPa) below "
-                       f"target ({target_G} kPa). Current genipin is stoichiometry-limited at p={x.p_final:.1%}.")
+            recs.append(f"**Increase crosslinker concentration** or crosslinking time — G_DN ({m.G_DN/1000:.1f} kPa) below "
+                       f"target ({target_G} kPa). Current crosslinker is stoichiometry-limited at p={x.p_final:.1%}.")
         else:
             recs.append(f"**Reduce polymer concentration** — G_DN ({m.G_DN/1000:.1f} kPa) exceeds target ({target_G} kPa).")
 
@@ -497,5 +512,5 @@ if "result" in st.session_state:
 st.divider()
 st.caption(
     "EmulSim v0.1.0 — Multi-scale simulation for double-network polysaccharide hydrogel microspheres. "
-    "Pipeline: PBE (Alopaeus) → Cahn-Hilliard → Genipin ODE → Rubber Elasticity + Ogston."
+    "Pipeline: PBE (Alopaeus) → Cahn-Hilliard → Crosslinking kinetics → Rubber Elasticity + Ogston."
 )

@@ -89,15 +89,15 @@ def assess_trust(result: FullResult, params: SimulationParameters,
     # 6. Crosslinking stoichiometry-limited
     if x.p_final < 0.01:
         warnings.append(
-            f"Crosslinking fraction={x.p_final:.1%} -- very low, increase genipin concentration"
+            f"Crosslinking fraction={x.p_final:.1%} -- very low, increase crosslinker concentration"
         )
 
-    # 7. Genipin is limiting reagent
+    # 7. Crosslinker is limiting reagent
     NH2_total = params.formulation.c_chitosan * 1000 * props.DDA / props.M_GlcN
     if NH2_total > 0 and params.formulation.c_genipin / NH2_total < 0.05:
         warnings.append(
-            f"Genipin/NH2 ratio = {params.formulation.c_genipin/NH2_total:.3f} -- "
-            "genipin-limited, increasing crosslinking time will not help"
+            f"Crosslinker/NH2 ratio = {params.formulation.c_genipin/NH2_total:.3f} -- "
+            "crosslinker-limited, increasing crosslinking time will not help"
         )
 
     # 8. Mechanical properties unreasonable

@@ -37,7 +37,9 @@ class PipelineOrchestrator:
     def run_single(self, params: SimulationParameters,
                    phi_d: float = None,
                    l2_mode: str = 'empirical',
-                   props_overrides: dict | None = None) -> FullResult:
+                   props_overrides: dict | None = None,
+                   crosslinker_key: str = 'genipin',
+                   uv_intensity: float = 0.0) -> FullResult:
         """Execute the full pipeline for a single parameter set.
 
         Parameters
@@ -104,7 +106,8 @@ class PipelineOrchestrator:
                      gel_result.pore_size_mean * 1e9, gel_result.porosity, timings["L2"])
 
         # ── Level 3: Crosslinking Kinetics ───────────────────────────────
-        logger.info("L3: Crosslinking (genipin=%.1f mM, T=%.0f°C, t=%.0fh)",
+        logger.info("L3: Crosslinking (%s=%.1f mM, T=%.0f°C, t=%.0fh)",
+                     crosslinker_key,
                      params.formulation.c_genipin,
                      params.formulation.T_crosslink - 273.15,
                      params.formulation.t_crosslink / 3600)
@@ -113,6 +116,8 @@ class PipelineOrchestrator:
             params, props,
             R_droplet=R_droplet,
             porosity=gel_result.porosity,
+            crosslinker_key=crosslinker_key,
+            uv_intensity=uv_intensity,
         )
         timings["L3"] = time.perf_counter() - t0
         logger.info("L3 done: p=%.2f, G_chit=%.0f Pa, xi=%.1f nm (%.3fs)",
