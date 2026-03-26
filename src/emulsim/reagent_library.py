@@ -27,6 +27,12 @@ TPP:
 Epichlorohydrin:
     Zhao et al. (2020) Carbohydr. Polym. 227:115352
     Chen et al. (2016) Cellulose 23:631-639
+Divinyl Sulfone (DVS):
+    Porath et al. (1975) J. Chromatogr. 103:49-62
+    Mateo et al. (2006) Enzyme Microb. Technol. 39:274-280
+Citric Acid:
+    Demitri et al. (2008) J. Appl. Polym. Sci. 110:2453-2460
+    Reddy & Yang (2010) Food Chem. 118:702-711
 
 Surfactant references:
     Santini et al. (2007) Colloids Surf. A 298:12-21
@@ -288,6 +294,68 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "handling and thorough washing. Widely accepted in chromatography "
             "resin manufacturing with validated wash protocols. "
             "Cost: ~USD 0.02/g."
+        ),
+    ),
+    "dvs": CrosslinkerProfile(
+        name="Divinyl Sulfone (DVS)",
+        cas="77-77-0",
+        mechanism="michael_addition",
+        # DVS reacts with -OH groups via Michael addition under alkaline
+        # conditions (pH 11-12).  Porath et al. (1975) J. Chromatogr. 103:49.
+        # Rate is faster than ECH at equivalent pH — typically 1-2 h at 25°C.
+        # k0 estimated from published activation kinetics (Mateo et al. 2006,
+        # Enzyme Microb. Technol. 39:274).
+        k_xlink_0=5000.0,      # [m³/(mol·s)] [estimated]
+        E_a_xlink=55000.0,     # [J/mol] [estimated from ECH analogy]
+        # DVS produces highly efficient ether-sulfone bridges between
+        # polysaccharide chains — virtually every reaction creates a crosslink.
+        f_bridge=0.70,
+        T_crosslink_default=298.15,  # 25 degC (room temperature, alkaline)
+        t_crosslink_default=7200.0,   # 2 h
+        kinetics_model="second_order",
+        suitability=9,
+        notes=(
+            "Industry standard for high-performance agarose chromatography "
+            "media (Sepharose HP, Sepharose CL). Reacts with -OH groups "
+            "under alkaline conditions (pH 11-12, 0.5 M NaOH + 0.5 M "
+            "Na2CO3). Produces vinyl sulfone ether bridges that are "
+            "extremely stable (resistant to acid, base, urea, guanidine). "
+            "Superior rigidity and flow rate vs uncrosslinked or ECH-"
+            "crosslinked agarose. TOXIC and LACHRYMATORY — handle in fume "
+            "hood with respiratory protection. Well-validated wash protocols "
+            "in chromatography resin manufacturing. "
+            "Ref: Porath et al. (1975) J. Chromatogr. 103:49-62. "
+            "Cost: ~USD 0.50/g (Sigma-Aldrich V3700)."
+        ),
+    ),
+    "citric_acid": CrosslinkerProfile(
+        name="Citric Acid",
+        cas="77-92-9",
+        mechanism="ester_bond",
+        # Citric acid crosslinks -NH2 and -OH groups via ester/amide bond
+        # formation under heat (80-120°C).  Reddy & Yang (2010) Food Chem.
+        # 118:702.  Reaction requires elevated temperature and is slow at RT.
+        # k0 estimated from cure kinetics in Demitri et al. (2008).
+        k_xlink_0=50.0,        # [m³/(mol·s)] [estimated, heat-activated]
+        E_a_xlink=80000.0,     # [J/mol] [estimated — high Ea due to ester formation]
+        # Trifunctional (3 COOH groups) but steric hindrance limits bridge
+        # formation — many pendant carboxyls remain unreacted.
+        f_bridge=0.25,
+        T_crosslink_default=353.15,  # 80 degC (heat cure)
+        t_crosslink_default=14400.0,  # 4 h
+        kinetics_model="second_order",
+        suitability=5,
+        notes=(
+            "Green chemistry crosslinker — cheap, non-toxic, FDA GRAS. "
+            "Trifunctional (3 COOH groups) forms ester bonds with -OH and "
+            "amide bonds with -NH2 under heat (80-120°C). CAUTION: heat "
+            "cure at 80°C+ may partially melt agarose gel if performed "
+            "before cooling below T_gel. Ester bonds are hydrolytically "
+            "unstable at pH > 10 or < 3 — limits use in strong ion-exchange "
+            "chromatography regeneration protocols. Suitable for "
+            "single-use or mild-condition applications. "
+            "Ref: Demitri et al. (2008) J. Appl. Polym. Sci. 110:2453. "
+            "Cost: ~USD 0.01/g (commodity chemical)."
         ),
     ),
 }
