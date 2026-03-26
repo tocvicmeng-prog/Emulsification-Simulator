@@ -84,6 +84,38 @@ target_d32 = st.sidebar.number_input("Target d32 (µm)", 0.5, 50.0, 2.0, step=0.
 target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 80, step=10)
 target_G = st.sidebar.number_input("Target G_DN (kPa)", 1.0, 500.0, 10.0, step=1.0)
 
+# ─── Material Constants Source ────────────────────────────────────────────
+
+st.sidebar.divider()
+st.sidebar.subheader("Material Constants")
+const_source = st.sidebar.radio(
+    "Constants source",
+    ["Literature values (default)", "Custom (from your wet-lab calibration)"],
+    index=0,
+    help="Literature: peer-reviewed estimates. Custom: enter your own measured values.",
+)
+
+from emulsim.literature_constants import ALL_CONSTANTS
+
+if "Custom" in const_source:
+    st.sidebar.caption("Enter your calibrated values:")
+    custom_K_L = st.sidebar.number_input("K_L (m³/mol)", 0.01, 10.0, 0.75, step=0.05, format="%.3f")
+    custom_Gamma_inf = st.sidebar.number_input("Γ∞ (×10⁻⁶ mol/m²)", 1.0, 10.0, 3.5, step=0.1)
+    custom_eta_chit = st.sidebar.number_input("[η] chitosan (mL/g)", 100.0, 2000.0, 800.0, step=50.0)
+    custom_C3 = st.sidebar.number_input("Breakage C3", 0.0, 1.0, 0.0, step=0.05, format="%.2f")
+    custom_eta_coup = st.sidebar.number_input("η coupling", -0.5, 0.5, -0.15, step=0.05, format="%.2f")
+else:
+    custom_K_L = ALL_CONSTANTS["K_L"].value
+    custom_Gamma_inf = ALL_CONSTANTS["Gamma_inf"].value * 1e6  # display units
+    custom_eta_chit = ALL_CONSTANTS["eta_intr_chit"].value
+    custom_C3 = ALL_CONSTANTS["breakage_C3"].value
+    custom_eta_coup = ALL_CONSTANTS["eta_coupling"].value
+    with st.sidebar.expander("View literature sources"):
+        for name, lv in ALL_CONSTANTS.items():
+            st.sidebar.caption(f"**{name}** = {lv.value} {lv.unit}")
+            st.sidebar.caption(f"  {lv.confidence} confidence | {lv.source[:50]}...")
+            st.sidebar.caption(f"  Match: {lv.system_match[:50]}")
+
 # ─── Build Parameters ─────────────────────────────────────────────────────
 
 params = SimulationParameters(
@@ -105,6 +137,13 @@ params = SimulationParameters(
     ),
     solver=SolverSettings(l2_n_grid=grid_size),
 )
+
+# Apply custom/literature material constants
+from emulsim.datatypes import MaterialProperties as _MP
+_custom_props_overrides = {
+    "breakage_C3": custom_C3,
+    "eta_coupling": custom_eta_coup,
+}
 
 # ─── Run Simulation ───────────────────────────────────────────────────────
 
