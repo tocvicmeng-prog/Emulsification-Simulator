@@ -36,13 +36,19 @@ class PipelineOrchestrator:
 
     def run_single(self, params: SimulationParameters,
                    phi_d: float = None,
-                   l2_mode: str = 'empirical') -> FullResult:
+                   l2_mode: str = 'empirical',
+                   props_overrides: dict | None = None) -> FullResult:
         """Execute the full pipeline for a single parameter set.
 
         Parameters
         ----------
         l2_mode : str
             'empirical' (default) or 'ch_2d' for mechanistic phase-field.
+        props_overrides : dict, optional
+            Key-value pairs to override on the MaterialProperties object
+            after it is built from the PropertyDatabase.  Used by the UI
+            to inject reagent-library parameters (e.g. crosslinker kinetics,
+            pre-computed IFT).
         """
         errors = params.validate()
         if errors:
@@ -64,6 +70,11 @@ class PipelineOrchestrator:
             c_chitosan=params.formulation.c_chitosan,
             c_span80=params.formulation.c_span80,
         )
+
+        # Apply caller-supplied overrides (reagent library selections, etc.)
+        if props_overrides:
+            for k, v in props_overrides.items():
+                setattr(props, k, v)
 
         # ── Level 1: Emulsification ──────────────────────────────────────
         logger.info("L1: Emulsification (RPM=%.0f)", params.emulsification.rpm)

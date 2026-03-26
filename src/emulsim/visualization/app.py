@@ -21,6 +21,7 @@ from emulsim.datatypes import SimulationParameters, MaterialProperties, Formulat
 from emulsim.properties.database import PropertyDatabase
 from emulsim.pipeline.orchestrator import PipelineOrchestrator
 from emulsim.trust import assess_trust
+from emulsim.reagent_library import SURFACTANTS, CROSSLINKERS
 from emulsim.visualization.plots import (
     plot_droplet_size_distribution,
     plot_phase_field,
@@ -51,13 +52,27 @@ t_emul = st.sidebar.number_input("Emulsification Time (min)", 1, 60, 10)
 phi_d = st.sidebar.slider("Dispersed Phase Fraction (φ_d)", 0.01, 0.30, 0.05, step=0.01)
 
 st.sidebar.subheader("Formulation")
+
+# Surfactant selector
+_surf_keys = list(SURFACTANTS.keys())
+_surf_names = [SURFACTANTS[k].name for k in _surf_keys]
+_surf_sel_name = st.sidebar.selectbox(
+    "Surfactant",
+    _surf_names,
+    index=_surf_keys.index("span80"),
+    help="Select surfactant for W/O emulsification",
+)
+_surf_sel_key = _surf_keys[_surf_names.index(_surf_sel_name)]
+surf = SURFACTANTS[_surf_sel_key]
+st.sidebar.caption(f"HLB={surf.hlb} | MW={surf.mw} g/mol | {surf.notes[:60]}")
+
 col1, col2 = st.sidebar.columns(2)
 with col1:
     c_agarose_pct = st.number_input("Agarose (% w/v)", 1.0, 10.0, 4.2, step=0.1)
 with col2:
     c_chitosan_pct = st.number_input("Chitosan (% w/v)", 0.5, 5.0, 1.8, step=0.1)
 
-c_span80_pct = st.sidebar.slider("Span-80 (% w/v)", 0.5, 5.0, 2.0, step=0.1)
+c_span80_pct = st.sidebar.slider("Surfactant (% w/v)", 0.5, 5.0, 2.0, step=0.1)
 T_oil_C = st.sidebar.slider("Oil Temperature (°C)", 60, 95, 90)
 
 st.sidebar.subheader("Cooling & Gelation (L2)")
@@ -75,7 +90,21 @@ if l2_mode == "ch_2d":
     grid_size = st.sidebar.select_slider("Phase-Field Grid", [32, 64, 128], value=64)
 
 st.sidebar.subheader("Crosslinking (L3)")
-c_genipin_mM = st.sidebar.slider("Genipin Concentration (mM)", 0.5, 10.0, 2.0, step=0.5)
+
+# Crosslinker selector
+_xl_keys = list(CROSSLINKERS.keys())
+_xl_names = [CROSSLINKERS[k].name for k in _xl_keys]
+_xl_sel_name = st.sidebar.selectbox(
+    "Crosslinker",
+    _xl_names,
+    index=_xl_keys.index("genipin"),
+    help="Select crosslinking agent",
+)
+_xl_sel_key = _xl_keys[_xl_names.index(_xl_sel_name)]
+xl = CROSSLINKERS[_xl_sel_key]
+st.sidebar.caption(f"{xl.mechanism} | k\u2080={xl.k_xlink_0:.1e} | Score: {xl.suitability}/10")
+
+c_genipin_mM = st.sidebar.slider("Crosslinker Concentration (mM)", 0.5, 10.0, 2.0, step=0.5)
 T_xlink_C = st.sidebar.slider("Crosslinking Temperature (°C)", 25, 50, 37)
 t_xlink_h = st.sidebar.slider("Crosslinking Time (hours)", 1, 48, 24)
 
@@ -207,6 +236,25 @@ _custom_props_overrides = {
     "eta_coupling": custom_eta_coup,
 }
 
+# ─── Build reagent-library overrides ─────────────────────────────────
+
+# Crosslinker overrides (Level 3 kinetics)
+_custom_props_overrides['k_xlink_0'] = xl.k_xlink_0
+_custom_props_overrides['E_a_xlink'] = xl.E_a_xlink
+_custom_props_overrides['f_bridge'] = xl.f_bridge
+
+# Surfactant IFT override: compute sigma from the selected surfactant's
+# Szyszkowski-Langmuir parameters so Level 1 uses the correct IFT.
+_R_gas = 8.314
+_T_ift = T_oil_C + 273.15
+_c_mol_ift = c_span80_pct * 10.0 / surf.mw * 1000.0  # kg/m3 -> mol/m3
+_sigma_0_T = max(surf.sigma_0_paraffin - 1.0e-4 * (_T_ift - 293.15), 0.001)
+_sigma_calc = max(
+    _sigma_0_T - _R_gas * _T_ift * surf.gamma_inf * np.log(1 + surf.K_L * _c_mol_ift),
+    1e-4,
+)
+_custom_props_overrides['sigma'] = _sigma_calc
+
 # ─── Run Simulation ───────────────────────────────────────────────────────
 
 st.divider()
@@ -224,7 +272,7 @@ if run_btn:
         progress = st.progress(0, text="Level 1: Emulsification (PBE solver)...")
 
         try:
-            result = orch.run_single(params, l2_mode=l2_mode)
+            result = orch.run_single(params, l2_mode=l2_mode, props_overrides=_custom_props_overrides)
         except Exception as ex:
             st.error(f"Simulation failed: {ex}")
             st.stop()
