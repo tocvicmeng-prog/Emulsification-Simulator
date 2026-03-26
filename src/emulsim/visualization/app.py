@@ -84,37 +84,58 @@ target_d32 = st.sidebar.number_input("Target d32 (µm)", 0.5, 50.0, 2.0, step=0.
 target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 80, step=10)
 target_G = st.sidebar.number_input("Target G_DN (kPa)", 1.0, 500.0, 10.0, step=1.0)
 
-# ─── Material Constants Source ────────────────────────────────────────────
+# ─── Material Constants (per-constant Literature / Custom toggle) ─────────
 
 st.sidebar.divider()
 st.sidebar.subheader("Material Constants")
-const_source = st.sidebar.radio(
-    "Constants source",
-    ["Literature values (default)", "Custom (from your wet-lab calibration)"],
-    index=0,
-    help="Literature: peer-reviewed estimates. Custom: enter your own measured values.",
-)
+st.sidebar.caption("For each constant: use the literature value or enter your own.")
 
 from emulsim.literature_constants import ALL_CONSTANTS
 
-if "Custom" in const_source:
-    st.sidebar.caption("Enter your calibrated values:")
-    custom_K_L = st.sidebar.number_input("K_L (m³/mol)", 0.01, 10.0, 0.75, step=0.05, format="%.3f")
-    custom_Gamma_inf = st.sidebar.number_input("Γ∞ (×10⁻⁶ mol/m²)", 1.0, 10.0, 3.5, step=0.1)
-    custom_eta_chit = st.sidebar.number_input("[η] chitosan (mL/g)", 100.0, 2000.0, 800.0, step=50.0)
-    custom_C3 = st.sidebar.number_input("Breakage C3", 0.0, 1.0, 0.0, step=0.05, format="%.2f")
-    custom_eta_coup = st.sidebar.number_input("η coupling", -0.5, 0.5, -0.15, step=0.05, format="%.2f")
-else:
-    custom_K_L = ALL_CONSTANTS["K_L"].value
-    custom_Gamma_inf = ALL_CONSTANTS["Gamma_inf"].value * 1e6  # display units
-    custom_eta_chit = ALL_CONSTANTS["eta_intr_chit"].value
-    custom_C3 = ALL_CONSTANTS["breakage_C3"].value
-    custom_eta_coup = ALL_CONSTANTS["eta_coupling"].value
-    with st.sidebar.expander("View literature sources"):
-        for name, lv in ALL_CONSTANTS.items():
-            st.sidebar.caption(f"**{name}** = {lv.value} {lv.unit}")
-            st.sidebar.caption(f"  {lv.confidence} confidence | {lv.source[:50]}...")
-            st.sidebar.caption(f"  Match: {lv.system_match[:50]}")
+def _const_input(label, key, lit_val, unit, source_short, lo, hi, step, fmt="%.3f"):
+    """Render a per-constant Literature/Custom selector."""
+    src = st.sidebar.radio(
+        label,
+        ["Literature", "Custom"],
+        index=0, horizontal=True, key=f"src_{key}",
+    )
+    if src == "Literature":
+        st.sidebar.caption(f"  = {lit_val} {unit}  ({source_short})")
+        return lit_val
+    else:
+        return st.sidebar.number_input(
+            f"{label} ({unit})", lo, hi, float(lit_val), step=step, format=fmt, key=f"val_{key}",
+        )
+
+_kl = ALL_CONSTANTS["K_L"]
+custom_K_L = _const_input(
+    "K_L (Span-80 adsorption)", "K_L",
+    _kl.value, "m³/mol", "Santini 2007", 0.01, 10.0, 0.05,
+)
+
+_gi = ALL_CONSTANTS["Gamma_inf"]
+custom_Gamma_inf = _const_input(
+    "Γ∞ (max surface excess)", "Gamma_inf",
+    _gi.value * 1e6, "×10⁻⁶ mol/m²", "Santini 2007", 1.0, 10.0, 0.1, "%.1f",
+)
+
+_ec = ALL_CONSTANTS["eta_intr_chit"]
+custom_eta_chit = _const_input(
+    "[η] chitosan", "eta_chit",
+    _ec.value, "mL/g", "Rinaudo 1993", 100.0, 2000.0, 50.0, "%.0f",
+)
+
+_c3 = ALL_CONSTANTS["breakage_C3"]
+custom_C3 = _const_input(
+    "C3 (viscous breakage)", "C3",
+    _c3.value, "-", "Alopaeus 2002", 0.0, 1.0, 0.05, "%.2f",
+)
+
+_et = ALL_CONSTANTS["eta_coupling"]
+custom_eta_coup = _const_input(
+    "η coupling (IPN)", "eta_coup",
+    _et.value, "-", "Gong 2010 est.", -0.5, 0.5, 0.05, "%.2f",
+)
 
 # ─── Build Parameters ─────────────────────────────────────────────────────
 
