@@ -121,7 +121,8 @@ def water_viscosity(T: float) -> float:
 
 
 def solution_viscosity(T: float, c_agarose: float, c_chitosan: float,
-                       M_w_agarose: float = 120000.0) -> float:
+                       M_w_agarose: float = 120000.0,
+                       eta_intr_chit: float = 800.0) -> float:
     """Total dispersed phase viscosity [Pa·s] for agarose + chitosan solution.
 
     Uses Mark-Houwink for intrinsic viscosity, Martin equation for
@@ -164,9 +165,8 @@ def solution_viscosity(T: float, c_agarose: float, c_chitosan: float,
     mu_agarose = mu_water * (1.0 + eta_sp_agar)
 
     # Chitosan contribution
-    # Intrinsic viscosity of chitosan ~5-15 dL/g (500-1500 mL/g) depending on MW and DD
-    # Use typical value for high-DD chitosan (~300 kDa): [eta] ~ 800 mL/g
-    eta_intr_chit = 800.0  # mL/g (typical high-MW, high-DD chitosan)
+    # eta_intr_chit: intrinsic viscosity in mL/g (default 800 for high-MW, high-DD chitosan)
+    # Can be overridden with user-measured value from dilute-solution viscometry
     c_eta_chit = c_chit_g_ml * eta_intr_chit
 
     if c_eta_chit > 1.0:

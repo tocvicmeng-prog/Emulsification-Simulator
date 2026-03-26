@@ -73,7 +73,8 @@ class PropertyDatabase:
             Shear rate [1/s].  If > 0, apply Cross model correction.
         """
         from .viscosity import solution_viscosity
-        mu_0 = solution_viscosity(T, c_agarose, c_chitosan)
+        mu_0 = solution_viscosity(T, c_agarose, c_chitosan,
+                                   eta_intr_chit=self.props.eta_intr_chit)
         if shear_rate > 0:
             from .viscosity import cross_model_correction
             return cross_model_correction(mu_0, shear_rate)

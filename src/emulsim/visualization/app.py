@@ -269,11 +269,9 @@ _sigma_calc = max(
 )
 _custom_props_overrides['sigma'] = _sigma_calc
 
-# Chitosan viscosity override (used by viscosity model via mu_d)
-# Note: mu_d is computed by PropertyDatabase.update_for_conditions() using
-# the hardcoded eta_intr_chit=800. To use the custom value, we'd need to
-# recompute mu_d here. For now, store as a note — full integration requires
-# making eta_intr_chit a MaterialProperties field.
+# Chitosan intrinsic viscosity override — now a MaterialProperties field,
+# so the PropertyDatabase will use it when computing dispersed phase viscosity.
+_custom_props_overrides['eta_intr_chit'] = custom_eta_chit
 
 # ─── Run Simulation ───────────────────────────────────────────────────────
 
@@ -308,12 +306,15 @@ if run_btn:
     st.session_state["params"] = params
     st.session_state["targets"] = (target_d32, target_pore, target_G)
 
-    # Compute trust assessment
+    # Compute trust assessment using the same overrides as the simulation
     db_trust = PropertyDatabase()
     props_trust = db_trust.update_for_conditions(
         params.formulation.T_oil, params.formulation.c_agarose,
         params.formulation.c_chitosan, params.formulation.c_span80,
     )
+    for _k, _v in _custom_props_overrides.items():
+        if hasattr(props_trust, _k):
+            setattr(props_trust, _k, _v)
     st.session_state["trust"] = assess_trust(result, params, props_trust,
                                                 crosslinker_key=_xl_sel_key)
 

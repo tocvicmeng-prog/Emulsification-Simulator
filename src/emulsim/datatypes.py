@@ -217,6 +217,9 @@ class MaterialProperties:
     # IPN coupling
     eta_coupling: float = -0.15        # IPN coupling coefficient
 
+    # Chitosan viscosity
+    eta_intr_chit: float = 800.0       # [mL/g] intrinsic viscosity of chitosan
+
     # Breakage kernel
     breakage_C3: float = 0.0           # [-] Alopaeus viscous correction constant.
                                         # C3=0.0 disables viscous correction.
