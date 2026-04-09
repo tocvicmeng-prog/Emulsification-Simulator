@@ -34,7 +34,7 @@ def agarose_modulus(c_agarose: float, G_prefactor: float = 3000.0,
 
 def double_network_modulus(G_agarose: float, G_chitosan: float,
                            eta_coupling: float = -0.15) -> float:
-    """IPN modulus with coupling term [Pa].
+    """Phenomenological IPN modulus with coupling term [Pa].
 
     G_DN = G1 + G2 + eta * sqrt(G1 * G2)
 
@@ -46,6 +46,60 @@ def double_network_modulus(G_agarose: float, G_chitosan: float,
     """
     G_cross = eta_coupling * np.sqrt(max(G_agarose, 0) * max(G_chitosan, 0))
     return max(G_agarose + G_chitosan + G_cross, 0.0)
+
+
+def ionic_gel_modulus(G_agarose: float, G_ionic: float,
+                      f_ionic_strength: float = 0.3) -> float:
+    """Modulus estimate for ionic (reversible) crosslinked gels [Pa].
+
+    Ionic bonds are weaker and reversible. The ionic network provides
+    only partial reinforcement, modeled as reduced additive contribution.
+    """
+    return max(G_agarose + f_ionic_strength * G_ionic, 0.0)
+
+
+def triple_network_modulus(G_agarose: float, G_chitosan_inherent: float,
+                            G_independent: float, eta_12: float = -0.15,
+                            eta_13: float = 0.0) -> float:
+    """Modulus estimate for triple-network (agarose + chitosan + PEGDA) [Pa].
+
+    The independent network (PEGDA) adds linearly with no coupling to
+    the agarose-chitosan IPN. eta_13 = 0 by default (no interaction).
+    """
+    G_ipn = double_network_modulus(G_agarose, G_chitosan_inherent, eta_12)
+    G_cross_13 = eta_13 * np.sqrt(max(G_ipn, 0) * max(G_independent, 0))
+    return max(G_ipn + G_independent + G_cross_13, 0.0)
+
+
+def select_modulus_model(G_agarose: float, G_xlink: float,
+                          network_metadata=None,
+                          eta_coupling: float = -0.15) -> float:
+    """Route to the appropriate modulus model based on network metadata.
+
+    Falls back to phenomenological DN modulus if no metadata provided.
+    """
+    if network_metadata is None:
+        return double_network_modulus(G_agarose, G_xlink, eta_coupling)
+
+    family = getattr(network_metadata, 'solver_family', 'amine_covalent')
+
+    if family == "ionic_reversible":
+        return ionic_gel_modulus(G_agarose, G_xlink)
+    elif family == "independent_network":
+        # PEGDA forms a third network; agarose modulus is already the base,
+        # G_xlink here is the independent PEGDA network modulus.
+        # Use triple_network with zero chitosan contribution.
+        return triple_network_modulus(G_agarose, 0.0, G_xlink, eta_13=0.0)
+    elif family == "hydroxyl_covalent":
+        # Hydroxyl crosslinkers bridge BOTH networks (synergistic coupling)
+        eta_syn = getattr(network_metadata, 'eta_coupling_recommended', +0.05)
+        if hasattr(network_metadata, 'eta_coupling_recommended'):
+            # Not available on NetworkTypeMetadata, use from CrosslinkerProfile
+            pass
+        return double_network_modulus(G_agarose, G_xlink, eta_coupling=+0.05)
+    else:
+        # amine_covalent and default
+        return double_network_modulus(G_agarose, G_xlink, eta_coupling)
 
 
 def effective_youngs_modulus(G: float, nu: float = 0.45) -> float:
@@ -142,16 +196,14 @@ def solve_mechanical(params: SimulationParameters,
         props.G_agarose_exponent,
     )
 
-    # Chitosan network modulus from crosslinking.
-    # NOTE: G_chitosan_final represents the crosslinked network modulus regardless
-    # of which polymer it actually targets (chitosan-NH2, agarose-OH, or independent
-    # PEGDA network).  This is a known simplification -- the DN model
-    # G_DN = G_agar + G_xlink + eta*sqrt(G_agar*G_xlink) still works because the
-    # coupling term captures the interaction between the two interpenetrating networks.
-    G_chit = crosslinking.G_chitosan_final
+    # Crosslinked network modulus from L3
+    G_xlink = crosslinking.G_chitosan_final
 
-    # Double-network modulus with IPN coupling
-    G_DN = double_network_modulus(G_agar, G_chit, props.eta_coupling)
+    # Route to appropriate modulus model based on network metadata from L3.
+    # If metadata is available, the model accounts for chemistry-specific
+    # coupling (amine vs hydroxyl vs ionic vs independent PEGDA).
+    network_meta = getattr(crosslinking, 'network_metadata', None)
+    G_DN = select_modulus_model(G_agar, G_xlink, network_meta, props.eta_coupling)
 
     # Effective Young's modulus
     E_star = effective_youngs_modulus(G_DN)

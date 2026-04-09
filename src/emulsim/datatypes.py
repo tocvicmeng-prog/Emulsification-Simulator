@@ -824,6 +824,15 @@ class GelationResult:
 
 
 @dataclass
+class NetworkTypeMetadata:
+    """Describes what network was formed by crosslinking."""
+    solver_family: str = "amine_covalent"
+    network_target: str = "chitosan"      # "chitosan", "agarose", "independent", "mixed"
+    bond_type: str = "covalent"           # "covalent", "ionic", "reversible"
+    is_true_second_network: bool = True   # True for IPN, False for reinforcement
+
+
+@dataclass
 class CrosslinkingResult:
     """Output of Level 3: ODE kinetics."""
     t_array: np.ndarray                 # [s] (N_t,)
@@ -837,6 +846,7 @@ class CrosslinkingResult:
     Mc_final: float                     # [g/mol]
     xi_final: float                     # [m]
     G_chitosan_final: float             # [Pa]
+    network_metadata: Optional[NetworkTypeMetadata] = None
 
 
 @dataclass

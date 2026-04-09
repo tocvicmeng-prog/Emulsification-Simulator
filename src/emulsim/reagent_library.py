@@ -66,6 +66,11 @@ class CrosslinkerProfile:
     kinetics_model: str  # "second_order", "michaelis_menten", "uv_dose", "ionic_instant"
     suitability: int  # 1-10, overall suitability for agarose-chitosan chromatography beads
     notes: str
+    # ── Per-family routing metadata (L3 chemistry split) ──────────────
+    solver_family: str = "amine_covalent"  # "amine_covalent", "hydroxyl_covalent", "ionic_reversible", "independent_network"
+    network_target: str = "chitosan"       # "chitosan", "agarose", "independent", "mixed"
+    reversible: bool = False
+    eta_coupling_recommended: float = -0.15  # per-chemistry IPN coupling coefficient
 
 
 @dataclass
@@ -149,6 +154,8 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "For chromatography: residual glutaraldehyde may leach and "
             "modify bound proteins — significant concern for bioprocessing."
         ),
+        # defaults: solver_family="amine_covalent", network_target="chitosan",
+        # reversible=False, eta_coupling_recommended=-0.15
     ),
     # ── 3. EDC/NHS (carbodiimide) ─────────────────────────────────────────
     "edc_nhs": CrosslinkerProfile(
@@ -185,6 +192,7 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "to standard chitosan without formulation changes. Does not "
             "interfere with agarose helices. Cost moderate (~USD 1-3/g EDC)."
         ),
+        eta_coupling_recommended=-0.10,
     ),
     # ── 4. PEGDA + UV ─────────────────────────────────────────────────────
     "pegda_uv": CrosslinkerProfile(
@@ -220,6 +228,9 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "Simulation needs UV dose model: k_eff = k0 * (I_UV)^0.5 * "
             "exp(-mu*r) where mu is optical attenuation. Cost: ~USD 0.5/g."
         ),
+        solver_family="independent_network",
+        network_target="independent",
+        eta_coupling_recommended=0.0,
     ),
     # ── 5. Sodium tripolyphosphate (TPP) ──────────────────────────────────
     "tpp": CrosslinkerProfile(
@@ -255,6 +266,9 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "equilibrium model rather than irreversible kinetics. "
             "Cost: ~USD 0.01/g."
         ),
+        solver_family="ionic_reversible",
+        reversible=True,
+        eta_coupling_recommended=-0.05,
     ),
     # ── 6. Epichlorohydrin ────────────────────────────────────────────────
     "epichlorohydrin": CrosslinkerProfile(
@@ -295,6 +309,9 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "resin manufacturing with validated wash protocols. "
             "Cost: ~USD 0.02/g."
         ),
+        solver_family="hydroxyl_covalent",
+        network_target="mixed",
+        eta_coupling_recommended=0.05,
     ),
     "dvs": CrosslinkerProfile(
         name="Divinyl Sulfone (DVS)",
@@ -327,6 +344,9 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "Ref: Porath et al. (1975) J. Chromatogr. 103:49-62. "
             "Cost: ~USD 0.50/g (Sigma-Aldrich V3700)."
         ),
+        solver_family="hydroxyl_covalent",
+        network_target="mixed",
+        eta_coupling_recommended=0.10,
     ),
     "citric_acid": CrosslinkerProfile(
         name="Citric Acid",

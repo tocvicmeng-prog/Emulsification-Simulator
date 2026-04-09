@@ -24,7 +24,12 @@ from typing import Optional
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from ..datatypes import CrosslinkingResult, MaterialProperties, SimulationParameters
+from ..datatypes import (
+    CrosslinkingResult,
+    MaterialProperties,
+    NetworkTypeMetadata,
+    SimulationParameters,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -581,15 +586,40 @@ def solve_crosslinking(params: SimulationParameters,
         raise ValueError(f"Unknown crosslinker_key: {crosslinker_key!r}. "
                          f"Valid keys: {list(CROSSLINKERS.keys())}")
 
+    # ── Dispatch to mechanism-specific solver ──────────────────────────
     if xl.kinetics_model == 'second_order':
         if xl.mechanism in _HYDROXYL_MECHANISMS:
-            return _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity)
+            result = _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity)
+            metadata = NetworkTypeMetadata(
+                solver_family="hydroxyl_covalent",
+                network_target="mixed",
+                bond_type="covalent",
+                is_true_second_network=True,
+            )
         else:
-            return _solve_second_order_amine(params, props, xl, R_droplet, porosity)
+            result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
+            metadata = NetworkTypeMetadata(
+                solver_family="amine_covalent",
+                network_target="chitosan",
+                bond_type="covalent",
+                is_true_second_network=True,
+            )
     elif xl.kinetics_model == 'uv_dose':
-        return _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity)
+        result = _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity)
+        metadata = NetworkTypeMetadata(
+            solver_family="independent_network",
+            network_target="independent",
+            bond_type="covalent",
+            is_true_second_network=True,
+        )
     elif xl.kinetics_model == 'ionic_instant':
-        return _solve_ionic_instant(params, props, xl, R_droplet, porosity)
+        result = _solve_ionic_instant(params, props, xl, R_droplet, porosity)
+        metadata = NetworkTypeMetadata(
+            solver_family="ionic_reversible",
+            network_target="chitosan",
+            bond_type="ionic",
+            is_true_second_network=False,
+        )
     elif xl.kinetics_model == 'michaelis_menten':
         # Michaelis-Menten crosslinkers (e.g. EDC/NHS) fall back to
         # second-order amine kinetics as an approximation until a
@@ -599,6 +629,16 @@ def solve_crosslinking(params: SimulationParameters,
                     "NOTE: results are approximate -- EDC/NHS kinetics involve "
                     "competitive hydrolysis not captured by simple second-order model.",
                     crosslinker_key)
-        return _solve_second_order_amine(params, props, xl, R_droplet, porosity)
+        result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
+        metadata = NetworkTypeMetadata(
+            solver_family="amine_covalent",
+            network_target="chitosan",
+            bond_type="covalent",
+            is_true_second_network=True,
+        )
     else:
         raise ValueError(f"Unknown kinetics model: {xl.kinetics_model}")
+
+    # Attach per-chemistry network metadata to result
+    result.network_metadata = metadata
+    return result
