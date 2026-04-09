@@ -17,14 +17,26 @@ _root = Path(__file__).resolve().parents[3]
 if str(_root / "src") not in sys.path:
     sys.path.insert(0, str(_root / "src"))
 
-# Force reload of core modules to avoid Streamlit's import cache
+# Force reload of ALL core modules to avoid Streamlit's import cache.
+# Order matters: reload dependencies before dependents.
 import importlib
 import emulsim.datatypes as _dt_mod; importlib.reload(_dt_mod)
+import emulsim.level1_emulsification.thermal as _th_mod; importlib.reload(_th_mod)
+import emulsim.level1_emulsification.energy as _en_mod; importlib.reload(_en_mod)
+import emulsim.level1_emulsification.kernels as _kr_mod; importlib.reload(_kr_mod)
+import emulsim.level1_emulsification.validation as _vl_mod; importlib.reload(_vl_mod)
+import emulsim.level1_emulsification.solver as _sv_mod; importlib.reload(_sv_mod)
+import emulsim.properties.database as _db_mod; importlib.reload(_db_mod)
 import emulsim.pipeline.orchestrator as _orch_mod; importlib.reload(_orch_mod)
 import emulsim.trust as _trust_mod; importlib.reload(_trust_mod)
 import emulsim.level3_crosslinking.solver as _xl_mod; importlib.reload(_xl_mod)
 
-from emulsim.datatypes import SimulationParameters, MaterialProperties, FormulationParameters, EmulsificationParameters, MixerGeometry, SolverSettings
+from emulsim.datatypes import (
+    SimulationParameters, MaterialProperties, FormulationParameters,
+    EmulsificationParameters, MixerGeometry, SolverSettings,
+    VesselGeometry, StirrerGeometry, HeatingConfig, KernelConfig,
+    VesselType, StirrerType, HeatingStrategy,
+)
 from emulsim.properties.database import PropertyDatabase
 from emulsim.pipeline.orchestrator import PipelineOrchestrator
 from emulsim.trust import assess_trust
@@ -51,12 +63,62 @@ st.caption("Multi-scale simulation: Emulsification → Gelation → Crosslinking
 
 # ─── Sidebar: Parameter Input ─────────────────────────────────────────────
 
-st.sidebar.header("⚙️ Process Parameters")
+st.sidebar.header("Process Parameters")
+
+# ── Mode Selection ──
+sim_mode = st.sidebar.radio(
+    "Hardware Mode",
+    ["Rotor-Stator (Legacy)", "Stirred Vessel (New)"],
+    index=0,
+    help="Legacy: 25 mm rotor-stator at 3k-25k RPM. "
+         "Stirred Vessel: pitched-blade or small rotor-stator at 800-9000 RPM.",
+)
+is_stirred = "Stirred" in sim_mode
 
 st.sidebar.subheader("Emulsification (L1)")
-rpm = st.sidebar.slider("Rotor Speed (RPM)", 3000, 25000, 10000, step=500)
-t_emul = st.sidebar.number_input("Emulsification Time (min)", 1, 60, 10)
-phi_d = st.sidebar.slider("Dispersed Phase Fraction (φ_d)", 0.01, 0.30, 0.05, step=0.01)
+
+if is_stirred:
+    # ── Stirred-vessel controls ──
+    vessel_choice = st.sidebar.selectbox(
+        "Vessel", ["Glass Beaker (100 mm)", "Jacketed Vessel (92 mm)"],
+        help="Beaker: flat-plate heating. Jacketed: hot-water circulation.",
+    )
+    stirrer_choice = st.sidebar.selectbox(
+        "Stirrer", ["Stirrer A - Pitched Blade (59 mm)", "Stirrer B - Rotor-Stator (32 mm)"],
+    )
+    is_stirrer_A = "Pitched" in stirrer_choice
+
+    if is_stirrer_A:
+        rpm = st.sidebar.slider("Stirrer Speed (RPM)", 800, 2000, 1300, step=50)
+    else:
+        rpm = st.sidebar.slider("Stirrer Speed (RPM)", 800, 9000, 1800, step=100)
+
+    t_emul = st.sidebar.number_input("Emulsification Time (min)", 1, 60, 10)
+
+    # Volumes
+    st.sidebar.caption("Working liquid volumes")
+    v_oil_mL = st.sidebar.slider("Oil + Span-80 (mL)", 100, 500, 300, step=10)
+    v_poly_mL = st.sidebar.slider("Polysaccharide solution (mL)", 50, 300, 200, step=10)
+    total_mL = v_oil_mL + v_poly_mL
+    phi_d = v_poly_mL / total_mL
+    st.sidebar.caption(f"Total: {total_mL} mL | phi_d = {phi_d:.2f}")
+
+    # Heating
+    if "Beaker" in vessel_choice:
+        heating_choice = "Flat Plate"
+        st.sidebar.caption("Heating: flat-plate (150C -> 80C oil)")
+    else:
+        heating_choice = "Hot Water Jacket"
+        st.sidebar.caption("Heating: jacket (85C circulating water)")
+
+else:
+    # ── Legacy rotor-stator controls ──
+    rpm = st.sidebar.slider("Rotor Speed (RPM)", 3000, 25000, 10000, step=500)
+    t_emul = st.sidebar.number_input("Emulsification Time (min)", 1, 60, 10)
+    phi_d = st.sidebar.slider("Dispersed Phase Fraction (phi_d)", 0.01, 0.30, 0.05, step=0.01)
+    v_oil_mL = 300
+    v_poly_mL = 200
+    total_mL = 500
 
 st.sidebar.subheader("Formulation")
 
@@ -79,11 +141,24 @@ with col1:
 with col2:
     c_chitosan_pct = st.number_input("Chitosan (% w/v)", 0.5, 5.0, 1.8, step=0.1)
 
-c_span80_pct = st.sidebar.slider("Surfactant (% w/v)", 0.5, 5.0, 2.0, step=0.1)
-T_oil_C = st.sidebar.slider("Oil Temperature (°C)", 60, 95, 90)
+if is_stirred:
+    c_span80_vol_pct = st.sidebar.slider("Span-80 in oil (% v/v)", 0.5, 5.0, 1.5, step=0.1)
+    c_span80_pct = c_span80_vol_pct * 986.0 / 1000.0  # convert v/v to approx w/v
+    T_oil_C = st.sidebar.slider("Paraffin Oil Temperature (C)", 65, 110, 80, step=1,
+                                 help="Oil temperature at start of emulsification. "
+                                      "Flat-plate heater can reach ~80 C; "
+                                      "higher temps may need oil bath.")
+else:
+    c_span80_pct = st.sidebar.slider("Surfactant (% w/v)", 0.5, 5.0, 2.0, step=0.1)
+    c_span80_vol_pct = 1.5
+    T_oil_C = st.sidebar.slider("Oil Temperature (C)", 60, 95, 90)
 
 st.sidebar.subheader("Cooling & Gelation (L2)")
-cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (°C/min)", 1.0, 20.0, 10.0, step=0.5)
+if is_stirred:
+    cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (C/min)", 0.3, 3.0, 0.67, step=0.1,
+                                           help="Natural cooling: ~0.67 C/min for 500 mL beaker")
+else:
+    cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (C/min)", 1.0, 20.0, 10.0, step=0.5)
 l2_model = st.sidebar.radio(
     "Pore Structure Model",
     ["Empirical (fast, calibrated)", "Cahn-Hilliard 2D (mechanistic)"],
@@ -128,8 +203,15 @@ else:
     uv_intensity = 0.0
 
 st.sidebar.subheader("Optimization Targets")
-target_d32 = st.sidebar.number_input("Target d32 (µm)", 0.5, 50.0, 2.0, step=0.5)
-target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 80, step=10)
+if is_stirred:
+    target_d_mode = st.sidebar.number_input("Target d_mode (um)", 10.0, 500.0, 100.0, step=10.0,
+                                             help="Modal diameter of microspheres")
+    target_d32 = target_d_mode  # for compatibility
+    target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 100, step=10)
+else:
+    target_d32 = st.sidebar.number_input("Target d32 (um)", 0.5, 50.0, 2.0, step=0.5)
+    target_d_mode = target_d32
+    target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 80, step=10)
 target_G = st.sidebar.number_input("Target G_DN (kPa)", 1.0, 500.0, 10.0, step=1.0)
 
 # ─── Material Constants (per-constant Literature / Custom + protocol link) ─
@@ -228,25 +310,77 @@ custom_eta_coup = _const_input(
 
 # ─── Build Parameters ─────────────────────────────────────────────────────
 
-params = SimulationParameters(
-    emulsification=EmulsificationParameters(
-        rpm=float(rpm),
-        t_emulsification=float(t_emul * 60),
-        mixer=MixerGeometry(),
-    ),
-    formulation=FormulationParameters(
-        c_agarose=c_agarose_pct * 10.0,
-        c_chitosan=c_chitosan_pct * 10.0,
-        c_span80=c_span80_pct * 10.0,
-        c_genipin=float(c_genipin_mM),
-        T_oil=T_oil_C + 273.15,
-        cooling_rate=cooling_rate_Cmin / 60.0,
-        T_crosslink=T_xlink_C + 273.15,
-        t_crosslink=float(t_xlink_h * 3600),
-        phi_d=phi_d,
-    ),
-    solver=SolverSettings(l2_n_grid=grid_size),
-)
+if is_stirred:
+    # Build stirred-vessel equipment
+    if "Beaker" in vessel_choice:
+        _vessel = VesselGeometry.glass_beaker(working_volume=total_mL * 1e-6)
+    else:
+        _vessel = VesselGeometry.jacketed_vessel(working_volume=total_mL * 1e-6)
+
+    if is_stirrer_A:
+        _stirrer = StirrerGeometry.pitched_blade_A()
+    else:
+        _stirrer = StirrerGeometry.rotor_stator_B()
+
+    if "Beaker" in vessel_choice:
+        _heating = HeatingConfig.flat_plate()
+    else:
+        _heating = HeatingConfig.hot_water_jacket()
+    # Sync heating T_initial with user-selected oil temperature
+    _heating.T_initial = T_oil_C + 273.15
+
+    _kernels = KernelConfig.for_stirrer_type(_stirrer.stirrer_type)
+
+    params = SimulationParameters(
+        emulsification=EmulsificationParameters(
+            mode="stirred_vessel",
+            rpm=float(rpm),
+            t_emulsification=float(t_emul * 60),
+            vessel=_vessel,
+            stirrer=_stirrer,
+            heating=_heating,
+            kernels=_kernels,
+        ),
+        formulation=FormulationParameters(
+            c_agarose=c_agarose_pct * 10.0,
+            c_chitosan=c_chitosan_pct * 10.0,
+            c_span80=c_span80_pct * 10.0,
+            c_genipin=float(c_genipin_mM),
+            T_oil=T_oil_C + 273.15,
+            cooling_rate=cooling_rate_Cmin / 60.0,
+            T_crosslink=T_xlink_C + 273.15,
+            t_crosslink=float(t_xlink_h * 3600),
+            phi_d=phi_d,
+            c_span80_vol_pct=c_span80_vol_pct,
+            v_oil_span80_mL=float(v_oil_mL),
+            v_polysaccharide_mL=float(v_poly_mL),
+        ),
+        solver=SolverSettings(
+            l1_n_bins=40, l1_d_min=1e-6, l1_d_max=2000e-6,
+            l2_n_grid=grid_size,
+        ),
+    )
+else:
+    params = SimulationParameters(
+        emulsification=EmulsificationParameters(
+            mode="rotor_stator_legacy",
+            rpm=float(rpm),
+            t_emulsification=float(t_emul * 60),
+            mixer=MixerGeometry(),
+        ),
+        formulation=FormulationParameters(
+            c_agarose=c_agarose_pct * 10.0,
+            c_chitosan=c_chitosan_pct * 10.0,
+            c_span80=c_span80_pct * 10.0,
+            c_genipin=float(c_genipin_mM),
+            T_oil=T_oil_C + 273.15,
+            cooling_rate=cooling_rate_Cmin / 60.0,
+            T_crosslink=T_xlink_C + 273.15,
+            t_crosslink=float(t_xlink_h * 3600),
+            phi_d=phi_d,
+        ),
+        solver=SolverSettings(l2_n_grid=grid_size),
+    )
 
 # Apply custom/literature material constants
 from emulsim.datatypes import MaterialProperties as _MP
@@ -342,13 +476,23 @@ if "result" in st.session_state:
     # KPI cards
     col1, col2, col3, col4 = st.columns(4)
 
-    d32_dev = abs(e.d32 * 1e6 - target_d32) / target_d32 * 100
+    _d_mode = getattr(e, 'd_mode', 0.0)
+
+    if is_stirred:
+        d_primary_dev = abs(_d_mode * 1e6 - target_d_mode) / target_d_mode * 100
+    else:
+        d_primary_dev = abs(e.d32 * 1e6 - target_d32) / target_d32 * 100
     pore_dev = abs(g.pore_size_mean * 1e9 - target_pore) / target_pore * 100
     G_dev = abs(m.G_DN / 1000 - target_G) / target_G * 100
 
-    col1.metric("d32", f"{e.d32*1e6:.2f} µm",
-                delta=f"{d32_dev:.0f}% from target",
-                delta_color="inverse")
+    if is_stirred:
+        col1.metric("d_mode", f"{_d_mode*1e6:.1f} um",
+                    delta=f"{d_primary_dev:.0f}% from target",
+                    delta_color="inverse")
+    else:
+        col1.metric("d32", f"{e.d32*1e6:.2f} um",
+                    delta=f"{d_primary_dev:.0f}% from target",
+                    delta_color="inverse")
     col2.metric("Pore Size", f"{g.pore_size_mean*1e9:.1f} nm",
                 delta=f"{pore_dev:.0f}% from target",
                 delta_color="inverse")
@@ -377,17 +521,28 @@ if "result" in st.session_state:
         st.plotly_chart(plot_results_dashboard(result), use_container_width=True)
 
     with tab2:
-        st.subheader("Level 1: Emulsification — Droplet Size Distribution")
+        st.subheader("Level 1: Emulsification -- Droplet Size Distribution")
         st.plotly_chart(plot_droplet_size_distribution(e), use_container_width=True)
 
         c1, c2, c3 = st.columns(3)
-        c1.write(f"**d10** = {e.d10*1e6:.2f} µm")
-        c1.write(f"**d32** = {e.d32*1e6:.2f} µm")
-        c2.write(f"**d50** = {e.d50*1e6:.2f} µm")
-        c2.write(f"**d90** = {e.d90*1e6:.2f} µm")
-        c3.write(f"**d43** = {e.d43*1e6:.2f} µm")
+        c1.write(f"**d10** = {e.d10*1e6:.2f} um")
+        c1.write(f"**d32** = {e.d32*1e6:.2f} um")
+        if _d_mode > 0:
+            c1.write(f"**d_mode** = {_d_mode*1e6:.1f} um")
+        c2.write(f"**d50** = {e.d50*1e6:.2f} um")
+        c2.write(f"**d90** = {e.d90*1e6:.2f} um")
+        c3.write(f"**d43** = {e.d43*1e6:.2f} um")
         c3.write(f"**Span** = {e.span:.3f}")
-        st.write(f"Converged: {'✅' if e.converged else '❌'}")
+
+        _conv_icon = "Yes" if e.converged else "No (still evolving)"
+        st.write(f"Converged: {_conv_icon}")
+        if is_stirred:
+            st.caption(
+                f"Mode: stirred-vessel | "
+                f"Vessel: {vessel_choice.split('(')[0].strip()} | "
+                f"Stirrer: {stirrer_choice.split('-')[0].strip()} | "
+                f"phi_d = {phi_d:.2f}"
+            )
 
     with tab3:
         st.subheader("Level 2: Gelation — Pore Structure")
@@ -433,16 +588,26 @@ if "result" in st.session_state:
     st.divider()
     st.header("🎯 Optimization Assessment")
 
-    # Compute objectives inline using sidebar targets instead of hardcoded ones
-    d32_dev_obj = abs(e.d32 * 1e6 - target_d32) / target_d32
+    # Compute objectives inline using sidebar targets
+    if is_stirred:
+        d_obj_val = _d_mode * 1e6
+        d_obj_target = target_d_mode
+        d_obj_label = "f_1 (d_mode deviation)"
+        d_obj_help = f"|d_mode - {target_d_mode} um| / {target_d_mode} um"
+    else:
+        d_obj_val = e.d32 * 1e6
+        d_obj_target = target_d32
+        d_obj_label = "f_1 (d32 deviation)"
+        d_obj_help = f"|d32 - {target_d32} um| / {target_d32} um"
+
+    d_dev_obj = abs(d_obj_val - d_obj_target) / d_obj_target
     pore_dev_obj = abs(g.pore_size_mean * 1e9 - target_pore) / target_pore
     G_dev_obj = abs(np.log10(max(m.G_DN, 1)) - np.log10(target_G * 1000))
-    obj = np.array([d32_dev_obj, pore_dev_obj, G_dev_obj])
+    obj = np.array([d_dev_obj, pore_dev_obj, G_dev_obj])
 
     st.write("**Objective Values** (lower = closer to target):")
     oc1, oc2, oc3 = st.columns(3)
-    oc1.metric("f_1 (d32 deviation)", f"{obj[0]:.3f}",
-               help=f"|d32 - {target_d32} um| / {target_d32} um")
+    oc1.metric(d_obj_label, f"{obj[0]:.3f}", help=d_obj_help)
     oc2.metric("f_2 (pore deviation)", f"{obj[1]:.3f}",
                help=f"|pore - {target_pore} nm| / {target_pore} nm")
     oc3.metric("f_3 (modulus deviation)", f"{obj[2]:.3f}",
@@ -460,11 +625,11 @@ if "result" in st.session_state:
     st.subheader("Recommendations")
     recs = []
     if obj[0] > 0.5:
-        if e.d32 * 1e6 > target_d32:
-            recs.append(f"**Increase RPM** (currently {rpm}) — d32 is {e.d32*1e6:.1f} µm vs target {target_d32} µm. "
-                       f"Try {rpm * 1.5:.0f}+ RPM or increase Span-80 concentration.")
+        if d_obj_val > d_obj_target:
+            recs.append(f"**Increase RPM** (currently {rpm}) -- droplet size is {d_obj_val:.1f} um vs target {d_obj_target:.0f} um. "
+                       f"Try higher RPM or increase Span-80 concentration.")
         else:
-            recs.append(f"**Decrease RPM** — d32 is {e.d32*1e6:.1f} µm, smaller than target {target_d32} µm.")
+            recs.append(f"**Decrease RPM** -- droplet size is {d_obj_val:.1f} um, smaller than target {d_obj_target:.0f} um.")
 
     if obj[1] > 0.5:
         recs.append(f"**Adjust cooling rate** — pore size ({g.pore_size_mean*1e9:.0f} nm) deviates from "
@@ -528,6 +693,8 @@ if "result" in st.session_state:
 
 st.divider()
 st.caption(
-    "EmulSim v0.1.0 — Multi-scale simulation for double-network polysaccharide hydrogel microspheres. "
-    "Pipeline: PBE (Alopaeus) → Cahn-Hilliard → Crosslinking kinetics → Rubber Elasticity + Ogston."
+    "EmulSim v2.0 -- Modular process-modeling platform combining calibrated empirical models "
+    "and mechanistic submodels for emulsified hydrogel microsphere fabrication. "
+    "L1: PBE emulsification | L2: Empirical pore correlation (size-coupled) or Cahn-Hilliard 2D | "
+    "L3: Chemistry-specific crosslinking | L4: Phenomenological property estimator."
 )

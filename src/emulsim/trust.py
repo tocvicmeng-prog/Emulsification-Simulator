@@ -36,7 +36,8 @@ class TrustAssessment:
 
 def assess_trust(result: FullResult, params: SimulationParameters,
                  props: MaterialProperties,
-                 crosslinker_key: str = 'genipin') -> TrustAssessment:
+                 crosslinker_key: str = 'genipin',
+                 l2_mode: str = 'empirical') -> TrustAssessment:
     """Evaluate whether the simulation results should be trusted.
 
     Checks for conditions where the model assumptions break down.
@@ -151,6 +152,34 @@ def assess_trust(result: FullResult, params: SimulationParameters,
         if xl.mechanism == 'ester_bond':
             warnings.append("Citric acid heat cure (80-120C) may partially melt agarose gel. "
                             "Ester bonds are hydrolytically unstable at pH>10.")
+
+    # 11. Hydroxyl crosslinker simplification (chitosan-NH2 side reactions)
+    if crosslinker_key in ('ech', 'dvs', 'citric_acid') and params.formulation.c_chitosan > 0:
+        warnings.append(
+            "Hydroxyl crosslinker model is simplified — assumes agarose-OH only targeting. "
+            "Real chemistry also reacts with chitosan-NH2. Results may underestimate crosslink density."
+        )
+
+    # 12. Phenomenological DN modulus (standing note)
+    warnings.append(
+        "G_DN uses phenomenological coupling formula (G1 + G2 + eta*sqrt(G1*G2)). "
+        "Suitable for formulation ranking, not absolute mechanical prediction."
+    )
+
+    # 13. Model mode mismatch (mechanistic_research requested but empirical L2 used)
+    model_mode = getattr(params, 'model_mode', None)
+    if model_mode == 'mechanistic_research' and l2_mode == 'empirical':
+        warnings.append(
+            "Mechanistic research mode requested but empirical L2 pore model was used. "
+            "Switch to ch_2d for mechanistic consistency."
+        )
+
+    # 14. Non-specific eta_coupling (same default for all crosslinker types)
+    if props.eta_coupling == -0.15:
+        warnings.append(
+            "IPN coupling coefficient (eta=-0.15) is the same default for all crosslinker types. "
+            "Per-chemistry eta values would improve accuracy."
+        )
 
     trustworthy = len(blockers) == 0
 

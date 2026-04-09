@@ -6,6 +6,7 @@ from .datatypes import (
     SimulationParameters,
     MaterialProperties,
     EmulsificationResult,
+    GelationTimingResult,
     GelationResult,
     CrosslinkingResult,
     MechanicalResult,

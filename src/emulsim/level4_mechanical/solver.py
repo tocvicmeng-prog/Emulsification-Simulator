@@ -122,7 +122,8 @@ def ogston_kav(rh: np.ndarray, r_fiber: float, phi_fiber: float) -> np.ndarray:
 def solve_mechanical(params: SimulationParameters,
                      props: MaterialProperties,
                      gelation: GelationResult,
-                     crosslinking: CrosslinkingResult) -> MechanicalResult:
+                     crosslinking: CrosslinkingResult,
+                     R_droplet: float = None) -> MechanicalResult:
     """Compute mechanical properties of the double-network microsphere.
 
     Parameters
@@ -156,12 +157,20 @@ def solve_mechanical(params: SimulationParameters,
     E_star = effective_youngs_modulus(G_DN)
 
     # Hertz contact curve
-    # Support both 1D radial (r_grid is radial) and 2D Cartesian (L_domain/2)
-    if gelation.L_domain > 0:
-        # 2D solver: R = L_domain / 2
-        R = gelation.L_domain / 2.0
+    # Bead radius: use actual R_droplet if provided, else fall back to
+    # L_domain (legacy behavior with deprecation warning).
+    if R_droplet is not None and R_droplet > 0:
+        R = R_droplet
     else:
-        R = gelation.r_grid[-1] + (gelation.r_grid[1] - gelation.r_grid[0]) / 2.0
+        import logging
+        logging.getLogger(__name__).warning(
+            "solve_mechanical: R_droplet not provided, falling back to "
+            "L_domain/2 (may be truncated for large droplets)"
+        )
+        if gelation.L_domain > 0:
+            R = gelation.L_domain / 2.0
+        else:
+            R = gelation.r_grid[-1] + (gelation.r_grid[1] - gelation.r_grid[0]) / 2.0
     delta_arr, F_arr = hertz_contact(E_star, R)
 
     # Ogston Kav for a range of protein sizes

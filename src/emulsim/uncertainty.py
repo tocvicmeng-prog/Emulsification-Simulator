@@ -75,6 +75,14 @@ class UncertaintyPropagator:
                 # Absolute values (uniform)
                 'f_bridge': self.rng.uniform(0.25, 0.55),
                 'eta_coupling': self.rng.uniform(-0.30, 0.0),
+
+                # L2 empirical pore-model uncertainty
+                'pore_prefactor_factor': 10 ** self.rng.uniform(-0.13, 0.13),  # +/-30%
+                'pore_exponent_offset': self.rng.uniform(-0.1, 0.1),           # on -0.7 exponent
+                'confinement_alpha': self.rng.uniform(0.10, 0.25),             # confinement coeff
+
+                # L1 kernel structural uncertainty (breakage rate)
+                'breakage_C1_factor': 10 ** self.rng.uniform(-0.30, 0.30),     # +/-50%
             }
             perturbations.append(p)
 
@@ -95,7 +103,8 @@ class UncertaintyPropagator:
     def run(self, params: SimulationParameters,
             db: Optional[PropertyDatabase] = None,
             crosslinker_key: str = 'genipin',
-            uv_intensity: float = 0.0) -> UncertaintyResult:
+            uv_intensity: float = 0.0,
+            l2_mode: str = 'empirical') -> UncertaintyResult:
         """Run Monte Carlo uncertainty propagation.
 
         Parameters
@@ -106,6 +115,8 @@ class UncertaintyPropagator:
             Key into CROSSLINKERS library to pass through to L3 solver.
         uv_intensity : float
             UV intensity [mW/cm2] for UV-initiated crosslinkers.
+        l2_mode : str
+            Gelation solver mode ('empirical', 'ch_2d', 'ch_1d').
         """
         db = db or PropertyDatabase()
 
@@ -140,19 +151,39 @@ class UncertaintyPropagator:
                 from .level3_crosslinking.solver import solve_crosslinking
                 from .level4_mechanical.solver import solve_mechanical
 
-                phi_d = params_i.formulation.phi_d
+                # phi_d: let solve() resolve per mode (volumetric for
+                # stirred-vessel, formulation.phi_d for legacy)
 
-                # L1
+                # L1 — apply breakage kernel structural uncertainty
+                # Perturb breakage_C3 (viscous correction constant read by PBE)
+                props_i.breakage_C3 = props_i.breakage_C3 * perturb['breakage_C1_factor']
+
                 pbe = PBESolver(
                     n_bins=params_i.solver.l1_n_bins,
                     d_min=params_i.solver.l1_d_min,
                     d_max=params_i.solver.l1_d_max,
                 )
-                emul = pbe.solve(params_i, props_i, phi_d=phi_d)
+                emul = pbe.solve(params_i, props_i)
 
                 # L2
                 R = emul.d50 / 2.0
-                gel = solve_gelation(params_i, props_i, R_droplet=R, mode='empirical')
+                gel = solve_gelation(params_i, props_i, R_droplet=R, mode=l2_mode)
+
+                # Apply pore-model perturbations post-hoc
+                # The empirical solver is deterministic for given inputs,
+                # so pore uncertainty must be injected here.
+                pore_raw = gel.pore_size_mean
+                pore_perturbed = (
+                    pore_raw
+                    * perturb['pore_prefactor_factor']
+                    # exponent offset: scale as (c/c0)^offset relative to base
+                    * np.exp(perturb['pore_exponent_offset'] * 0.5)
+                )
+                # Confinement: cap pore at alpha * bead diameter
+                pore_conf_max = perturb['confinement_alpha'] * 2.0 * R
+                if pore_conf_max > 0:
+                    pore_perturbed = min(pore_perturbed, pore_conf_max)
+                gel.pore_size_mean = float(pore_perturbed)
 
                 # L3 -- Fix 8: pass crosslinker_key and uv_intensity through
                 xl = solve_crosslinking(params_i, props_i, R_droplet=R,

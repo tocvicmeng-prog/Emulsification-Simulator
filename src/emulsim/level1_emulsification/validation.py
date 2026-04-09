@@ -2,10 +2,47 @@
 
 from __future__ import annotations
 
+from typing import Optional
+
 import numpy as np
 
 from ..datatypes import EmulsificationResult
 
+
+# ── Mode-specific constants ──────────────────────────────────────────────
+
+# ASSUMPTION: rotor-stator targets d32 ~ 2 µm; stirred-vessel targets d_mode ~ 100 µm
+_BOUNDS = {
+    "rotor_stator_legacy": {
+        "d32_min": 0.05e-6,       # 0.05 µm
+        "d32_max": 1000e-6,       # 1000 µm
+        "steady_state_tol": 0.01, # 1 % relative variation
+        "steady_state_frac": 0.10,  # last 10 % of time history
+    },
+    "stirred_vessel": {
+        "d32_min": 5e-6,          # 5 µm
+        "d32_max": 2000e-6,       # 2 mm
+        "steady_state_tol": 0.05, # 5 % — larger, noisier droplets
+        "steady_state_frac": 0.20,  # last 20 % of time history
+        # ASSUMPTION: modal diameter valid range for stirred-vessel
+        "d_mode_min": 5e-6,       # 5 µm
+        "d_mode_max": 500e-6,     # 500 µm
+    },
+}
+
+
+def _get_bounds(mode: Optional[str] = None) -> dict:
+    """Return physical bounds dict for the given mode.
+
+    Falls back to rotor_stator_legacy when *mode* is ``None`` or unrecognised,
+    preserving backward compatibility.
+    """
+    if mode is None or mode not in _BOUNDS:
+        mode = "rotor_stator_legacy"
+    return _BOUNDS[mode]
+
+
+# ── Existing functions (signatures unchanged) ────────────────────────────
 
 def check_mass_conservation(result: EmulsificationResult,
                             initial_phi_d: float = 0.05,
@@ -100,4 +137,180 @@ def validate_result(result: EmulsificationResult) -> dict:
     checks['non_negative'] = (check_non_negative(result), "")
     checks['physical_bounds'] = check_physical_bounds(result)
     checks['steady_state'] = check_steady_state(result)
+    return checks
+
+
+# ── Mode-aware validation functions ──────────────────────────────────────
+
+def check_physical_bounds_mode(result: EmulsificationResult,
+                               mode: str = "rotor_stator_legacy") -> tuple[bool, str]:
+    """Mode-aware physical-bounds check.
+
+    Uses pre-calibrated d32 ranges from ``_BOUNDS`` for the requested mode.
+    For ``stirred_vessel`` mode, also validates the modal diameter (d_mode).
+
+    Parameters
+    ----------
+    result : EmulsificationResult
+        Simulation result.
+    mode : str
+        ``"rotor_stator_legacy"`` or ``"stirred_vessel"``.
+
+    Returns
+    -------
+    passed : bool
+    message : str
+    """
+    b = _get_bounds(mode)
+    # Delegate d32 + basic checks to the original function with mode-specific limits
+    passed, msg = check_physical_bounds(result,
+                                        d32_min=b["d32_min"],
+                                        d32_max=b["d32_max"])
+    issues = [] if passed else [msg]
+
+    # Additional d_mode check for stirred-vessel mode
+    if mode == "stirred_vessel":
+        d_mode = compute_d_mode(result)
+        d_mode_min = b["d_mode_min"]
+        d_mode_max = b["d_mode_max"]
+        if d_mode < d_mode_min:
+            issues.append(
+                f"d_mode={d_mode*1e6:.1f} µm below minimum "
+                f"{d_mode_min*1e6:.0f} µm")
+        if d_mode > d_mode_max:
+            issues.append(
+                f"d_mode={d_mode*1e6:.1f} µm above maximum "
+                f"{d_mode_max*1e6:.0f} µm")
+
+    if issues:
+        return False, "; ".join(issues)
+    return True, "OK"
+
+
+def check_steady_state_mode(result: EmulsificationResult,
+                            mode: str = "rotor_stator_legacy") -> tuple[bool, float]:
+    """Mode-aware steady-state check.
+
+    For ``stirred_vessel`` mode the tolerance is relaxed to 5 % and the
+    window is expanded to the last 20 % of time history (larger, noisier
+    droplets converge more slowly).
+
+    Parameters
+    ----------
+    result : EmulsificationResult
+        Simulation result.
+    mode : str
+        ``"rotor_stator_legacy"`` or ``"stirred_vessel"``.
+
+    Returns
+    -------
+    converged : bool
+    relative_variation : float
+    """
+    b = _get_bounds(mode)
+    tol = b["steady_state_tol"]
+    frac = b["steady_state_frac"]
+
+    if result.n_d_history is None or len(result.n_d_history) < 2:
+        return False, float('inf')
+
+    n_steps = len(result.n_d_history)
+    n_check = max(1, int(n_steps * frac))
+    d32_vals = []
+    for k in range(-n_check, 0):
+        N_k = np.maximum(result.n_d_history[k], 0.0)
+        d3 = np.sum(N_k * result.d_bins**3)
+        d2 = np.sum(N_k * result.d_bins**2)
+        d32_k = d3 / d2 if d2 > 0 else 0.0
+        d32_vals.append(d32_k)
+
+    if not d32_vals or max(d32_vals) == 0:
+        return False, float('inf')
+
+    variation = (max(d32_vals) - min(d32_vals)) / max(max(d32_vals), 1e-15)
+    return variation < tol, variation
+
+
+def compute_d_mode(result: EmulsificationResult) -> float:
+    """Compute the modal diameter (peak of volume-weighted distribution).
+
+    ASSUMPTION: volume-weighted distribution is proportional to
+    n_d * d^3; the mode is the bin with the highest volume density.
+
+    Parameters
+    ----------
+    result : EmulsificationResult
+
+    Returns
+    -------
+    d_mode : float
+        Modal diameter [m].  Returns 0.0 if the distribution is empty.
+    """
+    vol_weighted = result.n_d * result.d_bins**3
+    if np.sum(vol_weighted) == 0:
+        return 0.0
+    idx = np.argmax(vol_weighted)
+    return float(result.d_bins[idx])
+
+
+def check_d_mode(result: EmulsificationResult,
+                 d_mode_min: float = 5e-6,
+                 d_mode_max: float = 500e-6) -> tuple[bool, str]:
+    """Standalone check that the modal diameter is within bounds.
+
+    Primarily intended for stirred-vessel mode.
+
+    Parameters
+    ----------
+    result : EmulsificationResult
+    d_mode_min : float
+        Minimum acceptable modal diameter [m].
+    d_mode_max : float
+        Maximum acceptable modal diameter [m].
+
+    Returns
+    -------
+    passed : bool
+    message : str
+    """
+    d_mode = compute_d_mode(result)
+    issues = []
+    if d_mode < d_mode_min:
+        issues.append(
+            f"d_mode={d_mode*1e6:.1f} µm below minimum {d_mode_min*1e6:.0f} µm")
+    if d_mode > d_mode_max:
+        issues.append(
+            f"d_mode={d_mode*1e6:.1f} µm above maximum {d_mode_max*1e6:.0f} µm")
+    if issues:
+        return False, "; ".join(issues)
+    return True, "OK"
+
+
+def validate_result_mode(result: EmulsificationResult,
+                         mode: str = "rotor_stator_legacy") -> dict:
+    """Mode-aware validation suite.
+
+    Runs all checks from :func:`validate_result` using mode-appropriate
+    thresholds.  For ``stirred_vessel`` mode, an additional ``d_mode``
+    check is included.
+
+    Parameters
+    ----------
+    result : EmulsificationResult
+    mode : str
+        ``"rotor_stator_legacy"`` or ``"stirred_vessel"``.
+
+    Returns
+    -------
+    dict
+        Check names as keys, ``(passed, detail)`` as values.
+    """
+    checks: dict = {}
+    checks['non_negative'] = (check_non_negative(result), "")
+    checks['physical_bounds'] = check_physical_bounds_mode(result, mode=mode)
+    checks['steady_state'] = check_steady_state_mode(result, mode=mode)
+
+    if mode == "stirred_vessel":
+        checks['d_mode'] = check_d_mode(result)
+
     return checks

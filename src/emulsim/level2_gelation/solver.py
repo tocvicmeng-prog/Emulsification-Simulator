@@ -15,7 +15,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import factorized, spsolve
 
-from ..datatypes import GelationResult, MaterialProperties, SimulationParameters
+from ..datatypes import GelationResult, GelationTimingResult, MaterialProperties, SimulationParameters
 from .spatial import (
     create_radial_grid, build_laplacian_matrix,
     create_2d_grid, build_laplacian_2d, build_mobility_laplacian_2d,
@@ -527,6 +527,64 @@ class CahnHilliard2DSolver:
         )
 
 
+def solve_gelation_timing(
+    params: SimulationParameters,
+    props: MaterialProperties,
+    R_droplet: float = 50e-6,
+) -> GelationTimingResult:
+    """Level 2a: Compute gelation timing and arrest for a droplet.
+
+    Separates the WHEN (timing) from the WHAT (microstructure).
+    """
+    T_oil = params.formulation.T_oil
+    T_gel = props.T_gel
+    cool_rate = params.formulation.cooling_rate
+
+    # Effective cooling rate (size-dependent for small droplets)
+    R_ref = 50e-6
+    if R_droplet > 0 and R_droplet < R_ref:
+        cool_rate_eff = cool_rate * (R_ref / R_droplet) ** 0.3
+        cool_rate_eff = min(cool_rate_eff, cool_rate * 3.0)
+    else:
+        cool_rate_eff = cool_rate
+
+    # Time to reach gelation temperature
+    if T_oil > T_gel and cool_rate_eff > 0:
+        t_gel_onset = (T_oil - T_gel) / cool_rate_eff
+    else:
+        t_gel_onset = 0.0  # already below T_gel
+
+    # Temperature history (simple linear cooling for now)
+    t_total = max(t_gel_onset * 2.0, 60.0)  # simulate past gel point
+    t_arr = np.linspace(0, t_total, 200)
+    T_arr = np.maximum(T_oil - cool_rate_eff * t_arr, 293.15)  # floor at 20C
+
+    # Gelation fraction via simplified Avrami
+    # alpha(t) = 1 - exp(-k_gel * (t - t_gel)^n) for t > t_gel
+    k_gel = props.k_gel_0
+    n_avrami = props.n_avrami
+    alpha_arr = np.zeros_like(t_arr)
+    mask = t_arr > t_gel_onset
+    if mask.any():
+        dt_gel = t_arr[mask] - t_gel_onset
+        alpha_arr[mask] = 1.0 - np.exp(-k_gel * dt_gel ** n_avrami)
+
+    alpha_final = float(alpha_arr[-1])
+
+    # Mobility arrest factor: how much the gel network immobilises diffusion
+    # ASSUMPTION: arrest ~ alpha^beta where beta is the arrest exponent
+    beta = props.gel_arrest_exponent
+    mobility_arrest_factor = max(1.0 - alpha_final ** beta, 0.01)
+
+    return GelationTimingResult(
+        T_history=T_arr,
+        t_gel_onset=t_gel_onset,
+        alpha_final=alpha_final,
+        mobility_arrest_factor=mobility_arrest_factor,
+        cooling_rate_effective=cool_rate_eff,
+    )
+
+
 def solve_gelation_empirical(params: SimulationParameters, props: MaterialProperties,
                              R_droplet: float = 1.0e-6) -> GelationResult:
     """Empirical pore-size model for agarose gels based on literature correlations.
@@ -565,6 +623,22 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
     chit_factor = 1.0 - 0.3 * (c_chit / (c_agar + c_chit + 1e-10))
 
     d_pore = d_pore_base * cool_factor * chit_factor
+
+    # Confinement correction: spinodal wavelength truncated by sphere boundary
+    # ASSUMPTION: max pore ~ 15% of bead diameter (Tanaka 2000, Physical Review E)
+    d_pore_confinement_max = 0.15 * 2.0 * R_droplet
+    if d_pore_confinement_max > 0:
+        d_pore = min(d_pore, d_pore_confinement_max)
+
+    # Size-dependent effective cooling: smaller droplets lose heat faster
+    # (surface-to-volume ratio scales as 1/R), producing finer pores.
+    # ASSUMPTION: mild power-law correction normalized to R_ref=50 um.
+    R_ref = 50e-6  # [m] reference droplet radius
+    if R_droplet > 0 and R_droplet < R_ref:
+        size_cool_factor = (R_ref / R_droplet) ** 0.3  # faster effective cooling
+        size_cool_factor = min(size_cool_factor, 3.0)   # cap at 3x
+        d_pore *= size_cool_factor ** (-0.2)             # faster cooling → smaller pores
+
     d_pore = np.clip(d_pore, 10e-9, 2000e-9)
 
     # Porosity from Ogston model: porosity ≈ 1 - phi_fiber_effective

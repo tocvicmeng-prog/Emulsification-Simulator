@@ -9,10 +9,10 @@ mu_oil_90C = { value = 0.005, unit = "Pa·s", uncertainty = 0.001, source = "Est
 rho_aq = { value = 1020.0, unit = "kg/m3", uncertainty = 10.0, source = "Estimated for 6% polymer solution" }
 
 [interfacial]
-sigma_bare = { value = 0.045, unit = "N/m", source = "Water/paraffin, no surfactant" }
-sigma_span80_2pct = { value = 0.005, unit = "N/m", uncertainty = 0.002, source = "Opawale & Burgess 1998" }
-gamma_inf = { value = 3.5e-6, unit = "mol/m2", source = "Span-80 max surface excess" }
-K_L = { value = 200.0, unit = "m3/mol", source = "Span-80 Langmuir constant" }
+sigma_bare = { value = 0.045, unit = "N/m", source = "Water/paraffin, no surfactant", status = "estimated" }
+sigma_span80_2pct = { value = 0.005, unit = "N/m", uncertainty = 0.002, source = "Opawale & Burgess 1998", status = "literature" }
+gamma_inf = { value = 3.5e-6, unit = "mol/m2", source = "Span-80 max surface excess, Santini et al. 2007", status = "literature" }
+K_L = { value = 0.75, unit = "m3/mol", source = "Langmuir adsorption constant for Span-80, Santini et al. 2007", status = "calibrated" }  # calibrated: ~5 mN/m at 2% w/v Span-80, 90 degC
 
 [thermodynamic]
 chi_agarose_water = { value = 0.497, unit = "-", source = "Normand et al. 2000" }

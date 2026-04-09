@@ -42,8 +42,10 @@ from .objectives import (
     PARAM_BOUNDS,
     PARAM_NAMES,
     LOG_SCALE_INDICES,
+    LOG_SCALE_INDICES_SV,
     compute_objectives,
     check_constraints,
+    get_param_bounds,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,26 +56,34 @@ REF_POINT = torch.tensor([5.0, 5.0, 3.0], dtype=torch.double)
 tkwargs = {"dtype": torch.double}
 
 
-def _to_search_space(x: np.ndarray) -> np.ndarray:
+def _log_indices_for_mode(mode: str = "rotor_stator_legacy") -> list[int]:
+    """Return log-scale parameter indices for the given mode."""
+    if mode == "stirred_vessel":
+        return LOG_SCALE_INDICES_SV
+    return LOG_SCALE_INDICES
+
+
+def _to_search_space(x: np.ndarray, mode: str = "rotor_stator_legacy") -> np.ndarray:
     """Transform parameters to search space (log-scale where appropriate)."""
     x_ss = x.copy()
-    for i in LOG_SCALE_INDICES:
+    for i in _log_indices_for_mode(mode):
         x_ss[i] = np.log10(x_ss[i])
     return x_ss
 
 
-def _from_search_space(x_ss: np.ndarray) -> np.ndarray:
+def _from_search_space(x_ss: np.ndarray, mode: str = "rotor_stator_legacy") -> np.ndarray:
     """Transform from search space back to physical parameters."""
     x = x_ss.copy()
-    for i in LOG_SCALE_INDICES:
+    for i in _log_indices_for_mode(mode):
         x[i] = 10.0 ** x[i]
     return x
 
 
-def _get_search_bounds() -> torch.Tensor:
+def _get_search_bounds(mode: str = "rotor_stator_legacy",
+                       stirrer_type: str = "pitched_blade") -> torch.Tensor:
     """Get parameter bounds in search space (2 x d)."""
-    bounds = PARAM_BOUNDS.copy()
-    for i in LOG_SCALE_INDICES:
+    bounds = get_param_bounds(mode, stirrer_type)
+    for i in _log_indices_for_mode(mode):
         bounds[i, 0] = np.log10(bounds[i, 0])
         bounds[i, 1] = np.log10(bounds[i, 1])
     return torch.tensor(bounds.T, **tkwargs)  # shape (2, d)
@@ -128,6 +138,7 @@ class OptimizationEngine:
         convergence_tol: float = 0.01,
         output_dir: Optional[Path] = None,
         db: Optional[PropertyDatabase] = None,
+        template_params: Optional[SimulationParameters] = None,
     ):
         self.n_initial = n_initial
         self.max_iterations = max_iterations
@@ -136,8 +147,14 @@ class OptimizationEngine:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         self.orchestrator = PipelineOrchestrator(db=db, output_dir=self.output_dir / "runs")
-        self.template_params = SimulationParameters()
-        self.bounds = _get_search_bounds()
+        self.template_params = template_params or SimulationParameters()
+        # Use mode-aware bounds from the template
+        mode = self.template_params.emulsification.mode
+        stirrer_type = "pitched_blade"
+        if (self.template_params.emulsification.stirrer is not None):
+            stirrer_type = self.template_params.emulsification.stirrer.stirrer_type.value
+        self.bounds = _get_search_bounds(mode, stirrer_type)
+        self._mode = mode
 
         # Storage
         self.X_observed: list[np.ndarray] = []

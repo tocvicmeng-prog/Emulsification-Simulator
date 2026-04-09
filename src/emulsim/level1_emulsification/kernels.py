@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..datatypes import BreakageModel, CoalescenceModel, KernelConfig
+
 
 # ─── Breakage Kernels ─────────────────────────────────────────────────────
 
@@ -251,3 +253,125 @@ def hinze_dmax_viscous(epsilon: float, sigma: float, rho_c: float,
         d = d_new
 
     return d
+
+
+# ─── Dispatch Functions ──────────────────────────────────────────────────
+
+def breakage_rate_dispatch(
+    d: np.ndarray,
+    epsilon: float,
+    sigma: float,
+    rho_c: float,
+    mu_d: float,
+    config: KernelConfig,
+    nu_c: float | None = None,
+) -> np.ndarray:
+    """Select and evaluate the breakage rate kernel based on KernelConfig.
+
+    Parameters
+    ----------
+    d : np.ndarray
+        Droplet diameters [m].
+    epsilon : float
+        Energy dissipation rate [m²/s³].
+    sigma : float
+        Interfacial tension [N/m].
+    rho_c : float
+        Continuous phase density [kg/m³].
+    mu_d : float
+        Dispersed phase dynamic viscosity [Pa·s].
+    config : KernelConfig
+        Kernel configuration selecting the model and its constants.
+    nu_c : float, optional
+        Kinematic viscosity of continuous phase [m²/s].
+        Required for Alopaeus model; if None, computed as mu_d/(rho_c) fallback.
+
+    Returns
+    -------
+    np.ndarray
+        Breakage rate for each diameter [1/s].
+    """
+    if getattr(config.breakage_model, 'value', config.breakage_model) == "alopaeus":
+        kwargs = dict(
+            C1=config.breakage_C1,
+            C2=config.breakage_C2,
+            C3=config.breakage_C3,
+        )
+        if nu_c is not None:
+            kwargs["nu_c"] = nu_c
+        return breakage_rate_alopaeus(
+            d, epsilon, sigma, rho_c, mu_d, **kwargs,
+        )
+    elif getattr(config.breakage_model, 'value', config.breakage_model) == "coulaloglou_tavlarides":
+        return breakage_rate_coulaloglou(
+            d, epsilon, sigma, rho_c,
+            C1=config.breakage_C1,
+            C2=config.breakage_C2,
+        )
+    else:
+        raise ValueError(f"Unknown breakage model: {config.breakage_model}")
+
+
+def coalescence_rate_dispatch(
+    d: np.ndarray,
+    epsilon: float,
+    sigma: float,
+    rho_c: float,
+    config: KernelConfig,
+    phi_d: float = 0.05,
+    mu_c: float = None,
+) -> np.ndarray:
+    """Build the coalescence rate matrix using the configured model.
+
+    Parameters
+    ----------
+    d : np.ndarray
+        Droplet diameters [m], 1-D array of length N.
+    epsilon : float
+        Energy dissipation rate [m²/s³].
+    sigma : float
+        Interfacial tension [N/m].
+    rho_c : float
+        Continuous phase density [kg/m³].
+    config : KernelConfig
+        Kernel configuration selecting the model and its constants.
+    phi_d : float
+        Dispersed phase volume fraction (used for crowding correction).
+    mu_c : float, optional
+        Continuous phase dynamic viscosity [Pa·s].
+        If None, estimated as 0.001 Pa·s (water-like).
+
+    Returns
+    -------
+    np.ndarray
+        Coalescence rate matrix of shape (N, N) [m³/s].
+    """
+    # ASSUMPTION: default mu_c = 0.001 Pa·s (water at ~20 °C)
+    if mu_c is None:
+        mu_c = 0.001
+
+    d = np.asarray(d, dtype=float)
+    N = d.size
+
+    # Build pairwise rate matrix using the underlying CT coalescence kernel.
+    # ASSUMPTION: CoalescenceModel is always CT for now; extensible via elif.
+    d_i = d[:, np.newaxis]  # (N, 1)
+    d_j = d[np.newaxis, :]  # (1, N)
+
+    Q = coalescence_rate_ct(
+        d_i, d_j, epsilon, sigma, rho_c, mu_c,
+        phi_d=phi_d,
+        C4=config.coalescence_C4,
+        C5=config.coalescence_C5,
+    )
+
+    # Concentrated-emulsion correction: dampen coalescence at high phi_d.
+    # The CT kernel already has a 1/(1+phi_d) in the collision frequency.
+    # The additional correction here accounts for crowding-induced drainage
+    # inhibition not captured by the original CT model.
+    # Total coalescence ~ 1/(1+phi_d)^(1+n) where n = coalescence_exponent.
+    # At phi_d=0.40 with n=2: total damping = 1/(1.4)^(1+2) = 0.36
+    if config.phi_d_correction and config.coalescence_exponent > 0:
+        Q = Q / (1.0 + phi_d) ** config.coalescence_exponent
+
+    return Q

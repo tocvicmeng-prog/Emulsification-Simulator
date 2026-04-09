@@ -1,0 +1,62 @@
+# Stirred-vessel double-emulsification configuration
+# Target: 100 µm microspheres with 100 nm pores
+
+[simulation]
+run_id = "stirred_vessel_default"
+notes = "Double-emulsification with pitched-blade impeller in glass beaker"
+
+[emulsification]
+mode = "stirred_vessel"
+rpm = 1300                # [rev/min] typical for Stirrer A
+t_emulsification = 600.0  # [s] (10 min)
+
+[vessel]
+type = "glass_beaker"     # "glass_beaker" or "jacketed_vessel"
+working_volume = 0.0005   # [m³] (500 mL)
+
+[stirrer]
+type = "pitched_blade"    # "pitched_blade" or "rotor_stator_small"
+
+[heating]
+strategy = "flat_plate"   # "flat_plate", "hot_water_jacket", or "isothermal"
+T_initial = 353.15        # [K] (80°C)
+T_final = 293.15          # [K] (20°C)
+cooldown_time = 5400.0    # [s] (1.5 hours)
+
+[formulation]
+c_agarose = 42.0           # [kg/m³] (4.2% w/v)
+c_chitosan = 18.0          # [kg/m³] (1.8% w/v)
+c_span80 = 12.75           # [kg/m³] (~1.5% v/v Span-80 in paraffin, ρ_span80 ≈ 986 kg/m³)
+c_span80_vol_pct = 1.5     # [% v/v] Span-80 in paraffin oil
+v_oil_span80_mL = 300.0    # [mL]
+v_polysaccharide_mL = 200.0  # [mL]
+c_genipin = 2.0            # [mol/m³]
+T_oil = 353.15             # [K] (80°C — from heating)
+cooling_rate = 0.0111      # [K/s] (~0.67°C/min, derived from 80→20°C in 1.5h)
+T_crosslink = 310.15       # [K] (37°C)
+t_crosslink = 86400.0      # [s] (24 hours)
+phi_d = 0.40               # [-] 200 mL / 500 mL
+
+[solver.level1]
+n_bins = 40
+d_min = 1e-6               # [m] (1 µm)
+d_max = 2000e-6            # [m] (2 mm)
+rtol = 1e-6
+atol = 1e-8
+
+[solver.level2]
+n_r = 1000
+n_grid = 128
+dt_initial = 1e-4
+dt_max = 1.0
+arrest_exponent = 2.5
+
+[solver.level3]
+method = "Radau"
+rtol = 1e-8
+atol = 1e-10
+
+[optimization]
+n_initial = 20
+max_iterations = 200
+convergence_tol = 0.01

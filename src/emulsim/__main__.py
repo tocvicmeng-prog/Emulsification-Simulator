@@ -98,7 +98,9 @@ def _cmd_run(args):
     if args.rpm is not None:
         params.emulsification.rpm = args.rpm
 
-    phi_d = args.phi_d if args.phi_d is not None else params.formulation.phi_d
+    # phi_d: use CLI override if given, otherwise let orchestrator resolve
+    # per mode (volumetric for stirred-vessel, formulation.phi_d for legacy)
+    phi_d = args.phi_d if args.phi_d is not None else None
 
     orch = PipelineOrchestrator(output_dir=Path(args.output))
     result = orch.run_single(params, phi_d=phi_d)

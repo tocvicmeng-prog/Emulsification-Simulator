@@ -17,7 +17,7 @@ from ..datatypes import (
 )
 from ..properties.database import PropertyDatabase
 from ..level1_emulsification.solver import PBESolver
-from ..level2_gelation.solver import solve_gelation
+from ..level2_gelation.solver import solve_gelation, solve_gelation_timing
 from ..level3_crosslinking.solver import solve_crosslinking
 from ..level4_mechanical.solver import solve_mechanical
 from ..trust import assess_trust
@@ -57,7 +57,27 @@ class PipelineOrchestrator:
             raise ValueError("Invalid parameters:\n" + "\n".join(f"  - {e}" for e in errors))
 
         if phi_d is None:
-            phi_d = params.formulation.phi_d
+            if params.emulsification.mode == "stirred_vessel":
+                phi_d = params.formulation.phi_d_from_volumes
+            else:
+                phi_d = params.formulation.phi_d
+
+        # Stirred-vessel: sync c_span80 from volumetric % if the TOML config
+        # set c_span80_vol_pct but left c_span80 at the FormulationParameters
+        # default. Compare against the volumetric-derived value to detect
+        # whether the user explicitly set c_span80 to something different.
+        if params.emulsification.mode == "stirred_vessel":
+            c_from_vol = params.formulation.c_span80_from_vol_pct
+            # If c_span80 does NOT match c_from_vol, the user set it explicitly
+            # (e.g., from a calibrated run). Honour the explicit value.
+            # If it's the legacy default (20.0) or matches the TOML c_span80
+            # field that was loaded alongside vol_pct, overwrite with volumetric.
+            if abs(params.formulation.c_span80 - c_from_vol) > 0.5:
+                # User explicitly set c_span80 different from vol_pct derivation
+                pass  # honour explicit value
+            else:
+                params.formulation.c_span80 = c_from_vol
+
         run_id = params.run_id or datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         run_dir = self.output_dir / f"run_{run_id}"
         run_dir.mkdir(parents=True, exist_ok=True)
@@ -88,17 +108,25 @@ class PipelineOrchestrator:
         )
         emul_result = pbe.solve(params, props, phi_d=phi_d)
         timings["L1"] = time.perf_counter() - t0
-        logger.info("L1 done: d32=%.2f µm, span=%.2f (%.1fs)",
-                     emul_result.d32 * 1e6, emul_result.span, timings["L1"])
+        d_mode_um = getattr(emul_result, 'd_mode', 0.0) * 1e6
+        logger.info("L1 done: d32=%.2f µm, d_mode=%.2f µm, span=%.2f (%.1fs)",
+                     emul_result.d32 * 1e6, d_mode_um, emul_result.span, timings["L1"])
 
-        # ── Level 2: Gelation & Pore Formation ───────────────────────────
+        # ── Level 2a: Gelation Timing ──────────────────────────────────
         # Use d50 (volume median) as the representative droplet size for L2.
         # d32 (Sauter mean) overweights large droplets; d50 better represents the
         # population center.  The full size distribution (d10–d90) is recorded in
         # the summary so downstream users can estimate pore-size spread via the
         # Cahn-Hilliard scaling λ* ~ sqrt(R).
         R_droplet = emul_result.d50 / 2.0
-        logger.info("L2: Gelation (R=%.2f µm, d50-based)", R_droplet * 1e6)
+        logger.info("L2a: Gelation timing (R=%.2f um)", R_droplet * 1e6)
+        timing_result = solve_gelation_timing(params, props, R_droplet=R_droplet)
+        logger.info("L2a done: t_gel=%.1fs, alpha=%.3f, cool_eff=%.4f K/s",
+                     timing_result.t_gel_onset, timing_result.alpha_final,
+                     timing_result.cooling_rate_effective)
+
+        # ── Level 2b: Gelation & Pore Formation ─────────────────────────
+        logger.info("L2b: Gelation (R=%.2f µm, d50-based)", R_droplet * 1e6)
         t0 = time.perf_counter()
         gel_result = solve_gelation(params, props, R_droplet=R_droplet, mode=l2_mode)
         timings["L2"] = time.perf_counter() - t0
@@ -127,7 +155,7 @@ class PipelineOrchestrator:
         # ── Level 4: Mechanical Properties ───────────────────────────────
         logger.info("L4: Mechanical property prediction")
         t0 = time.perf_counter()
-        mech_result = solve_mechanical(params, props, gel_result, xlink_result)
+        mech_result = solve_mechanical(params, props, gel_result, xlink_result, R_droplet=R_droplet)
         timings["L4"] = time.perf_counter() - t0
         logger.info("L4 done: G_DN=%.0f Pa, E*=%.0f Pa (%.4fs)",
                      mech_result.G_DN, mech_result.E_star, timings["L4"])
@@ -142,8 +170,9 @@ class PipelineOrchestrator:
             gelation=gel_result,
             crosslinking=xlink_result,
             mechanical=mech_result,
+            gelation_timing=timing_result,
         )
-        trust = assess_trust(full_result, params, props, crosslinker_key=crosslinker_key)
+        trust = assess_trust(full_result, params, props, crosslinker_key=crosslinker_key, l2_mode=l2_mode)
         if not trust.trustworthy:
             logger.warning("TRUST GATE: %s", trust.summary())
         elif trust.warnings:
@@ -200,7 +229,10 @@ class PipelineOrchestrator:
         """Run Level 1 for a list of RPM values."""
         base_params = base_params or SimulationParameters()
         if phi_d is None:
-            phi_d = base_params.formulation.phi_d
+            if base_params.emulsification.mode == "stirred_vessel":
+                phi_d = base_params.formulation.phi_d_from_volumes
+            else:
+                phi_d = base_params.formulation.phi_d
         results = []
 
         props = self.db.update_for_conditions(
