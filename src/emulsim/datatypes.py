@@ -755,6 +755,12 @@ class MaterialProperties:
     # Chitosan viscosity
     eta_intr_chit: float = 800.0       # [mL/g] intrinsic viscosity of chitosan
 
+    # Shear-thinning (Cross model) — set to enable non-Newtonian dispersed phase
+    cross_mu_0: float = 0.0       # [Pa.s] zero-shear viscosity (0 = disabled, use constant mu_d)
+    cross_mu_inf: float = 0.001   # [Pa.s] infinite-shear viscosity
+    cross_K: float = 0.01         # [s] relaxation time
+    cross_n: float = 0.6          # [-] power-law index
+
     # Breakage kernel
     breakage_C3: float = 0.1           # [-] Alopaeus viscous correction. Changed from 0.0 in v2.0
                                         # to restore monotonic RPM→d32 behavior for viscous dispersed phases.
@@ -821,6 +827,11 @@ class GelationResult:
     phi_snapshots: Optional[np.ndarray] = None
     L_domain: float = 0.0              # [m] domain side length (2D solver)
     grid_spacing: float = 0.0          # [m] uniform grid spacing
+    # Morphology descriptors (v3.0)
+    bicontinuous_score: float = 0.5   # [-] 0-1
+    anisotropy: float = 0.0           # [-] 0-1
+    connectivity: float = 1.0         # [-] 0-1, fraction of pore space connected
+    chord_skewness: float = 0.0       # [-] skewness of chord length distribution
 
 
 @dataclass

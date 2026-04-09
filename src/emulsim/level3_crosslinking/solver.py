@@ -264,6 +264,169 @@ def _build_zero_result(params):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  Reaction-diffusion PDE solver (diffusion-limited regime)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _solve_reaction_diffusion(
+    params: SimulationParameters,
+    props: MaterialProperties,
+    R_droplet: float,
+    D_crosslinker: float = 1e-10,  # [m^2/s] diffusivity of crosslinker in gel
+) -> tuple[CrosslinkingResult, float]:
+    """1D spherical reaction-diffusion for diffusion-limited crosslinking.
+
+    Solves:  dG/dt = D*(1/r^2)*d/dr(r^2*dG/dr) - k*G*NH2
+    with BC: G(R) = G_bulk,  dG/dr(0) = 0  (symmetry)
+
+    Activated when Thiele modulus > 1, meaning crosslinker penetration is
+    limited by diffusion relative to reaction rate.
+
+    Parameters
+    ----------
+    params : SimulationParameters
+        Simulation parameters (crosslinker conc, temperature, time).
+    props : MaterialProperties
+        Material kinetic constants and polymer properties.
+    R_droplet : float
+        Microsphere radius [m].
+    D_crosslinker : float
+        Effective diffusivity of crosslinker in the gel matrix [m^2/s].
+
+    Returns
+    -------
+    result : CrosslinkingResult
+        Volume-averaged crosslinking result.
+    Phi : float
+        Thiele modulus for the system.
+    """
+    c_crosslinker = params.formulation.c_genipin
+    T = params.formulation.T_crosslink
+    t_xlink = params.formulation.t_crosslink
+
+    # Reaction rate constant (Arrhenius)
+    k_rate = arrhenius_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
+
+    # Reactive amine groups
+    NH2_total = available_amine_concentration(
+        params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+    )
+
+    # Thiele modulus
+    Phi = compute_thiele_modulus(R_droplet, k_rate, NH2_total, D_crosslinker)
+
+    # 1D radial grid (N_r interior points + boundaries)
+    N_r = 50
+    r = np.linspace(0, R_droplet, N_r + 1)  # include center
+    r[0] = r[1] * 0.01  # avoid r=0 singularity in 1/r^2 term
+    dr = r[1] - r[0]  # uniform spacing (except first cell)
+
+    # Initial condition: crosslinker at bulk conc throughout, all NH2 intact
+    G0 = np.ones(N_r + 1) * c_crosslinker
+    NH2_0 = np.ones(N_r + 1) * NH2_total
+
+    # State vector: [G(r_0..r_N), NH2(r_0..r_N)] flattened
+    y0 = np.concatenate([G0, NH2_0])
+    n = N_r + 1  # number of spatial nodes
+
+    def rhs(_t, y):
+        G = y[:n]
+        NH2 = y[n:]
+
+        dGdt = np.zeros(n)
+        dNH2dt = np.zeros(n)
+
+        # Interior nodes: spherical diffusion + second-order reaction
+        for i in range(1, n - 1):
+            # Spherical Laplacian via finite differences:
+            # (1/r^2) d/dr(r^2 dG/dr) discretized on non-uniform first cell
+            laplacian = (
+                (r[i + 1] ** 2 * (G[i + 1] - G[i])
+                 - r[i] ** 2 * (G[i] - G[i - 1]))
+                / (r[i] ** 2 * dr ** 2)
+            )
+            reaction = k_rate * max(G[i], 0.0) * max(NH2[i], 0.0)
+            dGdt[i] = D_crosslinker * laplacian - reaction
+            dNH2dt[i] = -2.0 * reaction  # 2 NH2 consumed per crosslink
+
+        # BC at center: symmetry  dG/dr(0) = 0  ->  copy neighbor rate
+        dGdt[0] = dGdt[1]
+        dNH2dt[0] = dNH2dt[1]
+
+        # BC at surface: Dirichlet  G(R) = G_bulk  ->  no change
+        dGdt[-1] = 0.0
+        dNH2dt[-1] = 0.0
+
+        return np.concatenate([dGdt, dNH2dt])
+
+    sol = solve_ivp(
+        rhs, (0, t_xlink), y0, method='BDF',
+        rtol=1e-6, atol=1e-8,
+        max_step=t_xlink / 20,
+    )
+
+    if not sol.success:
+        logger.warning("Reaction-diffusion solver did not converge: %s",
+                       sol.message)
+
+    # Extract final spatial profiles
+    G_final = sol.y[:n, -1]
+    NH2_final = sol.y[n:, -1]
+
+    # Volume-weighted average using spherical shells: int(f * r^2 dr) / int(r^2 dr)
+    r2 = r ** 2
+    w = r2 / np.sum(r2)  # volume weights (proportional to r^2)
+
+    G_avg_final = np.dot(w, G_final)
+    NH2_avg_final = np.dot(w, NH2_final)
+    X_consumed = c_crosslinker - G_avg_final  # volume-avg crosslinker consumed
+    p_avg = 1.0 - NH2_avg_final / NH2_total if NH2_total > 0 else 0.0
+    p_avg = float(np.clip(p_avg, 0.0, 1.0))
+
+    # Derived network properties from volume-averaged crosslink density
+    nu_e, Mc, xi, G_chit = crosslink_density_to_properties(
+        X_consumed, params.formulation.c_chitosan, T,
+        props.DDA, props.M_GlcN, NH2_total, props.f_bridge,
+    )
+
+    # Build time-resolved arrays (volume-averaged at each output time)
+    G_spatial = sol.y[:n, :]  # shape (n, N_t)
+    X_arr = c_crosslinker - np.dot(w, G_spatial)  # volume-avg consumed at each t
+
+    nu_e_arr = np.zeros_like(sol.t)
+    Mc_arr = np.zeros_like(sol.t)
+    xi_arr = np.zeros_like(sol.t)
+    G_arr = np.zeros_like(sol.t)
+    for i in range(len(sol.t)):
+        nu_e_arr[i], Mc_arr[i], xi_arr[i], G_arr[i] = (
+            crosslink_density_to_properties(
+                X_arr[i], params.formulation.c_chitosan, T,
+                props.DDA, props.M_GlcN, NH2_total, props.f_bridge,
+            )
+        )
+
+    result = CrosslinkingResult(
+        t_array=sol.t,
+        X_array=X_arr,
+        nu_e_array=nu_e_arr,
+        Mc_array=Mc_arr,
+        xi_array=xi_arr,
+        G_chitosan_array=G_arr,
+        p_final=p_avg,
+        nu_e_final=float(nu_e),
+        Mc_final=float(Mc),
+        xi_final=float(xi),
+        G_chitosan_final=float(G_chit),
+    )
+    result.network_metadata = NetworkTypeMetadata(
+        solver_family="amine_covalent",
+        network_target="chitosan",
+        bond_type="covalent",
+        is_true_second_network=True,
+    )
+    return result, Phi
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Per-mechanism solver implementations
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -585,6 +748,22 @@ def solve_crosslinking(params: SimulationParameters,
     if xl is None:
         raise ValueError(f"Unknown crosslinker_key: {crosslinker_key!r}. "
                          f"Valid keys: {list(CROSSLINKERS.keys())}")
+
+    # ── Check if reaction-diffusion PDE is needed (Thiele > 1) ────────
+    if R_droplet is not None and R_droplet > 20e-6:  # only for non-tiny droplets
+        D_xlink = 1e-10  # [m2/s] typical small molecule diffusivity in gel
+        k_rate = arrhenius_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
+        NH2 = available_amine_concentration(
+            params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+        )
+        Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
+        if Phi > 1.0:
+            logger.info("Thiele modulus %.1f > 1: using reaction-diffusion "
+                        "solver (R=%.0f um)", Phi, R_droplet * 1e6)
+            rd_result, _ = _solve_reaction_diffusion(
+                params, props, R_droplet, D_xlink,
+            )
+            return rd_result
 
     # ── Dispatch to mechanism-specific solver ──────────────────────────
     if xl.kinetics_model == 'second_order':

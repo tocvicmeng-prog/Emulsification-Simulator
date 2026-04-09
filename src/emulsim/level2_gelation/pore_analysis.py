@@ -273,3 +273,103 @@ def compute_porosity_2d(phi_2d: np.ndarray, threshold: float = None) -> float:
         threshold = 0.5 * (np.min(phi_2d) + np.max(phi_2d))
 
     return float(np.mean(phi_2d < threshold))
+
+
+def morphology_descriptors(phi_field: np.ndarray, grid_spacing: float,
+                            threshold: float = 0.5) -> dict:
+    """Compute morphology descriptors from the phase-field.
+
+    Parameters
+    ----------
+    phi_field : np.ndarray
+        2D polymer volume fraction field (N x N).
+    grid_spacing : float
+        Grid spacing [m].
+    threshold : float
+        Threshold for pore vs polymer classification.
+
+    Returns
+    -------
+    dict with keys:
+        bicontinuous_score : float  0-1, how bicontinuous the structure is
+        anisotropy : float          0-1, ratio of principal axis lengths
+        connectivity : float        0-1, fraction of pore space connected
+        skewness : float            skewness of chord length distribution
+    """
+    if phi_field.ndim != 2:
+        # 1D field: return default descriptors
+        return {
+            'bicontinuous_score': 0.5,
+            'anisotropy': 0.0,
+            'connectivity': 1.0,
+            'skewness': 0.0,
+        }
+
+    N = phi_field.shape[0]
+    pore_mask = phi_field < threshold
+    poly_mask = ~pore_mask
+
+    # 1. Bicontinuous score: fraction of rows AND columns that contain
+    #    both pore and polymer phases (indicates interpenetrating structure)
+    row_both = sum(1 for i in range(N) if pore_mask[i].any() and poly_mask[i].any())
+    col_both = sum(1 for j in range(N) if pore_mask[:, j].any() and poly_mask[:, j].any())
+    bicontinuous_score = (row_both + col_both) / (2 * N) if N > 0 else 0.0
+
+    # 2. Anisotropy: compare horizontal vs vertical chord lengths
+    h_chords = []
+    v_chords = []
+    for i in range(N):
+        row = pore_mask[i]
+        chord = 0
+        for j in range(N):
+            if row[j]:
+                chord += 1
+            elif chord > 0:
+                h_chords.append(chord * grid_spacing)
+                chord = 0
+        if chord > 0:
+            h_chords.append(chord * grid_spacing)
+
+    for j in range(N):
+        col = pore_mask[:, j]
+        chord = 0
+        for i in range(N):
+            if col[i]:
+                chord += 1
+            elif chord > 0:
+                v_chords.append(chord * grid_spacing)
+                chord = 0
+        if chord > 0:
+            v_chords.append(chord * grid_spacing)
+
+    mean_h = np.mean(h_chords) if h_chords else 1.0
+    mean_v = np.mean(v_chords) if v_chords else 1.0
+    anisotropy = abs(mean_h - mean_v) / max(mean_h, mean_v) if max(mean_h, mean_v) > 0 else 0.0
+
+    # 3. Connectivity: simple flood fill from top-left pore pixel
+    #    fraction of total pore pixels reachable
+    from scipy import ndimage
+    if pore_mask.any():
+        labeled, n_features = ndimage.label(pore_mask)
+        if n_features > 0:
+            largest_component = np.argmax(np.bincount(labeled.flat)[1:]) + 1
+            connectivity = np.sum(labeled == largest_component) / np.sum(pore_mask)
+        else:
+            connectivity = 0.0
+    else:
+        connectivity = 0.0
+
+    # 4. Skewness of all chord lengths
+    all_chords = h_chords + v_chords
+    if len(all_chords) > 2:
+        from scipy.stats import skew
+        skewness = float(skew(all_chords))
+    else:
+        skewness = 0.0
+
+    return {
+        'bicontinuous_score': float(bicontinuous_score),
+        'anisotropy': float(anisotropy),
+        'connectivity': float(connectivity),
+        'skewness': float(skewness),
+    }

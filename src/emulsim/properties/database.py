@@ -114,4 +114,12 @@ class PropertyDatabase:
         props.mu_d = self.dispersed_viscosity(T_oil, c_agarose, c_chitosan)
         props.sigma = self.interfacial_tension(T_oil, c_span80)
         props.chi_0 = self.chi_parameter(T_oil)
+
+        # Estimate Cross model parameters for shear-thinning
+        from .viscosity import estimate_cross_params
+        cross_params = estimate_cross_params(c_agarose + c_chitosan, T_oil)
+        props.cross_mu_0 = cross_params['mu_0']
+        props.cross_K = cross_params['K']
+        props.cross_n = cross_params['n']
+
         return props

@@ -108,6 +108,59 @@ def cross_model_correction(mu_0: float, shear_rate: float,
     return mu_0 / (1.0 + (lambda_cross * shear_rate) ** m_cross)
 
 
+def cross_viscosity(gamma_dot: float, mu_0: float, mu_inf: float = 0.001,
+                     K: float = 0.01, n: float = 0.6) -> float:
+    """Cross model for shear-thinning viscosity [Pa.s].
+
+    mu(gamma) = mu_inf + (mu_0 - mu_inf) / (1 + (K * gamma)^n)
+
+    Parameters
+    ----------
+    gamma_dot : float
+        Shear rate [1/s].
+    mu_0 : float
+        Zero-shear viscosity [Pa.s].
+    mu_inf : float
+        Infinite-shear viscosity [Pa.s] (default: water-like).
+    K : float
+        Relaxation time constant [s].
+    n : float
+        Power-law index [-] (0 < n < 1 for shear-thinning).
+    """
+    if gamma_dot <= 0:
+        return mu_0
+    return mu_inf + (mu_0 - mu_inf) / (1.0 + (K * gamma_dot) ** n)
+
+
+def estimate_cross_params(c_polymer_kg_m3: float, T: float = 353.15) -> dict:
+    """Estimate Cross model parameters from total polymer concentration.
+
+    ASSUMPTION: Based on typical agarose-chitosan solution behavior.
+    mu_0 scales as c^3.3 (de Gennes scaling for semidilute solutions).
+    K scales as c^1.5.
+    n ~ 0.5-0.7 (weakly dependent on concentration).
+
+    Parameters
+    ----------
+    c_polymer_kg_m3 : float
+        Total polymer concentration [kg/m3].
+    T : float
+        Temperature [K] (reserved for future Arrhenius correction).
+
+    Returns
+    -------
+    dict
+        Keys: mu_0, mu_inf, K, n
+    """
+    c_pct = c_polymer_kg_m3 / 10.0  # kg/m3 to % w/v
+    # ASSUMPTION: mu_0 ~ 0.01 * c^3.3 Pa.s at 80C (Arrhenius corrected)
+    mu_0 = 0.01 * max(c_pct, 0.1) ** 3.3
+    mu_inf = 0.001  # ~water
+    K = 0.005 * max(c_pct, 0.1) ** 1.5  # relaxation time
+    n = 0.6  # typical for polysaccharide solutions
+    return {'mu_0': mu_0, 'mu_inf': mu_inf, 'K': K, 'n': n}
+
+
 def water_viscosity(T: float) -> float:
     """Dynamic viscosity of water [Pa·s] at temperature T [K].
 

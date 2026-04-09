@@ -25,6 +25,7 @@ from .gelation import avrami_gelation, gelation_rate_constant, cooling_temperatu
 from .pore_analysis import (
     characteristic_wavelength, chord_length_distribution, compute_porosity,
     characteristic_wavelength_2d, chord_length_distribution_2d, compute_porosity_2d,
+    morphology_descriptors,
 )
 
 
@@ -278,6 +279,9 @@ class CahnHilliardSolver:
         pore_std = np.std(chords) if len(chords) > 1 else 0.0
         porosity = compute_porosity(phi, r)
 
+        # Morphology descriptors (1D field -> defaults)
+        morph = morphology_descriptors(phi, dr)
+
         T_hist_arr = np.array([T for _, T in T_history]) if T_history else np.array([0.0])
 
         return GelationResult(
@@ -291,6 +295,10 @@ class CahnHilliardSolver:
             char_wavelength=char_wl,
             T_history=T_hist_arr,
             phi_snapshots=np.array(phi_snapshots) if phi_snapshots else None,
+            bicontinuous_score=morph['bicontinuous_score'],
+            anisotropy=morph['anisotropy'],
+            connectivity=morph['connectivity'],
+            chord_skewness=morph['skewness'],
         )
 
 
@@ -509,6 +517,9 @@ class CahnHilliard2DSolver:
         pore_std = float(np.std(chords)) if len(chords) > 1 else 0.0
         porosity = compute_porosity_2d(phi_2d_final)
 
+        # Morphology descriptors
+        morph = morphology_descriptors(phi_2d_final, h)
+
         T_hist_arr = np.array([T for _, T in T_history]) if T_history else np.array([0.0])
 
         return GelationResult(
@@ -524,6 +535,10 @@ class CahnHilliard2DSolver:
             phi_snapshots=np.array(phi_snapshots) if phi_snapshots else None,
             L_domain=L_domain,
             grid_spacing=h,
+            bicontinuous_score=morph['bicontinuous_score'],
+            anisotropy=morph['anisotropy'],
+            connectivity=morph['connectivity'],
+            chord_skewness=morph['skewness'],
         )
 
 
@@ -661,6 +676,9 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
     T_gel = props.T_gel
     alpha_final = 0.999
 
+    # Morphology descriptors: empirical model uses defaults (1D field)
+    morph = morphology_descriptors(np.ones(N_r) * phi_dry, 0.0)
+
     return GelationResult(
         r_grid=r,
         phi_field=np.ones(N_r) * phi_dry,  # uniform (empirical model)
@@ -674,6 +692,10 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
         phi_snapshots=None,
         L_domain=0.0,
         grid_spacing=0.0,
+        bicontinuous_score=morph['bicontinuous_score'],
+        anisotropy=morph['anisotropy'],
+        connectivity=morph['connectivity'],
+        chord_skewness=morph['skewness'],
     )
 
 
