@@ -881,8 +881,8 @@ class MechanicalResult:
     pore_size_mean: float               # [m]
     xi_mesh: float                      # [m]
     model_used: str = "phenomenological"  # which modulus model produced G_DN
-    G_DN_lower: float = 0.0             # [Pa] Hashin-Shtrikman lower bound
-    G_DN_upper: float = 0.0             # [Pa] Hashin-Shtrikman upper bound
+    G_DN_lower: float = 0.0             # [Pa] Single-phase composite reference (HS bounds, not applicable to IPN)
+    G_DN_upper: float = 0.0             # [Pa] Single-phase composite reference (HS bounds, not applicable to IPN)
 
 
 @dataclass

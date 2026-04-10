@@ -366,6 +366,8 @@ custom_eta_coup = _const_input(
     _xl_eta, "-", f"{xl.name} library", -0.5, 0.5, 0.05,
     "eta_coup", "%.2f",
 )
+# Detect whether user chose "Custom" for eta coupling (radio key is "src_eta_coup")
+eta_coup_source = st.session_state.get("src_eta_coup", "Literature")
 
 # ─── Build Parameters ─────────────────────────────────────────────────────
 
@@ -456,6 +458,7 @@ from emulsim.datatypes import MaterialProperties as _MP
 _custom_props_overrides = {
     "breakage_C3": custom_C3,
     "eta_coupling": custom_eta_coup,
+    "eta_is_custom": (eta_coup_source == "Custom"),
 }
 
 # ─── Build reagent-library overrides ─────────────────────────────────
@@ -571,7 +574,7 @@ if "result" in st.session_state:
     _hs_hi = getattr(m, 'G_DN_upper', 0.0)
     if _hs_lo > 0 and _hs_hi > 0:
         col3.metric("G_DN", f"{m.G_DN/1000:.1f} kPa",
-                    delta=f"HS: [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa",
+                    delta=f"Ref: [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa (single-phase)",
                     delta_color="off")
     else:
         col3.metric("G_DN", f"{m.G_DN/1000:.1f} kPa",
@@ -683,7 +686,7 @@ if "result" in st.session_state:
 
         # U6b: HS bounds display
         if _hs_lo > 0 and _hs_hi > 0:
-            st.write(f"**Hashin-Shtrikman bounds:** [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa")
+            st.write(f"**Single-phase reference (HS composite bounds, not IPN bounds):** [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa")
         st.caption(f"Model: {_model_label}")
 
         # U7: Model comparison in Mechanistic Research mode

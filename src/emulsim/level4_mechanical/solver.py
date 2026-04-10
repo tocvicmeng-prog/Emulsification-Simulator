@@ -156,7 +156,7 @@ def flory_rehner_swelling(
     phi_0: float,
     chi: float,
     T: float = 298.15,
-) -> float:
+) -> tuple[float, bool]:
     """Equilibrium polymer volume fraction from Flory-Rehner theory.
 
     Solves the Flory-Rehner equation for equilibrium swelling of a
@@ -179,6 +179,8 @@ def flory_rehner_swelling(
     -------
     phi_eq : float
         Equilibrium swollen polymer volume fraction [-].
+    converged : bool
+        True if brentq found a root; False if fell back to phi_0.
 
     Notes
     -----
@@ -206,15 +208,14 @@ def flory_rehner_swelling(
 
     try:
         phi_eq = brentq(objective, phi_lo, phi_hi, xtol=1e-8, maxiter=200)
+        return float(phi_eq), True
     except ValueError:
         # Bracket does not contain root; return reference volume fraction
         logger.warning(
             "Flory-Rehner: no root in [%.4f, %.4f] for nu_e=%.1f, chi=%.3f. "
             "Returning phi_0=%.4f.", phi_lo, phi_hi, nu_e, chi, phi_0,
         )
-        phi_eq = phi_0
-
-    return float(phi_eq)
+        return float(phi_0), False
 
 
 def double_network_modulus_affine(
@@ -278,7 +279,9 @@ def double_network_modulus_affine(
 
     # --- Network 1: agarose ---
     if nu_e1 > 0 and phi_01 > 0:
-        phi_eq1 = flory_rehner_swelling(nu_e1, phi_01, chi1, T)
+        phi_eq1, fr_ok1 = flory_rehner_swelling(nu_e1, phi_01, chi1, T)
+        if not fr_ok1:
+            status = "fallback"
         if phi_eq1 > 0:
             lambda_1 = (phi_01 / phi_eq1) ** (1.0 / 3.0)
         else:
@@ -291,7 +294,9 @@ def double_network_modulus_affine(
 
     # --- Network 2: chitosan ---
     if nu_e2 > 0 and phi_02 > 0:
-        phi_eq2 = flory_rehner_swelling(nu_e2, phi_02, chi2, T)
+        phi_eq2, fr_ok2 = flory_rehner_swelling(nu_e2, phi_02, chi2, T)
+        if not fr_ok2:
+            status = "fallback"
         if phi_eq2 > 0:
             lambda_2 = (phi_02 / phi_eq2) ** (1.0 / 3.0)
         else:
@@ -318,6 +323,7 @@ def select_modulus_model(G_agarose: float, G_xlink: float,
                           model_mode: str = "hybrid_coupled",
                           params: SimulationParameters | None = None,
                           crosslinking: CrosslinkingResult | None = None,
+                          eta_is_custom: bool = False,
                           ) -> tuple[float, str]:
     """Route to the appropriate modulus model based on network metadata and mode.
 
@@ -330,13 +336,18 @@ def select_modulus_model(G_agarose: float, G_xlink: float,
     Falls back to phenomenological DN modulus if no metadata provided.
     Per-chemistry eta is read from network_metadata.eta_coupling_recommended
     when available; otherwise falls back to the eta_coupling parameter.
+    If eta_is_custom is True, the eta_coupling parameter is used as-is
+    (user explicitly set it via calibration).
     """
     if network_metadata is None:
         return double_network_modulus(G_agarose, G_xlink, eta_coupling), "phenomenological"
 
     # Extract per-chemistry eta from metadata, with fallback to parameter
     family = getattr(network_metadata, 'solver_family', 'amine_covalent')
-    eta_per_chem = getattr(network_metadata, 'eta_coupling_recommended', eta_coupling)
+    if eta_is_custom:
+        eta_per_chem = eta_coupling  # User explicitly set via calibration
+    else:
+        eta_per_chem = getattr(network_metadata, 'eta_coupling_recommended', eta_coupling)
 
     if family == "ionic_reversible":
         return ionic_gel_modulus(G_agarose, G_xlink), "ionic_gel"
@@ -386,6 +397,11 @@ def select_modulus_model(G_agarose: float, G_xlink: float,
                     "Affine IPN model fallback: status=%s, G=%.1f Pa. "
                     "Using phenomenological.", affine_status, G_affine,
                 )
+                # Fall through to phenomenological with fallback label
+                if family == "hydroxyl_covalent":
+                    return double_network_modulus(G_agarose, G_xlink, eta_coupling=eta_per_chem), "phenomenological_fallback"
+                else:
+                    return double_network_modulus(G_agarose, G_xlink, eta_per_chem), "phenomenological_fallback"
         except Exception as exc:
             logger.warning(
                 "Affine IPN model failed: %s. Using phenomenological.", exc,
@@ -473,7 +489,8 @@ def solve_mechanical(params: SimulationParameters,
                      props: MaterialProperties,
                      gelation: GelationResult,
                      crosslinking: CrosslinkingResult,
-                     R_droplet: float = None) -> MechanicalResult:
+                     R_droplet: float = None,
+                     eta_is_custom: bool = False) -> MechanicalResult:
     """Compute mechanical properties of the double-network microsphere.
 
     Parameters
@@ -507,6 +524,7 @@ def solve_mechanical(params: SimulationParameters,
         model_mode=model_mode_str,
         params=params,
         crosslinking=crosslinking,
+        eta_is_custom=eta_is_custom,
     )
 
     # Hashin-Shtrikman bounds: use agarose volume fraction in the polymer phase

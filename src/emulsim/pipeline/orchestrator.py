@@ -93,6 +93,10 @@ class PipelineOrchestrator:
             c_span80=params.formulation.c_span80,
         )
 
+        # Extract eta_is_custom before applying props overrides (it is not a
+        # MaterialProperties field and must not be set on props).
+        _eta_is_custom = bool(props_overrides.pop("eta_is_custom", False)) if props_overrides else False
+
         # Apply caller-supplied overrides (reagent library selections, etc.)
         if props_overrides:
             for k, v in props_overrides.items():
@@ -155,7 +159,7 @@ class PipelineOrchestrator:
         # ── Level 4: Mechanical Properties ───────────────────────────────
         logger.info("L4: Mechanical property prediction")
         t0 = time.perf_counter()
-        mech_result = solve_mechanical(params, props, gel_result, xlink_result, R_droplet=R_droplet)
+        mech_result = solve_mechanical(params, props, gel_result, xlink_result, R_droplet=R_droplet, eta_is_custom=_eta_is_custom)
         timings["L4"] = time.perf_counter() - t0
         logger.info("L4 done: G_DN=%.0f Pa, E*=%.0f Pa (%.4fs)",
                      mech_result.G_DN, mech_result.E_star, timings["L4"])
