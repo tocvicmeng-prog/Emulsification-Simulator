@@ -102,6 +102,19 @@ def available_hydroxyl_concentration(c_agarose: float) -> float:
     return c_agarose * 1000.0 * OH_per_repeat / M_agarose_repeat
 
 
+def recommended_crosslinker_concentration(
+    c_chitosan: float, DDA: float, M_GlcN: float,
+    target_p: float = 0.20,
+) -> float:
+    """Minimum crosslinker concentration [mol/m³] for target crosslinking fraction.
+
+    Each crosslink bridge consumes 1 crosslinker molecule and 2 NH₂ groups,
+    so c_xlink = target_p * [NH₂] / 2.
+    """
+    NH2 = available_amine_concentration(c_chitosan, DDA, M_GlcN)
+    return target_p * NH2 / 2.0
+
+
 def crosslinking_odes(t: float, y: np.ndarray, k: float,
                       NH2_total: float) -> np.ndarray:
     """RHS of the crosslinking ODE system.
@@ -241,14 +254,19 @@ def _build_result_arrays(t_arr, X_arr, c_polymer, T, DDA, M_GlcN,
     )
 
 
-def _build_zero_result(params):
-    """Return a CrosslinkingResult with all zeros (no crosslinking)."""
+def _build_zero_result(params, xl=None):
+    """Return a CrosslinkingResult with all zeros (no crosslinking).
+
+    When ``xl`` is provided, network_metadata is populated with the
+    crosslinker's per-chemistry eta so that downstream trust gates and
+    L4 modulus selection receive consistent metadata even on edge-case paths.
+    """
     t_xlink = params.formulation.t_crosslink
     t_arr = np.array([0.0, max(t_xlink, 1.0)])
     zeros = np.zeros_like(t_arr)
     xi_default = np.full_like(t_arr, 1e-6)  # 1 um uncrosslinked default
     Mc_default = np.full_like(t_arr, 1e10)
-    return CrosslinkingResult(
+    result = CrosslinkingResult(
         t_array=t_arr,
         X_array=zeros,
         nu_e_array=zeros,
@@ -261,6 +279,15 @@ def _build_zero_result(params):
         xi_final=1e-6,
         G_chitosan_final=0.0,
     )
+    if xl is not None:
+        result.network_metadata = NetworkTypeMetadata(
+            solver_family=getattr(xl, 'solver_family', 'amine_covalent'),
+            network_target="chitosan",
+            bond_type=getattr(xl, 'bond_type', 'covalent'),
+            is_true_second_network=False,
+            eta_coupling_recommended=xl.eta_coupling_recommended,
+        )
+    return result
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -417,12 +444,8 @@ def _solve_reaction_diffusion(
         xi_final=float(xi),
         G_chitosan_final=float(G_chit),
     )
-    result.network_metadata = NetworkTypeMetadata(
-        solver_family="amine_covalent",
-        network_target="chitosan",
-        bond_type="covalent",
-        is_true_second_network=True,
-    )
+    # NOTE: network_metadata is NOT set here — the caller (solve_crosslinking
+    # dispatcher) is responsible for attaching per-chemistry metadata after return.
     return result, Phi
 
 
@@ -587,7 +610,7 @@ def _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity):
     # Fix 4: Check t_crosslink > 0
     if t_xlink <= 0:
         logger.warning("L3 UV dose model: t_crosslink <= 0, returning zero conversion.")
-        return _build_zero_result(params)
+        return _build_zero_result(params, xl=xl)
 
     # k_eff = k_uv * sqrt(I_uv) where I_uv is in mW/cm2
     k_uv = arrhenius_rate_constant(T, k0, Ea)
@@ -644,7 +667,7 @@ def _solve_ionic_instant(params, props, xl, R_droplet, porosity):
     # Fix 5: When NH2_total <= 0, return zero crosslinking result directly
     if NH2_total <= 1e-10:
         logger.info("L3 ionic model: NH2_total ~ 0, no reactive groups for ionic crosslinking.")
-        return _build_zero_result(params)
+        return _build_zero_result(params, xl=xl)
 
     # Fix 1: Prefer crosslinker profile values over props when xl is provided
     fb = xl.f_bridge if xl else props.f_bridge
@@ -763,6 +786,14 @@ def solve_crosslinking(params: SimulationParameters,
             rd_result, _ = _solve_reaction_diffusion(
                 params, props, R_droplet, D_xlink,
             )
+            # Wire per-chemistry eta into the reaction-diffusion result's metadata
+            rd_result.network_metadata = NetworkTypeMetadata(
+                solver_family="amine_covalent",
+                network_target="chitosan",
+                bond_type="covalent",
+                is_true_second_network=True,
+                eta_coupling_recommended=xl.eta_coupling_recommended,
+            )
             return rd_result
 
     # ── Dispatch to mechanism-specific solver ──────────────────────────
@@ -774,6 +805,7 @@ def solve_crosslinking(params: SimulationParameters,
                 network_target="mixed",
                 bond_type="covalent",
                 is_true_second_network=True,
+                eta_coupling_recommended=xl.eta_coupling_recommended,
             )
         else:
             result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
@@ -782,6 +814,7 @@ def solve_crosslinking(params: SimulationParameters,
                 network_target="chitosan",
                 bond_type="covalent",
                 is_true_second_network=True,
+                eta_coupling_recommended=xl.eta_coupling_recommended,
             )
     elif xl.kinetics_model == 'uv_dose':
         result = _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity)
@@ -790,6 +823,7 @@ def solve_crosslinking(params: SimulationParameters,
             network_target="independent",
             bond_type="covalent",
             is_true_second_network=True,
+            eta_coupling_recommended=xl.eta_coupling_recommended,
         )
     elif xl.kinetics_model == 'ionic_instant':
         result = _solve_ionic_instant(params, props, xl, R_droplet, porosity)
@@ -798,6 +832,7 @@ def solve_crosslinking(params: SimulationParameters,
             network_target="chitosan",
             bond_type="ionic",
             is_true_second_network=False,
+            eta_coupling_recommended=xl.eta_coupling_recommended,
         )
     elif xl.kinetics_model == 'michaelis_menten':
         # Michaelis-Menten crosslinkers (e.g. EDC/NHS) fall back to
@@ -814,6 +849,7 @@ def solve_crosslinking(params: SimulationParameters,
             network_target="chitosan",
             bond_type="covalent",
             is_true_second_network=True,
+            eta_coupling_recommended=xl.eta_coupling_recommended,
         )
     else:
         raise ValueError(f"Unknown kinetics model: {xl.kinetics_model}")

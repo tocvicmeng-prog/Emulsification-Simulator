@@ -266,43 +266,95 @@ class PBESolver:
         # Initial distribution
         N0 = self._initial_distribution(phi_d)
 
-        # Integrate
         def rhs(t, N):
             return self._compute_rhs(t, N, birth_matrix, death_rate, Q)
 
-        t_span = (0.0, t_emul)
-        t_eval = np.linspace(0, t_emul, 101)
+        # ── Adaptive extension loop ─────────────────────────────────────
+        conv_tol = params.solver.l1_conv_tol
+        max_extensions = params.solver.l1_max_extensions
+        t_max_abs = params.solver.l1_t_max
 
-        sol = solve_ivp(
-            rhs, t_span, N0,
-            method='BDF',
-            rtol=params.solver.l1_rtol,
-            atol=params.solver.l1_atol,
-            t_eval=t_eval,
-            max_step=t_emul / 10,
-        )
+        t_start = 0.0
+        t_end = t_emul
+        N_current = N0.copy()
+        all_t = []
+        all_y_cols = []
+        n_extensions = 0
+        converged = False
+        t_converged = None
 
-        if not sol.success:
-            logger.warning("PBE solver did not converge: %s", sol.message)
+        for extension_round in range(max_extensions + 1):
+            t_span = (t_start, t_end)
+            n_eval_pts = 101 if extension_round == 0 else 51
+            t_eval = np.linspace(t_start, t_end, n_eval_pts)
 
-        N_final = np.maximum(sol.y[:, -1], 0.0)
+            sol = solve_ivp(
+                rhs, t_span, N_current,
+                method='BDF',
+                rtol=params.solver.l1_rtol,
+                atol=params.solver.l1_atol,
+                t_eval=t_eval,
+                max_step=(t_end - t_start) / 10,
+            )
+
+            if not sol.success:
+                logger.warning("PBE solver did not converge: %s", sol.message)
+
+            # Accumulate history
+            if extension_round == 0:
+                all_t.append(sol.t)
+                all_y_cols.append(sol.y)
+            else:
+                # Skip first point (duplicate of previous last point)
+                all_t.append(sol.t[1:])
+                all_y_cols.append(sol.y[:, 1:])
+
+            N_final = np.maximum(sol.y[:, -1], 0.0)
+
+            # Convergence check: d32 stable over last 10% of TOTAL accumulated time
+            t_combined = np.concatenate(all_t)
+            y_combined = np.concatenate(all_y_cols, axis=1)
+            n_check = max(1, len(t_combined) // 10)
+            if y_combined.shape[1] > n_check:
+                d32_late = [self._sauter_mean(np.maximum(y_combined[:, k], 0.0))
+                            for k in range(-n_check, 0)]
+                d32_current = self._sauter_mean(N_final)
+                variation = (max(d32_late) - min(d32_late)) / max(d32_current, 1e-15)
+                if variation < conv_tol:
+                    converged = True
+                    if t_converged is None:
+                        t_converged = float(t_combined[-1])
+                    break
+
+            # If not converged and more extensions allowed, extend
+            if extension_round < max_extensions:
+                extension_dt = t_emul / 2.0
+                new_t_end = t_end + extension_dt
+                if new_t_end > t_max_abs:
+                    new_t_end = t_max_abs
+                if new_t_end <= t_end:
+                    logger.info("L1: reached t_max=%.0fs without convergence", t_max_abs)
+                    break
+                logger.info(
+                    "L1: not converged at t=%.0fs, extending to %.0fs (extension %d/%d)",
+                    t_end, new_t_end, extension_round + 1, max_extensions,
+                )
+                N_current = N_final.copy()
+                t_start = t_end
+                t_end = new_t_end
+                n_extensions += 1
+
+        # Combine all history segments
+        t_combined = np.concatenate(all_t)
+        y_combined = np.concatenate(all_y_cols, axis=1)
+
+        N_final = np.maximum(y_combined[:, -1], 0.0)
         d32, d43, d10, d50, d90, span = self._compute_statistics(N_final)
-
-        # Convergence check — d32 stable over last 10 % of time
-        n_check = max(1, len(sol.t) // 10)
-        if sol.y.shape[1] > n_check:
-            d32_late = [self._sauter_mean(np.maximum(sol.y[:, k], 0.0))
-                        for k in range(-n_check, 0)]
-            converged = (max(d32_late) - min(d32_late)) / max(d32, 1e-15) < 0.01
-        else:
-            converged = False
-
         total_vol = np.sum(N_final * self.v_pivots)
 
         # Convert from total count per bin back to number density for output
         n_d_output = N_final / self.d_widths
-        n_d_history = sol.y.T / self.d_widths[np.newaxis, :]
-
+        n_d_history = y_combined.T / self.d_widths[np.newaxis, :]
         d_mode = self._compute_d_mode(N_final)
 
         return EmulsificationResult(
@@ -312,8 +364,10 @@ class PBESolver:
             total_volume_fraction=total_vol,
             converged=converged,
             d_mode=d_mode,
-            t_history=sol.t,
+            t_history=t_combined,
             n_d_history=n_d_history,
+            t_converged=t_converged,
+            n_extensions=n_extensions,
         )
 
     # ── Stirred-vessel solver ────────────────────────────────────────────
@@ -484,23 +538,88 @@ class PBESolver:
             birth_matrix, death_rate = self._build_breakage_matrix(g)
             return self._compute_rhs(t, N, birth_matrix, death_rate, Q)
 
-        # ── Integrate ────────────────────────────────────────────────────
-        t_span = (0.0, t_emul)
+        # ── Adaptive extension loop (stirred-vessel) ──────────────────────
+        # Relaxed convergence tolerance: stirred-vessel has noisier dynamics
+        conv_tol_sv = max(params.solver.l1_conv_tol, 0.05)
+        max_extensions = params.solver.l1_max_extensions
+        t_max_abs = params.solver.l1_t_max
 
-        sol = solve_ivp(
-            rhs, t_span, N0,
-            method='BDF',
-            rtol=params.solver.l1_rtol,
-            atol=params.solver.l1_atol,
-            t_eval=t_eval,
-            max_step=t_emul / 10,
-        )
+        t_start_sv = 0.0
+        t_end_sv = t_emul
+        N_current = N0.copy()
+        all_t_sv = []
+        all_y_cols_sv = []
+        n_extensions = 0
+        converged = False
+        t_converged = None
 
-        if not sol.success:
-            logger.warning("PBE solver (stirred-vessel) did not converge: %s",
-                           sol.message)
+        for extension_round in range(max_extensions + 1):
+            t_span_sv = (t_start_sv, t_end_sv)
+            n_eval_pts = 101 if extension_round == 0 else 51
+            t_eval_seg = np.linspace(t_start_sv, t_end_sv, n_eval_pts)
 
-        N_final = np.maximum(sol.y[:, -1], 0.0)
+            sol = solve_ivp(
+                rhs, t_span_sv, N_current,
+                method='BDF',
+                rtol=params.solver.l1_rtol,
+                atol=params.solver.l1_atol,
+                t_eval=t_eval_seg,
+                max_step=(t_end_sv - t_start_sv) / 10,
+            )
+
+            if not sol.success:
+                logger.warning("PBE solver (stirred-vessel) did not converge: %s",
+                               sol.message)
+
+            # Accumulate history
+            if extension_round == 0:
+                all_t_sv.append(sol.t)
+                all_y_cols_sv.append(sol.y)
+            else:
+                # Skip first point (duplicate of previous last point)
+                all_t_sv.append(sol.t[1:])
+                all_y_cols_sv.append(sol.y[:, 1:])
+
+            N_final = np.maximum(sol.y[:, -1], 0.0)
+
+            # Convergence check: d32 stable over last 20% of TOTAL accumulated time
+            t_combined_sv = np.concatenate(all_t_sv)
+            y_combined_sv = np.concatenate(all_y_cols_sv, axis=1)
+            n_check = max(1, len(t_combined_sv) // 5)   # 20% window
+            if y_combined_sv.shape[1] > n_check:
+                d32_late = [self._sauter_mean(np.maximum(y_combined_sv[:, k], 0.0))
+                            for k in range(-n_check, 0)]
+                d32_current = self._sauter_mean(N_final)
+                variation = (max(d32_late) - min(d32_late)) / max(d32_current, 1e-15)
+                if variation < conv_tol_sv:
+                    converged = True
+                    if t_converged is None:
+                        t_converged = float(t_combined_sv[-1])
+                    break
+
+            # If not converged and more extensions allowed, extend
+            if extension_round < max_extensions:
+                extension_dt = t_emul / 2.0
+                new_t_end = t_end_sv + extension_dt
+                if new_t_end > t_max_abs:
+                    new_t_end = t_max_abs
+                if new_t_end <= t_end_sv:
+                    logger.info("L1 (SV): reached t_max=%.0fs without convergence", t_max_abs)
+                    break
+                logger.info(
+                    "L1 (SV): not converged at t=%.0fs, extending to %.0fs (extension %d/%d)",
+                    t_end_sv, new_t_end, extension_round + 1, max_extensions,
+                )
+                N_current = N_final.copy()
+                t_start_sv = t_end_sv
+                t_end_sv = new_t_end
+                n_extensions += 1
+
+        # Combine all history segments
+        t_combined_sv = np.concatenate(all_t_sv)
+        y_combined_sv = np.concatenate(all_y_cols_sv, axis=1)
+
+        N_final = np.maximum(y_combined_sv[:, -1], 0.0)
         d32, d43, d10, d50, d90, span = self._compute_statistics(N_final)
         d_mode = self._compute_d_mode(N_final)
 
@@ -524,22 +643,11 @@ class PBESolver:
                         regime_ratio, d_mode * 1e6, eta_K * 1e6,
                     )
 
-        # Convergence check — d32 stable over last 20% of time (relaxed for
-        # stirred-vessel: larger droplets have noisier late-time dynamics)
-        n_check = max(1, len(sol.t) // 5)   # 20% of history
-        conv_tol = 0.05                       # 5% tolerance
-        if sol.y.shape[1] > n_check:
-            d32_late = [self._sauter_mean(np.maximum(sol.y[:, k], 0.0))
-                        for k in range(-n_check, 0)]
-            converged = (max(d32_late) - min(d32_late)) / max(d32, 1e-15) < conv_tol
-        else:
-            converged = False
-
         total_vol = np.sum(N_final * self.v_pivots)
 
         # Convert from total count per bin back to number density for output
         n_d_output = N_final / self.d_widths
-        n_d_history = sol.y.T / self.d_widths[np.newaxis, :]
+        n_d_history = y_combined_sv.T / self.d_widths[np.newaxis, :]
 
         return EmulsificationResult(
             d_bins=self.d_pivots.copy(),
@@ -548,8 +656,10 @@ class PBESolver:
             total_volume_fraction=total_vol,
             converged=converged,
             d_mode=d_mode,
-            t_history=sol.t,
+            t_history=t_combined_sv,
             n_d_history=n_d_history,
+            t_converged=t_converged,
+            n_extensions=n_extensions,
         )
 
     # ── Statistics helpers ────────────────────────────────────────────────

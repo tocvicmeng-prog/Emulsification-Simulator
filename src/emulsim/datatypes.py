@@ -549,6 +549,10 @@ class SolverSettings:
     l3_method: str = "Radau"
     l3_rtol: float = 1e-8
     l3_atol: float = 1e-10
+    # Level 1 adaptive convergence
+    l1_t_max: float = 600.0            # [s] absolute max emulsification time for adaptive extensions
+    l1_conv_tol: float = 0.01          # [-] relative d32 variation threshold for convergence
+    l1_max_extensions: int = 2         # [-] max number of adaptive time extensions
 
 
 @dataclass
@@ -791,6 +795,8 @@ class EmulsificationResult:
     d_mode: float = 0.0                 # [m] modal diameter (volume-weighted)
     t_history: Optional[np.ndarray] = None
     n_d_history: Optional[np.ndarray] = None
+    t_converged: Optional[float] = None # [s] time at which d32 convergence was first achieved (None if never)
+    n_extensions: int = 0               # [-] number of adaptive extensions performed
 
 
 @dataclass
@@ -841,6 +847,7 @@ class NetworkTypeMetadata:
     network_target: str = "chitosan"      # "chitosan", "agarose", "independent", "mixed"
     bond_type: str = "covalent"           # "covalent", "ionic", "reversible"
     is_true_second_network: bool = True   # True for IPN, False for reinforcement
+    eta_coupling_recommended: float = -0.15  # [-] per-chemistry IPN coupling coefficient from CrosslinkerProfile
 
 
 @dataclass
@@ -873,6 +880,9 @@ class MechanicalResult:
     Kav_array: np.ndarray               # [-]
     pore_size_mean: float               # [m]
     xi_mesh: float                      # [m]
+    model_used: str = "phenomenological"  # which modulus model produced G_DN
+    G_DN_lower: float = 0.0             # [Pa] Hashin-Shtrikman lower bound
+    G_DN_upper: float = 0.0             # [Pa] Hashin-Shtrikman upper bound
 
 
 @dataclass

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .datatypes import FullResult, SimulationParameters, MaterialProperties
+from .datatypes import FullResult, SimulationParameters, MaterialProperties, ModelMode
 
 
 @dataclass
@@ -100,11 +100,17 @@ def assess_trust(result: FullResult, params: SimulationParameters,
         )
 
     # 7. Crosslinker is limiting reagent
+    from .level3_crosslinking.solver import recommended_crosslinker_concentration
     NH2_total = params.formulation.c_chitosan * 1000 * props.DDA / props.M_GlcN
     if NH2_total > 0 and params.formulation.c_genipin / NH2_total < 0.05:
+        c_min = recommended_crosslinker_concentration(
+            params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+            target_p=0.10,  # target_p=0.10 -> ratio=0.05 threshold
+        )
         warnings.append(
             f"Crosslinker/NH2 ratio = {params.formulation.c_genipin/NH2_total:.3f} -- "
-            "crosslinker-limited, increasing crosslinking time will not help"
+            f"crosslinker-limited. Increase to at least {c_min:.1f} mol/m\u00b3 for ratio \u2265 0.05. "
+            "Increasing crosslinking time will not help."
         )
 
     # 8. Mechanical properties unreasonable
@@ -160,22 +166,41 @@ def assess_trust(result: FullResult, params: SimulationParameters,
             "Real chemistry also reacts with chitosan-NH2. Results may underestimate crosslink density."
         )
 
-    # 12. Phenomenological DN modulus (standing note)
-    warnings.append(
-        "G_DN uses phenomenological coupling formula (G1 + G2 + eta*sqrt(G1*G2)). "
-        "Suitable for formulation ranking, not absolute mechanical prediction."
+    # 12. Phenomenological DN modulus (mode-aware)
+    _model_mode_for_w3 = getattr(params, 'model_mode', None)
+    _model_used = getattr(m, 'model_used', None)
+    _suppress_w3 = (
+        _model_mode_for_w3 == ModelMode.EMPIRICAL_ENGINEERING
+        or _model_used == 'flory_rehner_affine'
     )
+    if not _suppress_w3:
+        _w3_msg = (
+            "G_DN uses phenomenological coupling formula (G1 + G2 + eta*sqrt(G1*G2)). "
+            "Suitable for formulation ranking, not absolute mechanical prediction."
+        )
+        if _model_mode_for_w3 == ModelMode.MECHANISTIC_RESEARCH:
+            blockers.append(_w3_msg)
+        else:
+            # hybrid_coupled and all other modes: keep as warning
+            warnings.append(_w3_msg)
 
     # 13. Model mode mismatch (mechanistic_research requested but empirical L2 used)
     model_mode = getattr(params, 'model_mode', None)
-    if model_mode == 'mechanistic_research' and l2_mode == 'empirical':
+    if model_mode == ModelMode.MECHANISTIC_RESEARCH and l2_mode == 'empirical':
         warnings.append(
             "Mechanistic research mode requested but empirical L2 pore model was used. "
             "Switch to ch_2d for mechanistic consistency."
         )
 
     # 14. Non-specific eta_coupling (same default for all crosslinker types)
-    if props.eta_coupling == -0.15:
+    # Suppressed when per-chemistry eta has been wired through L3 -> L4 via
+    # CrosslinkerProfile.eta_coupling_recommended -> NetworkTypeMetadata.eta_coupling_recommended.
+    _network_meta = getattr(x, 'network_metadata', None)
+    _per_chem_eta_active = (
+        _network_meta is not None
+        and hasattr(_network_meta, 'eta_coupling_recommended')
+    )
+    if not _per_chem_eta_active and props.eta_coupling == -0.15:
         warnings.append(
             "IPN coupling coefficient (eta=-0.15) is the same default for all crosslinker types. "
             "Per-chemistry eta values would improve accuracy."

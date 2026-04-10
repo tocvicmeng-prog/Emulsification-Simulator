@@ -4,7 +4,7 @@ notes = "Baseline simulation with default parameters"
 
 [emulsification]
 rpm = 10000
-t_emulsification = 60.0  # [s] (1 min — sufficient for steady state)
+t_emulsification = 300.0  # [s] (5 min — allows PBE to reach steady state for viscous systems)
 
 [emulsification.mixer]
 rotor_diameter = 0.025    # [m] (25 mm rotor)
@@ -18,7 +18,7 @@ dissipation_ratio = 50.0
 c_agarose = 42.0          # [kg/m³] (4.2% w/v for 7:3 ratio with total 6%)
 c_chitosan = 18.0          # [kg/m³] (1.8% w/v)
 c_span80 = 20.0            # [kg/m³] (~2% w/v)
-c_genipin = 2.0            # [mol/m³] (~2 mM)
+c_genipin = 10.0           # [mol/m³] (~10 mM, stoichiometric for target p≈0.20)
 T_oil = 363.15             # [K] (90°C)
 cooling_rate = 0.167        # [K/s] (~10°C/min)
 T_crosslink = 310.15       # [K] (37°C)
@@ -31,6 +31,9 @@ d_min = 1e-6              # [m]
 d_max = 500e-6            # [m]
 rtol = 1e-6
 atol = 1e-8
+t_max = 600.0             # [s] absolute ceiling for adaptive extensions
+conv_tol = 0.01           # [-] relative d32 variation for convergence
+max_extensions = 2        # [-] max number of half-interval extensions
 
 [solver.level2]
 n_r = 1000
