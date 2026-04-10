@@ -115,6 +115,50 @@ def plot_kav_curve(result: MechanicalResult) -> go.Figure:
     return fig
 
 
+def plot_modulus_comparison(m: MechanicalResult) -> go.Figure:
+    """Bar chart comparing G_agarose, G_chitosan, and G_DN with HS error bars."""
+    labels = ["G_agarose", "G_chitosan (XL)", "G_DN"]
+    values_kpa = [m.G_agarose / 1000, m.G_chitosan / 1000, m.G_DN / 1000]
+    colors = ["steelblue", "crimson", "darkorange"]
+
+    # HS error bars on G_DN
+    _hs_lo = getattr(m, 'G_DN_lower', 0.0)
+    _hs_hi = getattr(m, 'G_DN_upper', 0.0)
+    error_minus = [0.0, 0.0, max(m.G_DN - _hs_lo, 0.0) / 1000 if _hs_lo > 0 else 0.0]
+    error_plus  = [0.0, 0.0, max(_hs_hi - m.G_DN, 0.0) / 1000 if _hs_hi > 0 else 0.0]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=labels,
+        y=values_kpa,
+        marker_color=colors,
+        error_y=dict(
+            type="data",
+            symmetric=False,
+            array=error_plus,
+            arrayminus=error_minus,
+            visible=any(v > 0 for v in error_plus),
+            color="black",
+            thickness=2,
+            width=8,
+        ),
+        name="Shear modulus",
+    ))
+
+    _model_label = getattr(m, 'model_used', 'phenomenological')
+    _hs_text = ""
+    if _hs_lo > 0 and _hs_hi > 0:
+        _hs_text = f"  |  HS: [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa"
+    fig.update_layout(
+        title=f"Modulus Breakdown (L4) — Model: {_model_label}{_hs_text}",
+        yaxis_title="Shear Modulus (kPa)",
+        xaxis_title="Network Component",
+        height=380,
+        showlegend=False,
+    )
+    return fig
+
+
 def plot_results_dashboard(result: FullResult) -> go.Figure:
     """Combined 4-panel dashboard of all levels."""
     fig = make_subplots(

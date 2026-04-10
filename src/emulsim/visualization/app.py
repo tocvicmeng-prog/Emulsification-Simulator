@@ -35,7 +35,7 @@ from emulsim.datatypes import (
     SimulationParameters, MaterialProperties, FormulationParameters,
     EmulsificationParameters, MixerGeometry, SolverSettings,
     VesselGeometry, StirrerGeometry, HeatingConfig, KernelConfig,
-    VesselType, StirrerType, HeatingStrategy,
+    VesselType, StirrerType, HeatingStrategy, ModelMode,
 )
 from emulsim.properties.database import PropertyDatabase
 from emulsim.pipeline.orchestrator import PipelineOrchestrator
@@ -48,6 +48,7 @@ from emulsim.visualization.plots import (
     plot_hertz_contact,
     plot_kav_curve,
     plot_results_dashboard,
+    plot_modulus_comparison,
 )
 
 # ─── Page Config ──────────────────────────────────────────────────────────
@@ -74,6 +75,22 @@ sim_mode = st.sidebar.radio(
          "Stirred Vessel: pitched-blade or small rotor-stator at 800-9000 RPM.",
 )
 is_stirred = "Stirred" in sim_mode
+
+# ── Scientific Mode ──
+model_mode = st.sidebar.radio(
+    "Scientific Mode",
+    ["Empirical Engineering", "Hybrid Coupled", "Mechanistic Research"],
+    index=1,  # default: Hybrid Coupled
+    help="Empirical: fast screening, suppresses model warnings. "
+         "Hybrid: default, phenomenological DN model with trust warnings. "
+         "Mechanistic: Flory-Rehner affine IPN model, strictest trust gates.",
+)
+_mode_map = {
+    "Empirical Engineering": ModelMode.EMPIRICAL_ENGINEERING,
+    "Hybrid Coupled": ModelMode.HYBRID_COUPLED,
+    "Mechanistic Research": ModelMode.MECHANISTIC_RESEARCH,
+}
+model_mode_enum = _mode_map[model_mode]
 
 st.sidebar.subheader("Emulsification (L1)")
 
@@ -119,6 +136,21 @@ else:
     v_oil_mL = 300
     v_poly_mL = 200
     total_mL = 500
+
+if model_mode_enum != ModelMode.EMPIRICAL_ENGINEERING:
+    with st.sidebar.expander("Advanced PBE Settings",
+                              expanded=(model_mode_enum == ModelMode.MECHANISTIC_RESEARCH)):
+        l1_t_max = st.slider("Max emulsification time (s)", 60, 1800, 600, step=60,
+                              help="Absolute ceiling for adaptive time extensions")
+        l1_conv_tol = st.slider("Convergence tolerance", 0.005, 0.10, 0.01, step=0.005,
+                                 format="%.3f",
+                                 help="Relative d32 variation threshold for steady state")
+        l1_max_ext = st.number_input("Max extensions", 0, 5, 2,
+                                      help="Number of half-interval extensions if PBE not converged")
+else:
+    l1_t_max = 600.0
+    l1_conv_tol = 0.01
+    l1_max_ext = 2
 
 st.sidebar.subheader("Formulation")
 
@@ -187,6 +219,31 @@ xl = CROSSLINKERS[_xl_sel_key]
 st.sidebar.caption(f"{xl.mechanism} | k\u2080={xl.k_xlink_0:.1e} | Score: {xl.suitability}/10")
 
 c_genipin_mM = st.sidebar.slider("Crosslinker Concentration (mM)", 0.5, 10.0, 2.0, step=0.5)
+
+# ── Stoichiometry guidance ──
+from emulsim.level3_crosslinking.solver import (
+    available_amine_concentration,
+    recommended_crosslinker_concentration,
+)
+_DDA = 0.90  # TODO: make user-adjustable in future
+_M_GlcN = 161.16
+_c_chit_kg = c_chitosan_pct * 10.0  # % -> kg/m3
+_NH2 = available_amine_concentration(_c_chit_kg, _DDA, _M_GlcN)
+if _NH2 > 0:
+    _ratio = c_genipin_mM / _NH2
+    _c_rec = recommended_crosslinker_concentration(_c_chit_kg, _DDA, _M_GlcN, target_p=0.20)
+    if _ratio >= 0.10:
+        st.sidebar.success(f"Crosslinker/NH\u2082 = {_ratio:.3f} \u2014 sufficient for p \u2265 0.20")
+    elif _ratio >= 0.05:
+        st.sidebar.warning(
+            f"Crosslinker/NH\u2082 = {_ratio:.3f} \u2014 may be limiting. "
+            f"Recommend \u2265 {_c_rec:.1f} mM for target p = 0.20"
+        )
+    else:
+        st.sidebar.error(
+            f"Crosslinker/NH\u2082 = {_ratio:.3f} \u2014 severely limiting! "
+            f"Increase to at least {_c_rec:.1f} mM for target p = 0.20"
+        )
 
 # Adapt slider defaults and ranges from crosslinker profile
 _T_xlink_default = int(xl.T_crosslink_default - 273.15)
@@ -301,10 +358,12 @@ custom_C3 = _const_input(
     "C3", "%.2f",
 )
 
-_et = ALL_CONSTANTS["eta_coupling"]
+# U5: Per-chemistry eta display — use crosslinker-specific recommended value
+_xl_eta = xl.eta_coupling_recommended
+st.sidebar.caption(f"Per-chemistry η for {xl.name}: {_xl_eta:+.2f}")
 custom_eta_coup = _const_input(
     "η coupling (IPN)", "eta_coup",
-    _et.value, "-", "Gong 2010 est.", -0.5, 0.5, 0.05,
+    _xl_eta, "-", f"{xl.name} library", -0.5, 0.5, 0.05,
     "eta_coup", "%.2f",
 )
 
@@ -332,6 +391,7 @@ if is_stirred:
     _kernels = KernelConfig.for_stirrer_type(_stirrer.stirrer_type)
 
     params = SimulationParameters(
+        model_mode=model_mode_enum,
         emulsification=EmulsificationParameters(
             mode="stirred_vessel",
             rpm=float(rpm),
@@ -358,10 +418,14 @@ if is_stirred:
         solver=SolverSettings(
             l1_n_bins=40, l1_d_min=1e-6, l1_d_max=2000e-6,
             l2_n_grid=grid_size,
+            l1_t_max=float(l1_t_max),
+            l1_conv_tol=float(l1_conv_tol),
+            l1_max_extensions=int(l1_max_ext),
         ),
     )
 else:
     params = SimulationParameters(
+        model_mode=model_mode_enum,
         emulsification=EmulsificationParameters(
             mode="rotor_stator_legacy",
             rpm=float(rpm),
@@ -379,7 +443,12 @@ else:
             t_crosslink=float(t_xlink_h * 3600),
             phi_d=phi_d,
         ),
-        solver=SolverSettings(l2_n_grid=grid_size),
+        solver=SolverSettings(
+            l2_n_grid=grid_size,
+            l1_t_max=float(l1_t_max),
+            l1_conv_tol=float(l1_conv_tol),
+            l1_max_extensions=int(l1_max_ext),
+        ),
     )
 
 # Apply custom/literature material constants
@@ -457,7 +526,8 @@ if run_btn:
         if hasattr(props_trust, _k):
             setattr(props_trust, _k, _v)
     st.session_state["trust"] = assess_trust(result, params, props_trust,
-                                                crosslinker_key=_xl_sel_key)
+                                                crosslinker_key=_xl_sel_key,
+                                                l2_mode=l2_mode)
 
 # ─── Display Results ──────────────────────────────────────────────────────
 
@@ -496,9 +566,17 @@ if "result" in st.session_state:
     col2.metric("Pore Size", f"{g.pore_size_mean*1e9:.1f} nm",
                 delta=f"{pore_dev:.0f}% from target",
                 delta_color="inverse")
-    col3.metric("G_DN", f"{m.G_DN/1000:.1f} kPa",
-                delta=f"{G_dev:.0f}% from target",
-                delta_color="inverse")
+    # U6: Show Hashin-Shtrikman bounds on G_DN metric if available
+    _hs_lo = getattr(m, 'G_DN_lower', 0.0)
+    _hs_hi = getattr(m, 'G_DN_upper', 0.0)
+    if _hs_lo > 0 and _hs_hi > 0:
+        col3.metric("G_DN", f"{m.G_DN/1000:.1f} kPa",
+                    delta=f"HS: [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa",
+                    delta_color="off")
+    else:
+        col3.metric("G_DN", f"{m.G_DN/1000:.1f} kPa",
+                    delta=f"{G_dev:.0f}% from target",
+                    delta_color="inverse")
     col4.metric("Pipeline Time", f"{elapsed:.1f}s")
 
     # Additional metrics
@@ -534,8 +612,14 @@ if "result" in st.session_state:
         c3.write(f"**d43** = {e.d43*1e6:.2f} um")
         c3.write(f"**Span** = {e.span:.3f}")
 
-        _conv_icon = "Yes" if e.converged else "No (still evolving)"
-        st.write(f"Converged: {_conv_icon}")
+        _conv_icon = "✅ Yes" if e.converged else "⚠️ No (still evolving)"
+        st.write(f"**Converged:** {_conv_icon}")
+        _t_conv = getattr(e, 't_converged', None)
+        _n_ext = getattr(e, 'n_extensions', 0)
+        if _t_conv is not None:
+            st.write(f"Converged at t = {_t_conv:.1f} s")
+        if _n_ext > 0:
+            st.write(f"Adaptive extensions: {_n_ext}")
         if is_stirred:
             st.caption(
                 f"Mode: stirred-vessel | "
@@ -572,16 +656,46 @@ if "result" in st.session_state:
     with tab5:
         st.subheader("Level 4: Mechanical Properties")
 
+        # U7: Model used label + Flory-Rehner status
+        _model_label = getattr(m, 'model_used', 'phenomenological')
+        st.caption(f"Model: {_model_label}")
+        if _model_label == "flory_rehner_affine":
+            st.success("Flory-Rehner affine IPN model converged — mechanistic crosslink density used.")
+        elif _model_label == "phenomenological":
+            if model_mode_enum == ModelMode.MECHANISTIC_RESEARCH:
+                st.info("Using phenomenological model. Switch to Mechanistic Research mode to enable Flory-Rehner affine IPN.")
+            else:
+                st.info("Phenomenological DN model (G1 + G2 + η√(G1·G2)). Switch to Mechanistic Research for affine IPN.")
+
         left, right = st.columns(2)
         with left:
             st.plotly_chart(plot_hertz_contact(m), use_container_width=True)
         with right:
             st.plotly_chart(plot_kav_curve(m), use_container_width=True)
 
+        # U6c: Modulus comparison bar chart
+        st.plotly_chart(plot_modulus_comparison(m), use_container_width=True)
+
         c1, c2, c3 = st.columns(3)
         c1.write(f"**G_agarose** = {m.G_agarose:.0f} Pa ({m.G_agarose/1000:.1f} kPa)")
         c2.write(f"**G_crosslinked** = {m.G_chitosan:.0f} Pa ({m.G_chitosan/1000:.1f} kPa)")
         c3.write(f"**G_DN** = {m.G_DN:.0f} Pa ({m.G_DN/1000:.1f} kPa)")
+
+        # U6b: HS bounds display
+        if _hs_lo > 0 and _hs_hi > 0:
+            st.write(f"**Hashin-Shtrikman bounds:** [{_hs_lo/1000:.1f}, {_hs_hi/1000:.1f}] kPa")
+        st.caption(f"Model: {_model_label}")
+
+        # U7: Model comparison in Mechanistic Research mode
+        if model_mode_enum == ModelMode.MECHANISTIC_RESEARCH:
+            st.write("**Model Comparison:**")
+            from emulsim.level4_mechanical.solver import double_network_modulus as _dnm
+            _eta_comp = getattr(x.network_metadata, 'eta_coupling_recommended', -0.15) if x.network_metadata else -0.15
+            _G_pheno = _dnm(m.G_agarose, m.G_chitosan, _eta_comp)
+            st.write(
+                f"Phenomenological: {_G_pheno/1000:.1f} kPa | "
+                f"{'Affine IPN' if _model_label == 'flory_rehner_affine' else _model_label}: {m.G_DN/1000:.1f} kPa"
+            )
 
     # ── Optimization Assessment ───────────────────────────────────────
 
@@ -656,6 +770,13 @@ if "result" in st.session_state:
 
         trust = st.session_state["trust"]
 
+        _mode_desc = {
+            "empirical_engineering": "Empirical Engineering — trust warnings relaxed for screening",
+            "hybrid_coupled": "Hybrid Coupled — phenomenological models with trust warnings",
+            "mechanistic_research": "Mechanistic Research — strictest gates, Flory-Rehner when available",
+        }
+        st.caption(f"Mode: {_mode_desc.get(model_mode_enum.value, model_mode_enum.value)}")
+
         if trust.level == "TRUSTWORTHY":
             st.success(f"**{trust.level}** -- All checks passed.")
         elif trust.level == "CAUTION":
@@ -693,8 +814,9 @@ if "result" in st.session_state:
 
 st.divider()
 st.caption(
-    "EmulSim v2.0 -- Modular process-modeling platform combining calibrated empirical models "
+    "EmulSim v3.1 -- Modular process-modeling platform combining calibrated empirical models "
     "and mechanistic submodels for emulsified hydrogel microsphere fabrication. "
-    "L1: PBE emulsification | L2: Empirical pore correlation (size-coupled) or Cahn-Hilliard 2D | "
-    "L3: Chemistry-specific crosslinking | L4: Phenomenological property estimator."
+    "L1: PBE emulsification (adaptive convergence) | L2: Empirical pore or Cahn-Hilliard 2D | "
+    "L3: Chemistry-specific crosslinking (per-chemistry eta) | "
+    "L4: Phenomenological + Flory-Rehner affine IPN + Hashin-Shtrikman bounds."
 )
