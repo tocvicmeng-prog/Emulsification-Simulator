@@ -174,7 +174,7 @@ with col2:
     c_chitosan_pct = st.number_input("Chitosan (% w/v)", 0.5, 5.0, 1.8, step=0.1)
 
 if is_stirred:
-    c_span80_vol_pct = st.sidebar.slider("Span-80 in oil (% v/v)", 0.5, 5.0, 1.5, step=0.1)
+    c_span80_vol_pct = st.sidebar.slider("Span-80 in oil (% v/v)", 0.2, 5.0, 1.5, step=0.1)
     c_span80_pct = c_span80_vol_pct * 986.0 / 1000.0  # convert v/v to approx w/v
     T_oil_C = st.sidebar.slider("Paraffin Oil Temperature (C)", 65, 110, 80, step=1,
                                  help="Oil temperature at start of emulsification. "
@@ -187,7 +187,7 @@ else:
 
 st.sidebar.subheader("Cooling & Gelation (L2)")
 if is_stirred:
-    cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (C/min)", 0.3, 3.0, 0.67, step=0.1,
+    cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (C/min)", 0.1, 15.0, 0.67, step=0.1,
                                            help="Natural cooling: ~0.67 C/min for 500 mL beaker")
 else:
     cooling_rate_Cmin = st.sidebar.slider("Cooling Rate (C/min)", 1.0, 20.0, 10.0, step=0.5)
@@ -218,7 +218,7 @@ _xl_sel_key = _xl_keys[_xl_names.index(_xl_sel_name)]
 xl = CROSSLINKERS[_xl_sel_key]
 st.sidebar.caption(f"{xl.mechanism} | k\u2080={xl.k_xlink_0:.1e} | Score: {xl.suitability}/10")
 
-c_genipin_mM = st.sidebar.slider("Crosslinker Concentration (mM)", 0.5, 10.0, 2.0, step=0.5)
+c_genipin_mM = st.sidebar.slider("Crosslinker Concentration (mM)", 0.5, 500.0, 10.0, step=0.5)
 
 # ── Stoichiometry guidance ──
 from emulsim.level3_crosslinking.solver import (

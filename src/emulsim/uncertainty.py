@@ -82,7 +82,7 @@ class UncertaintyPropagator:
                 'confinement_alpha': self.rng.uniform(0.10, 0.25),             # confinement coeff
 
                 # L1 kernel structural uncertainty (breakage rate)
-                'breakage_C1_factor': 10 ** self.rng.uniform(-0.30, 0.30),     # +/-50%
+                'breakage_C3_factor': 10 ** self.rng.uniform(-0.30, 0.30),     # +/-50%
             }
             perturbations.append(p)
 
@@ -156,7 +156,7 @@ class UncertaintyPropagator:
 
                 # L1 — apply breakage kernel structural uncertainty
                 # Perturb breakage_C3 (viscous correction constant read by PBE)
-                props_i.breakage_C3 = props_i.breakage_C3 * perturb['breakage_C1_factor']
+                props_i.breakage_C3 = props_i.breakage_C3 * perturb['breakage_C3_factor']
 
                 pbe = PBESolver(
                     n_bins=params_i.solver.l1_n_bins,

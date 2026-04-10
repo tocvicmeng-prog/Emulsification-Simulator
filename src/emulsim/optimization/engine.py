@@ -16,7 +16,7 @@ from typing import Optional
 import numpy as np
 import torch
 from botorch.acquisition.multi_objective import (
-    qExpectedHypervolumeImprovement,
+    qLogExpectedHypervolumeImprovement,
 )
 from botorch.models import SingleTaskGP
 from botorch.models.model_list_gp_regression import ModelListGP
@@ -280,7 +280,7 @@ class OptimizationEngine:
                     ref_point=-REF_POINT, Y=neg_Y,
                 )
 
-                acqf = qExpectedHypervolumeImprovement(
+                acqf = qLogExpectedHypervolumeImprovement(
                     model=model,
                     ref_point=(-REF_POINT).tolist(),
                     partitioning=partitioning,

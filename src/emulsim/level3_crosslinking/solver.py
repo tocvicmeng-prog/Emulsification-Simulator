@@ -731,6 +731,60 @@ def _solve_ionic_instant(params, props, xl, R_droplet, porosity):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+#  Diffusion-limit guard for unsupported chemistries
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _check_diffusion_limited_unsupported(
+    xl,
+    R_droplet: float,
+    params,
+    props,
+    chemistry_type: str,
+) -> None:
+    """Raise NotImplementedError if Thiele > 1 for a chemistry that lacks a PDE solver.
+
+    Called for hydroxyl-reactive, UV, and ionic crosslinkers when the droplet
+    is large enough that diffusion-limited conditions may apply.  These chemistries
+    cannot fall back to the amine/genipin reaction-diffusion PDE because the
+    underlying physics differ (OH groups, photoinitiation front, shrinking-core
+    ionic model).
+
+    Parameters
+    ----------
+    xl : CrosslinkerProfile
+        Resolved crosslinker profile.
+    R_droplet : float
+        Microsphere radius [m].
+    params : SimulationParameters
+    props : MaterialProperties
+    chemistry_type : str
+        Human-readable chemistry label for error messages.
+    """
+    T = params.formulation.T_crosslink
+    D_xlink = 1e-10  # [m2/s] generic small-molecule diffusivity in gel
+    k_rate = arrhenius_rate_constant(T, xl.k_xlink_0, xl.E_a_xlink)
+
+    # Select the appropriate reactive group concentration
+    if chemistry_type == "hydroxyl-reactive":
+        reactive = available_hydroxyl_concentration(params.formulation.c_agarose)
+    else:
+        reactive = available_amine_concentration(
+            params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+        )
+
+    if reactive > 0:
+        Phi = compute_thiele_modulus(R_droplet, k_rate, reactive, D_xlink)
+        if Phi > 1.0:
+            raise NotImplementedError(
+                f"Diffusion-limited regime (Thiele={Phi:.1f}) not supported for "
+                f"{chemistry_type} crosslinker '{xl.name}'. "
+                f"R_droplet={R_droplet * 1e6:.0f} um is too large for ODE kinetics. "
+                f"Reduce droplet size or use an amine-reactive crosslinker "
+                f"(genipin, glutaraldehyde)."
+            )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 #  Main dispatcher
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -772,33 +826,17 @@ def solve_crosslinking(params: SimulationParameters,
         raise ValueError(f"Unknown crosslinker_key: {crosslinker_key!r}. "
                          f"Valid keys: {list(CROSSLINKERS.keys())}")
 
-    # ── Check if reaction-diffusion PDE is needed (Thiele > 1) ────────
-    if R_droplet is not None and R_droplet > 20e-6:  # only for non-tiny droplets
-        D_xlink = 1e-10  # [m2/s] typical small molecule diffusivity in gel
-        k_rate = arrhenius_rate_constant(T, props.k_xlink_0, props.E_a_xlink)
-        NH2 = available_amine_concentration(
-            params.formulation.c_chitosan, props.DDA, props.M_GlcN,
-        )
-        Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
-        if Phi > 1.0:
-            logger.info("Thiele modulus %.1f > 1: using reaction-diffusion "
-                        "solver (R=%.0f um)", Phi, R_droplet * 1e6)
-            rd_result, _ = _solve_reaction_diffusion(
-                params, props, R_droplet, D_xlink,
-            )
-            # Wire per-chemistry eta into the reaction-diffusion result's metadata
-            rd_result.network_metadata = NetworkTypeMetadata(
-                solver_family="amine_covalent",
-                network_target="chitosan",
-                bond_type="covalent",
-                is_true_second_network=True,
-                eta_coupling_recommended=xl.eta_coupling_recommended,
-            )
-            return rd_result
-
     # ── Dispatch to mechanism-specific solver ──────────────────────────
+    # NOTE: The Thiele modulus check is now INSIDE each chemistry branch so that
+    # the correct kinetic constants and reactive groups are used for each chemistry.
+    # This fixes the bug where the old pre-dispatch check always used amine/genipin
+    # parameters (props.k_xlink_0, NH2) regardless of the actual crosslinker.
     if xl.kinetics_model == 'second_order':
         if xl.mechanism in _HYDROXYL_MECHANISMS:
+            # Hydroxyl crosslinkers (DVS, ECH, citric acid) — PDE not supported
+            if R_droplet is not None and R_droplet > 20e-6:
+                _check_diffusion_limited_unsupported(
+                    xl, R_droplet, params, props, "hydroxyl-reactive")
             result = _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity)
             metadata = NetworkTypeMetadata(
                 solver_family="hydroxyl_covalent",
@@ -808,6 +846,31 @@ def solve_crosslinking(params: SimulationParameters,
                 eta_coupling_recommended=xl.eta_coupling_recommended,
             )
         else:
+            # Amine crosslinkers (genipin, glutaraldehyde) — PDE is supported
+            if R_droplet is not None and R_droplet > 20e-6:
+                D_xlink = 1e-10  # [m2/s] generic small-molecule diffusivity
+                k_rate = arrhenius_rate_constant(T, xl.k_xlink_0, xl.E_a_xlink)
+                NH2 = available_amine_concentration(
+                    params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+                )
+                Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
+                if Phi > 1.0:
+                    logger.info(
+                        "Thiele modulus %.1f > 1: using reaction-diffusion "
+                        "solver (R=%.0f um, crosslinker='%s')",
+                        Phi, R_droplet * 1e6, crosslinker_key,
+                    )
+                    rd_result, _ = _solve_reaction_diffusion(
+                        params, props, R_droplet, D_xlink,
+                    )
+                    rd_result.network_metadata = NetworkTypeMetadata(
+                        solver_family="amine_covalent",
+                        network_target="chitosan",
+                        bond_type="covalent",
+                        is_true_second_network=True,
+                        eta_coupling_recommended=xl.eta_coupling_recommended,
+                    )
+                    return rd_result
             result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
             metadata = NetworkTypeMetadata(
                 solver_family="amine_covalent",
@@ -817,6 +880,10 @@ def solve_crosslinking(params: SimulationParameters,
                 eta_coupling_recommended=xl.eta_coupling_recommended,
             )
     elif xl.kinetics_model == 'uv_dose':
+        # UV photopolymerization — PDE not supported (photoinitiation front physics)
+        if R_droplet is not None and R_droplet > 20e-6:
+            _check_diffusion_limited_unsupported(
+                xl, R_droplet, params, props, "UV photopolymerization")
         result = _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity)
         metadata = NetworkTypeMetadata(
             solver_family="independent_network",
@@ -826,6 +893,10 @@ def solve_crosslinking(params: SimulationParameters,
             eta_coupling_recommended=xl.eta_coupling_recommended,
         )
     elif xl.kinetics_model == 'ionic_instant':
+        # Ionic crosslinking — PDE not supported (shrinking-core model needed)
+        if R_droplet is not None and R_droplet > 20e-6:
+            _check_diffusion_limited_unsupported(
+                xl, R_droplet, params, props, "ionic")
         result = _solve_ionic_instant(params, props, xl, R_droplet, porosity)
         metadata = NetworkTypeMetadata(
             solver_family="ionic_reversible",
@@ -843,6 +914,31 @@ def solve_crosslinking(params: SimulationParameters,
                     "NOTE: results are approximate -- EDC/NHS kinetics involve "
                     "competitive hydrolysis not captured by simple second-order model.",
                     crosslinker_key)
+        # EDC/NHS targets amine groups — PDE is supported (amine chemistry)
+        if R_droplet is not None and R_droplet > 20e-6:
+            D_xlink = 1e-10
+            k_rate = arrhenius_rate_constant(T, xl.k_xlink_0, xl.E_a_xlink)
+            NH2 = available_amine_concentration(
+                params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+            )
+            Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
+            if Phi > 1.0:
+                logger.info(
+                    "Thiele modulus %.1f > 1: using reaction-diffusion "
+                    "solver (R=%.0f um, crosslinker='%s')",
+                    Phi, R_droplet * 1e6, crosslinker_key,
+                )
+                rd_result, _ = _solve_reaction_diffusion(
+                    params, props, R_droplet, D_xlink,
+                )
+                rd_result.network_metadata = NetworkTypeMetadata(
+                    solver_family="amine_covalent",
+                    network_target="chitosan",
+                    bond_type="covalent",
+                    is_true_second_network=True,
+                    eta_coupling_recommended=xl.eta_coupling_recommended,
+                )
+                return rd_result
         result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
         metadata = NetworkTypeMetadata(
             solver_family="amine_covalent",

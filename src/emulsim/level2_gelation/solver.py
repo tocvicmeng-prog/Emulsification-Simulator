@@ -299,6 +299,7 @@ class CahnHilliardSolver:
             anisotropy=morph['anisotropy'],
             connectivity=morph['connectivity'],
             chord_skewness=morph['skewness'],
+            model_tier="mechanistic",
         )
 
 
@@ -539,6 +540,7 @@ class CahnHilliard2DSolver:
             anisotropy=morph['anisotropy'],
             connectivity=morph['connectivity'],
             chord_skewness=morph['skewness'],
+            model_tier="mechanistic",
         )
 
 
@@ -696,6 +698,7 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
         anisotropy=morph['anisotropy'],
         connectivity=morph['connectivity'],
         chord_skewness=morph['skewness'],
+        model_tier="empirical_calibrated",
     )
 
 

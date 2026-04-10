@@ -838,6 +838,7 @@ class GelationResult:
     anisotropy: float = 0.0           # [-] 0-1
     connectivity: float = 1.0         # [-] 0-1, fraction of pore space connected
     chord_skewness: float = 0.0       # [-] skewness of chord length distribution
+    model_tier: str = "unknown"       # "empirical_calibrated" or "mechanistic" — identifies L2 model type
 
 
 @dataclass
