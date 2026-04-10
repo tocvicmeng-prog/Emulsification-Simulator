@@ -235,7 +235,7 @@ def solve_mechanical(params: SimulationParameters,
 
     return MechanicalResult(
         G_agarose=float(G_agar),
-        G_chitosan=float(G_chit),
+        G_chitosan=float(G_xlink),
         G_DN=float(G_DN),
         E_star=float(E_star),
         delta_array=delta_arr,
