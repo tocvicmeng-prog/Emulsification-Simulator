@@ -63,11 +63,12 @@ def _arrhenius_prefactor(k_ref: float, E_a: float, T_ref: float) -> float:
     """
     if E_a <= 0 or T_ref <= 0 or k_ref <= 0:
         return 0.0
-    # Guard overflow for large E_a (Codex F2 fix)
+    # Guard overflow for large E_a (Codex R4 fix: continuous cap)
     exponent = E_a / (R_GAS * T_ref)
     if exponent > 700:
-        return min(k_ref * 1e300, 1e30)  # cap at finite value
-    return k_ref * math.exp(exponent)
+        return 1e20
+    result = k_ref * math.exp(exponent)
+    return min(result, 1e20)
 
 
 # ─── Enums ──────────────────────────────────────────────────────────────

@@ -78,7 +78,7 @@ def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:
     if exponent < -700:
         return 0.0
     if exponent > 700:
-        return min(k0, 1e10)
+        return 1e20  # same cap for continuity at threshold
     result = k0 * np.exp(exponent)
     return min(float(result), 1e20)
 

@@ -78,10 +78,9 @@ def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:
     if exponent < -700:
         return 0.0
     if exponent > 700:
-        # Negative E_a (physically unusual). Cap at a safe max rate.
-        return min(k0, 1e10)  # k0 itself is the upper bound
+        # Negative E_a (physically unusual). Use same 1e20 cap for continuity.
+        return 1e20
     result = k0 * math.exp(exponent)
-    # Final product cap to prevent inf propagation into ODE solvers
     return min(result, 1e20)
 
 
