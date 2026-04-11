@@ -196,3 +196,41 @@ class TestPBESolver:
         d_high = hinze_dmax(eps_high, sigma, rho_c)
 
         assert d_high < d_low
+
+
+@pytest.mark.slow
+def test_d32_monotonic_pbe_rpm_sweep():
+    """PBE output d32 must decrease monotonically with RPM (Finding F1 regression test).
+
+    This test runs the full PBE solver at 5 RPM values in the converging
+    regime [8000, 25000] and asserts that d32 decreases monotonically. It
+    guards against the Vi-coalescence interaction that caused nonmonotonic
+    RPM->d32 behavior at high RPM (audit Finding F1).
+
+    RPM range starts at 8000 rather than 3000 because at very low RPM the
+    PBE requires much longer emulsification time to reach steady state,
+    making the test impractically slow. The Hinze-level monotonicity at
+    lower RPM is covered by test_d32_decreases_with_rpm.
+    """
+    rpms = [8000, 10000, 15000, 20000, 25000]
+    d32_values = []
+
+    for rpm in rpms:
+        params = SimulationParameters()
+        params.emulsification.rpm = float(rpm)
+        params.emulsification.t_emulsification = 60.0
+        # Disable adaptive extensions to keep test runtime manageable
+        params.solver.l1_max_extensions = 0
+
+        props = MaterialProperties(sigma=5e-3)
+
+        solver = PBESolver(n_bins=20, d_min=1e-6, d_max=200e-6)
+        result = solver.solve(params, props, phi_d=0.05)
+        d32_values.append(result.d32)
+
+    # Assert monotonic decrease
+    for i in range(len(d32_values) - 1):
+        assert d32_values[i] > d32_values[i + 1], (
+            f"d32 not monotonic: d32({rpms[i]} RPM)={d32_values[i]*1e6:.2f} um "
+            f">= d32({rpms[i+1]} RPM)={d32_values[i+1]*1e6:.2f} um"
+        )

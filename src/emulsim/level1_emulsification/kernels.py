@@ -70,6 +70,11 @@ def breakage_rate_alopaeus(d: np.ndarray, epsilon: float, sigma: float,
     if C3 > 0 and mu_d > 0:
         with np.errstate(divide='ignore', invalid='ignore'):
             Vi = mu_d / np.sqrt(rho_c * sigma * np.maximum(d, 1e-15))
+            # Cap Vi to prevent exp(-C3*Vi) from killing breakage at small d.
+            # Without the cap, sub-micron droplets can have Vi > 50, making
+            # exp(-C3*Vi) ~ 0 and creating a nonmonotonic RPM->d32 feedback
+            # loop where breakage dies but coalescence continues (see F1 audit).
+            Vi = np.minimum(Vi, 100.0)
             exp_arg2 = -C3 * Vi
 
     # Clip total exponent to prevent extreme underflow (g < 1e-100 is effectively 0)

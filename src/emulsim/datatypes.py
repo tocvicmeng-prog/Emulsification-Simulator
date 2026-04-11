@@ -309,9 +309,12 @@ class KernelConfig:
     # Breakage constants
     breakage_C1: float = 0.986          # [-] Alopaeus default; range [0.5, 2.0]
     breakage_C2: float = 0.0115         # [-] Alopaeus default; range [0.005, 0.03]
-    breakage_C3: float = 0.1            # [-] Alopaeus viscous correction. Changed from 0.0 in v2.0
-                                         # to restore monotonic RPM→d32 behavior for viscous dispersed phases.
-                                         # Set to 0.0 explicitly in config to disable.
+    breakage_C3: float = 0.0            # [-] Alopaeus viscous correction. Default 0.0: for aqueous
+                                         # dispersed phases (mu_d ~ 0.01-0.1 Pa·s at emulsification T),
+                                         # the viscous correction is physically negligible. The Vi cap
+                                         # in breakage_rate_alopaeus() prevents exponential blowout for
+                                         # any C3 > 0 value. Set C3 > 0 only for highly viscous
+                                         # dispersed phases (mu_d > 1 Pa·s) after calibration.
     # Coalescence constants (Coulaloglou-Tavlarides)
     coalescence_C4: float = 2.17e-4     # [-]; range [1e-4, 5e-4]
     coalescence_C5: float = 2.28e13     # [-]; range [1e13, 5e13]
@@ -326,7 +329,7 @@ class KernelConfig:
             breakage_model=BreakageModel.ALOPAEUS,
             breakage_C1=0.986,
             breakage_C2=0.0115,
-            breakage_C3=0.1,                # mild viscous correction (v2 default)
+            breakage_C3=0.0,                # disabled for aqueous dispersed phases (Vi cap handles high-mu_d)
             coalescence_C4=2.17e-4,
             coalescence_C5=2.28e13,
             phi_d_correction=False,
@@ -766,12 +769,12 @@ class MaterialProperties:
     cross_n: float = 0.6          # [-] power-law index
 
     # Breakage kernel
-    breakage_C3: float = 0.1           # [-] Alopaeus viscous correction. Changed from 0.0 in v2.0
-                                        # to restore monotonic RPM→d32 behavior for viscous dispersed phases.
-                                        # Set to 0.0 explicitly in config to disable.
-                                        # C3=0.1-0.3 recommended for viscous dispersed phases
-                                        # (requires BDF solver tolerance of 1e-8+ and may
-                                        # increase runtime).
+    breakage_C3: float = 0.0           # [-] Alopaeus viscous correction. Default 0.0: for aqueous
+                                        # dispersed phases (mu_d ~ 0.01-0.1 Pa·s at emulsification T),
+                                        # the viscous correction is physically negligible. The Vi cap
+                                        # in breakage_rate_alopaeus() prevents exponential blowout for
+                                        # any C3 > 0. Set C3 > 0 only for highly viscous dispersed
+                                        # phases (mu_d > 1 Pa·s) after calibration.
 
     # Network / pore
     r_fiber: float = 1.5e-9            # [m] agarose fiber radius

@@ -54,7 +54,33 @@ class UncertaintyResult:
 
 
 class UncertaintyPropagator:
-    """Monte Carlo uncertainty propagation over material property uncertainties."""
+    """Monte Carlo uncertainty propagation over material property uncertainties.
+
+    Perturbation parameters are organised into three conceptually distinct
+    uncertainty categories:
+
+    Parameter uncertainty
+        Stems from measurement or literature scatter in physical material
+        properties that feed directly into the governing model equations
+        (interfacial tension, viscosities, kinetic rate constants, modulus
+        prefactors).  These parameters are propagated *pre-hoc* — they enter
+        the solver before any physics is evaluated.
+
+    Calibration uncertainty
+        Reflects imprecision in the empirical coefficients that were fitted to
+        experimental data.  Examples include the Alopaeus C3 viscous-correction
+        constant, and the prefactor/exponent of the L2 pore-size correlation.
+        These are also propagated pre-hoc where possible; the pore-model
+        coefficients use a post-hoc approximation that is exact for the
+        algebraic (empirical) L2 path (see note in ``run()``).
+
+    Model-form uncertainty
+        Accounts for structural assumptions embedded in the model that cannot
+        be derived from first principles alone.  Examples are the bridge
+        efficiency fraction for crosslinking and the IPN coupling coefficient.
+        These are sampled from physically motivated uniform priors rather than
+        being perturbed around a point estimate.
+    """
 
     def __init__(self, n_samples: int = 20, seed: int = 42):
         self.n_samples = n_samples
@@ -67,22 +93,21 @@ class UncertaintyPropagator:
 
         for i in range(n):
             p = {
-                # Multiplicative factors (lognormal-like via uniform on log scale)
-                'sigma_factor': np.exp(self.rng.uniform(-0.26, 0.26)),      # +/-30%
-                'mu_d_factor': np.exp(self.rng.uniform(-0.40, 0.40)),       # +/-50%
-                'k_xlink_0_factor': np.exp(self.rng.uniform(-0.34, 0.34)), # +/-40%
-                'G_prefactor_factor': np.exp(self.rng.uniform(-0.26, 0.26)), # +/-30%
-                # Absolute values (uniform)
-                'f_bridge': self.rng.uniform(0.25, 0.55),
-                'eta_coupling': self.rng.uniform(-0.30, 0.0),
+                # ── Parameter uncertainty (propagated through model equations) ──
+                'sigma_factor': np.exp(self.rng.uniform(-0.26, 0.26)),       # interfacial tension             +/-30%
+                'mu_d_factor': np.exp(self.rng.uniform(-0.40, 0.40)),        # dispersed phase viscosity       +/-50%
+                'k_xlink_factor': np.exp(self.rng.uniform(-0.34, 0.34)),     # crosslinking rate constant      +/-40%
+                'G_prefactor_factor': np.exp(self.rng.uniform(-0.26, 0.26)), # agarose modulus prefactor       +/-30%
 
-                # L2 empirical pore-model uncertainty
-                'pore_prefactor_factor': 10 ** self.rng.uniform(-0.13, 0.13),  # +/-30%
-                'pore_exponent_offset': self.rng.uniform(-0.1, 0.1),           # on -0.7 exponent
-                'confinement_alpha': self.rng.uniform(0.10, 0.25),             # confinement coeff
+                # ── Calibration uncertainty (empirical model coefficients) ──
+                'breakage_C3_factor': 10 ** self.rng.uniform(-0.30, 0.30),   # breakage viscous correction     +/-50%
+                'pore_prefactor_factor': 10 ** self.rng.uniform(-0.13, 0.13), # L2 pore correlation prefactor  +/-30%
+                'pore_exponent_offset': self.rng.uniform(-0.1, 0.1),          # L2 pore correlation exponent   on -0.7 exponent
+                'confinement_alpha': self.rng.uniform(0.10, 0.25),            # confinement correction
 
-                # L1 kernel structural uncertainty (breakage rate)
-                'breakage_C3_factor': 10 ** self.rng.uniform(-0.30, 0.30),     # +/-50%
+                # ── Model-form uncertainty (structural assumptions) ──
+                'f_bridge_factor': self.rng.uniform(0.25, 0.55),             # crosslinking bridge efficiency
+                'eta_coupling_offset': self.rng.uniform(-0.30, 0.0),         # IPN coupling coefficient
             }
             perturbations.append(p)
 
@@ -94,10 +119,10 @@ class UncertaintyPropagator:
         p = copy.deepcopy(props)
         p.sigma *= perturb['sigma_factor']
         p.mu_d *= perturb['mu_d_factor']
-        p.k_xlink_0 *= perturb['k_xlink_0_factor']
+        p.k_xlink_0 *= perturb['k_xlink_factor']
         p.G_agarose_prefactor *= perturb['G_prefactor_factor']
-        p.f_bridge = perturb['f_bridge']
-        p.eta_coupling = perturb['eta_coupling']
+        p.f_bridge = perturb['f_bridge_factor']
+        p.eta_coupling = perturb['eta_coupling_offset']
         return p
 
     def run(self, params: SimulationParameters,
@@ -169,9 +194,17 @@ class UncertaintyPropagator:
                 R = emul.d50 / 2.0
                 gel = solve_gelation(params_i, props_i, R_droplet=R, mode=l2_mode)
 
-                # Apply pore-model perturbations post-hoc
-                # The empirical solver is deterministic for given inputs,
-                # so pore uncertainty must be injected here.
+                # Apply pore-model perturbations post-hoc.
+                # NOTE: this post-hoc injection is valid *only* for the
+                # empirical L2 path (algebraic model).  For algebraic models
+                # the output is a closed-form function of the inputs, so
+                # multiplying the result by a prefactor factor is
+                # mathematically equivalent to perturbing the prefactor
+                # before the solve (pre-hoc == post-hoc).  Mechanistic CH
+                # solvers (ch_1d / ch_2d) are nonlinear PDEs where pre-hoc
+                # and post-hoc perturbations are NOT equivalent; the pore
+                # uncertainty block below should be revisited if those modes
+                # are used in production UQ runs.
                 pore_raw = gel.pore_size_mean
                 pore_perturbed = (
                     pore_raw

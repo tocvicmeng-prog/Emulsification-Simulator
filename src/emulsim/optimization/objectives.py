@@ -76,11 +76,26 @@ def compute_objectives(result: FullResult, mode: str | None = None) -> np.ndarra
 
 
 def check_constraints(result: FullResult, mode: str | None = None) -> tuple[bool, list[str]]:
-    """Check optimisation constraints. Returns (feasible, violations)."""
+    """Check optimisation constraints. Returns (feasible, violations).
+
+    Constraints checked:
+      1. Span < 2.0 (polydispersity limit)
+      2. G_DN > 1 kPa (minimum mechanical integrity)
+      3. d_mode in [75, 150] µm for stirred_vessel mode
+      4. RPM <= 20000 (validated calibration range for L1 PBE)
+      5. Crosslinker/NH2 ratio >= 0.02 (minimum stoichiometry to avoid
+         severely crosslinker-limited regime)
+      6. Total polymer (c_agarose + c_chitosan) <= 120 kg/m³ (pumpability
+         limit, equivalent to 12% w/v)
+      7. Pore size >= mesh size xi_final (inaccessible pore structure check)
+    """
     if mode is None:
         mode = getattr(result.parameters.emulsification, 'mode', 'rotor_stator_legacy')
 
+    params = result.parameters
     violations = []
+
+    # ── Original constraints ──────────────────────────────────────────────
 
     if result.emulsification.span > MAX_SPAN:
         violations.append(f"span={result.emulsification.span:.2f} > {MAX_SPAN}")
@@ -95,6 +110,34 @@ def check_constraints(result: FullResult, mode: str | None = None) -> tuple[bool
             violations.append(
                 f"d_mode={d_mode*1e6:.1f} µm outside ideal range [75, 150] µm"
             )
+
+    # ── Additional feasibility constraints (F8b) ──────────────────────────
+
+    # 4. RPM monotonicity guard: nonphysical regime until L1 fully recalibrated
+    if params.emulsification.rpm > 20000:
+        violations.append("RPM exceeds validated calibration range (max 20000)")
+
+    # 5. Crosslinker stoichiometry check: reject if crosslinker/NH2 < 0.02
+    from ..level3_crosslinking.solver import available_amine_concentration
+    # Use MaterialProperties defaults for DDA and M_GlcN when not available on params
+    _DDA = 0.90       # MaterialProperties default: degree of deacetylation
+    _M_GlcN = 161.16  # MaterialProperties default: glucosamine molar mass [g/mol]
+    NH2 = available_amine_concentration(
+        params.formulation.c_chitosan, _DDA, _M_GlcN
+    )
+    if NH2 > 0 and params.formulation.c_genipin / NH2 < 0.02:
+        violations.append("Crosslinker/NH2 ratio < 0.02 (severely limited)")
+
+    # 6. Total polymer concentration cap: > 120 kg/m³ is extremely viscous
+    total_polymer = params.formulation.c_agarose + params.formulation.c_chitosan
+    if total_polymer > 120.0:
+        violations.append(
+            f"Total polymer {total_polymer:.0f} kg/m3 exceeds pumpability limit (120)"
+        )
+
+    # 7. Pore-mesh size consistency: pore must be accessible through crosslinked mesh
+    if result.gelation.pore_size_mean < result.crosslinking.xi_final:
+        violations.append("Pore size smaller than crosslinked mesh size (inaccessible)")
 
     return len(violations) == 0, violations
 
