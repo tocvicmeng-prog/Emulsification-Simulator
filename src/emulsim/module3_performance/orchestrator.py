@@ -274,6 +274,7 @@ class GradientElutionResult:
     overall_yield: float
     pressure_drop: float
     mass_balance_errors: np.ndarray     # shape (n_comp,)
+    gradient_affects_binding: bool = False  # True only for SMA/IMAC isotherms
 
 
 def _find_peak(
@@ -371,6 +372,7 @@ def _build_gradient_lrm_rhs(
     C_feed: np.ndarray,
     gradient: GradientProgram,
     total_time: float,
+    feed_duration: float,
 ):
     """Build the ODE RHS for multi-component gradient LRM.
 
@@ -378,6 +380,10 @@ def _build_gradient_lrm_rhs(
         y[0         : n_comp*n_z]          = C    (bulk, n_comp x n_z, row-major)
         y[n_comp*n_z: 2*n_comp*n_z]        = Cp   (pore, n_comp x n_z)
         y[2*n_comp*n_z: 3*n_comp*n_z]      = q    (bound, n_comp x n_z)
+
+    Args:
+        feed_duration: Duration of protein loading phase [s].  After this time
+            the inlet protein concentration is set to zero (elution/wash phase).
     """
     nc = n_comp
     nz = n_z
@@ -396,18 +402,20 @@ def _build_gradient_lrm_rhs(
         np.maximum(Cp, 0.0, out=Cp)
         np.maximum(q,  0.0, out=q)
 
-        # Gradient value at current time (e.g., salt for elution)
-        # Not directly used in competitive Langmuir — gradient controls
-        # feed switch; for SMA-type, gradient would enter isotherm call.
-        # Here the gradient is stored in output but doesn't modify K_L.
-        # The feed profile uses step: load during first half, elute with wash.
+        # Gradient value at current time (e.g., salt for elution).
+        # For SMA/IMAC isotherms this would be passed into equilibrium_loading.
+        # For competitive Langmuir (gradient_sensitive=False) it does not
+        # modify K_L but is correctly used below for feed phase switching.
         _ = gradient.value_at_time(t)  # reserved for SMA / pH-dependent isotherms
 
-        # Inlet concentration: constant feed during entire simulation
-        # (gradient-mediated elution is handled by time-varying gradient value
-        #  that would modulate adsorption; for pure competitive Langmuir,
-        #  elution happens via dilution / gradient switch)
-        C_in = C_feed.copy()  # shape (nc,)
+        # Feed phase switching: protein is present only during the load phase.
+        # After feed_duration the inlet switches to protein-free buffer so that
+        # bound protein is eluted by the rising gradient rather than being
+        # continuously replaced by fresh feed.
+        if t <= feed_duration:
+            C_in = C_feed.copy()   # loading phase: protein in feed
+        else:
+            C_in = np.zeros(nc)    # elution/wash phase: no protein
 
         # Isotherm: q_eq for all cells, shape (nc, nz)
         q_eq = isotherm.equilibrium_loading(Cp)  # (nc, nz)
@@ -450,6 +458,7 @@ def run_gradient_elution(
     gradient: GradientProgram,
     flow_rate: float,
     total_time: float,
+    feed_duration: float | None = None,
     isotherm: CompetitiveLangmuirIsotherm | None = None,
     n_z: int = 50,
     D_molecular: float | np.ndarray = 7e-11,
@@ -473,6 +482,10 @@ def run_gradient_elution(
             (e.g., salt or pH profile).
         flow_rate: Volumetric flow rate [m^3/s].
         total_time: Total simulation time [s].
+        feed_duration: Duration of the protein loading phase [s].  After this
+            time the inlet is switched to protein-free buffer (elution phase).
+            Defaults to the start time of the first gradient segment, i.e.
+            ``gradient.segments[0][0]`` if > 0, otherwise ``total_time / 3``.
         isotherm: CompetitiveLangmuirIsotherm. If None, a 2-component
             default is used.
         n_z: Number of axial finite-volume cells.
@@ -488,7 +501,9 @@ def run_gradient_elution(
         atol: ODE solver absolute tolerance.
 
     Returns:
-        GradientElutionResult with outlet profiles, peak table, and metrics.
+        GradientElutionResult with outlet profiles, peak table, metrics, and
+        ``gradient_affects_binding`` flag indicating whether the isotherm
+        equilibrium depends on the gradient value.
 
     Raises:
         RuntimeError: If the ODE solver fails.
@@ -503,6 +518,23 @@ def run_gradient_elution(
             q_max=np.full(n_comp, 100.0),
             K_L=np.full(n_comp, 1e3),
         )
+
+    # Determine feed_duration: protein inlet is active only during load phase.
+    # Default: use the gradient's first segment start time if it is > 0
+    # (i.e. the gradient only begins after an isocratic load step), otherwise
+    # fall back to one-third of the total simulation time.
+    if feed_duration is None:
+        first_segment_time = float(gradient.segments[0][0])
+        if first_segment_time > 0.0:
+            feed_duration = first_segment_time
+        else:
+            feed_duration = total_time / 3.0
+
+    # Detect whether the isotherm equilibrium is sensitive to the gradient
+    # (e.g. SMA uses salt, IMAC uses pH).  Competitive Langmuir is not.
+    gradient_affects_binding: bool = bool(
+        getattr(isotherm, "gradient_sensitive", False)
+    )
 
     if isotherm.n_components != n_comp:
         raise ValueError(
@@ -552,6 +584,7 @@ def run_gradient_elution(
         C_feed=C_feed,
         gradient=gradient,
         total_time=total_time,
+        feed_duration=feed_duration,
     )
 
     # ── Initial conditions: column empty ──
@@ -680,4 +713,5 @@ def run_gradient_elution(
         overall_yield=overall_yield,
         pressure_drop=column.pressure_drop(flow_rate, mu),
         mass_balance_errors=mass_balance_errors,
+        gradient_affects_binding=gradient_affects_binding,
     )

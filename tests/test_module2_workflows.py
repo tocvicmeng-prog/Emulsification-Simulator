@@ -515,3 +515,42 @@ def test_second_order_consumption_zero_reagent():
     )
     assert conv == 0.0
     assert remaining == 1.0
+
+
+# ─── Test: Temperature affects conversion via Arrhenius ───────────────
+
+def test_temperature_affects_conversion():
+    """Verify that higher temperature increases conversion (Arrhenius).
+
+    BF-1 regression test: before the fix, k0=0.0 meant Arrhenius was
+    bypassed and temperature had no effect on kinetics.  After the fix,
+    _arrhenius_prefactor back-calculates k0 from the reagent profile so
+    the Arrhenius branch in solve_second_order_consumption is engaged.
+    """
+    contract = _make_contract(nh2_bulk=100.0)
+    reagent = REAGENT_PROFILES["genipin_secondary"]
+
+    def _run_at_temperature(temp_K: float) -> float:
+        surface_model = _make_surface_model(contract)
+        acs_state = _make_acs_state(contract, surface_model)
+        step = ModificationStep(
+            step_type=ModificationStepType.SECONDARY_CROSSLINKING,
+            reagent_key="genipin_secondary",
+            target_acs=ACSSiteType.AMINE_PRIMARY,
+            temperature=temp_K,
+            time=14400.0,    # 4 h — same for both runs
+            reagent_concentration=10.0,
+            stoichiometry=0.5,
+        )
+        result = solve_modification_step(step, acs_state, surface_model, reagent)
+        return result.conversion
+
+    conversion_298 = _run_at_temperature(298.15)   # 25 degC
+    conversion_310 = _run_at_temperature(310.15)   # 37 degC (reference T)
+
+    assert conversion_298 > 0.0, "Conversion at 298 K should be positive"
+    assert conversion_310 > 0.0, "Conversion at 310 K should be positive"
+    assert conversion_310 > conversion_298, (
+        f"Higher temperature should give higher conversion via Arrhenius: "
+        f"conv(310K)={conversion_310:.6f} vs conv(298K)={conversion_298:.6f}"
+    )

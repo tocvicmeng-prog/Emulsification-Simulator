@@ -17,7 +17,12 @@ import pytest
 
 from emulsim.module3_performance.hydrodynamics import ColumnGeometry
 from emulsim.module3_performance.isotherms.langmuir import LangmuirIsotherm
-from emulsim.module3_performance.transport.lumped_rate import solve_lrm, LRMResult
+from emulsim.module3_performance.transport.lumped_rate import (
+    solve_lrm,
+    LRMResult,
+    classify_mass_balance,
+    MassBalanceQuality,
+)
 from emulsim.module3_performance.detection.uv import (
     compute_uv_signal,
     apply_detector_broadening,
@@ -196,6 +201,44 @@ class TestLangmuirJacobian:
 
 
 # ─── C.3: LRM Transport ──────────────────────────────────────────────
+
+class TestMassBalanceQuality:
+    """Mass balance quality classification tests."""
+
+    def test_mass_balance_quality_classification(self):
+        """Verify quality thresholds map to correct enum members."""
+        assert classify_mass_balance(0.01) == MassBalanceQuality.ACCEPTABLE
+        assert classify_mass_balance(0.02) == MassBalanceQuality.ACCEPTABLE   # boundary: <= 2% is ACCEPTABLE
+        assert classify_mass_balance(0.03) == MassBalanceQuality.CAUTION
+        assert classify_mass_balance(0.05) == MassBalanceQuality.CAUTION      # boundary: <= 5% is CAUTION
+        assert classify_mass_balance(0.06) == MassBalanceQuality.UNRELIABLE
+
+    def test_lrm_result_has_quality_field(self):
+        """LRMResult includes mass_balance_quality as a string."""
+        col = ColumnGeometry(bed_height=0.05, particle_diameter=50e-6)
+        iso = LangmuirIsotherm(q_max=20.0, K_L=100.0)
+        result = solve_lrm(
+            column=col,
+            isotherm=iso,
+            C_feed=1.0,
+            feed_duration=300.0,
+            flow_rate=1e-8,
+            total_time=600.0,
+            n_z=60,
+        )
+        assert hasattr(result, "mass_balance_quality"), (
+            "LRMResult is missing the mass_balance_quality field"
+        )
+        assert isinstance(result.mass_balance_quality, str)
+        assert result.mass_balance_quality in {q.value for q in MassBalanceQuality}, (
+            f"Unexpected quality value: {result.mass_balance_quality!r}"
+        )
+        # For a well-resolved run the quality should be acceptable
+        assert result.mass_balance_quality == MassBalanceQuality.ACCEPTABLE.value, (
+            f"Expected 'acceptable', got {result.mass_balance_quality!r} "
+            f"(error={result.mass_balance_error:.4%})"
+        )
+
 
 class TestLRMMassBalance:
     """LRM mass balance tests."""

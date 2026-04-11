@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import copy
 import logging
+import math
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
@@ -37,6 +38,27 @@ logger = logging.getLogger(__name__)
 
 K_BOLTZMANN = 1.38e-23  # [J/K]
 N_AVOGADRO = 6.022e23
+R_GAS = 8.314  # J/(mol*K)
+
+
+# ─── Arrhenius helpers ──────────────────────────────────────────────────
+
+def _arrhenius_prefactor(k_ref: float, E_a: float, T_ref: float) -> float:
+    """Back-calculate Arrhenius prefactor from reference-condition rate constant.
+
+    k_ref = k0 * exp(-E_a/(R*T_ref))  =>  k0 = k_ref * exp(E_a/(R*T_ref))
+
+    Args:
+        k_ref: Rate constant at reference temperature [m^3/(mol*s)].
+        E_a: Activation energy [J/mol].
+        T_ref: Reference temperature [K].
+
+    Returns:
+        Arrhenius prefactor k0 [m^3/(mol*s)], or 0.0 if inputs are invalid.
+    """
+    if E_a <= 0 or T_ref <= 0 or k_ref <= 0:
+        return 0.0
+    return k_ref * math.exp(E_a / (R_GAS * T_ref))
 
 
 # ─── Enums ──────────────────────────────────────────────────────────────
@@ -211,6 +233,9 @@ def _solve_crosslinking_step(
         delta_G = delta_nu_e * kB * T
     where delta_nu_e is the additional effective crosslink density.
     """
+    k0 = _arrhenius_prefactor(
+        reagent_profile.k_forward, reagent_profile.E_a, reagent_profile.temperature_default
+    )
     conversion, reagent_remaining = solve_second_order_consumption(
         acs_concentration=acs_concentration,
         reagent_concentration=step.reagent_concentration,
@@ -219,7 +244,7 @@ def _solve_crosslinking_step(
         time=step.time,
         temperature=step.temperature,
         E_a=reagent_profile.E_a,
-        k0=0.0,  # Use k_forward directly (already at reference T)
+        k0=k0,
         hydrolysis_rate=reagent_profile.hydrolysis_rate,
     )
 
@@ -271,6 +296,9 @@ def _solve_activation_step(
     Consumes HYDROXYL sites, produces EPOXIDE or VINYL_SULFONE sites.
     Includes hydrolysis side reaction for ECH (k_hydrol > 0).
     """
+    k0 = _arrhenius_prefactor(
+        reagent_profile.k_forward, reagent_profile.E_a, reagent_profile.temperature_default
+    )
     conversion, reagent_remaining = solve_second_order_consumption(
         acs_concentration=acs_concentration,
         reagent_concentration=step.reagent_concentration,
@@ -279,7 +307,7 @@ def _solve_activation_step(
         time=step.time,
         temperature=step.temperature,
         E_a=reagent_profile.E_a,
-        k0=0.0,  # Use k_forward directly
+        k0=k0,
         hydrolysis_rate=reagent_profile.hydrolysis_rate,
     )
 

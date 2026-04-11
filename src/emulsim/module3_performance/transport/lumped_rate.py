@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import warnings
 from dataclasses import dataclass, field
+from enum import Enum
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -33,6 +34,31 @@ from ..hydrodynamics import ColumnGeometry
 from ..isotherms.langmuir import LangmuirIsotherm
 
 logger = logging.getLogger(__name__)
+
+
+# ─── Mass Balance Quality ─────────────────────────────────────────────
+
+class MassBalanceQuality(Enum):
+    ACCEPTABLE = "acceptable"     # <= 2%
+    CAUTION = "caution"           # 2-5%
+    UNRELIABLE = "unreliable"     # > 5%
+
+
+def classify_mass_balance(error: float) -> MassBalanceQuality:
+    """Classify a relative mass balance error into a quality tier.
+
+    Args:
+        error: Relative mass balance error [-], e.g. 0.03 for 3%.
+
+    Returns:
+        MassBalanceQuality enum member.
+    """
+    if error <= 0.02:
+        return MassBalanceQuality.ACCEPTABLE
+    elif error <= 0.05:
+        return MassBalanceQuality.CAUTION
+    else:
+        return MassBalanceQuality.UNRELIABLE
 
 
 # ─── Result Dataclass ─────────────────────────────────────────────────
@@ -50,6 +76,8 @@ class LRMResult:
         mass_eluted: Total mass eluted [mol].
         mass_bound: Total mass currently bound in the column [mol].
         mass_balance_error: Relative mass balance error [-].
+        mass_balance_quality: Quality tier string ("acceptable", "caution",
+            or "unreliable") derived from mass_balance_error.
     """
 
     time: np.ndarray
@@ -60,6 +88,7 @@ class LRMResult:
     mass_eluted: float
     mass_bound: float
     mass_balance_error: float
+    mass_balance_quality: str = "acceptable"  # MassBalanceQuality.value
 
 
 # ─── Correlation Functions ────────────────────────────────────────────
@@ -346,6 +375,8 @@ def solve_lrm(
     else:
         mass_balance_error = 0.0
 
+    quality = classify_mass_balance(mass_balance_error)
+
     if mass_balance_error > 0.02:
         warnings.warn(
             f"Mass balance error {mass_balance_error:.2%} exceeds 2% threshold. "
@@ -355,8 +386,8 @@ def solve_lrm(
         )
 
     logger.info(
-        "LRM solved: %d time steps, mass balance error = %.4f%%",
-        len(time), mass_balance_error * 100,
+        "LRM solved: %d time steps, mass balance error = %.4f%% (%s)",
+        len(time), mass_balance_error * 100, quality.value,
     )
 
     return LRMResult(
@@ -368,4 +399,5 @@ def solve_lrm(
         mass_eluted=mass_eluted,
         mass_bound=mass_bound,
         mass_balance_error=mass_balance_error,
+        mass_balance_quality=quality.value,
     )

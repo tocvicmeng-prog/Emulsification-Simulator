@@ -44,6 +44,19 @@ class CompetitiveLangmuirIsotherm:
         """Number of components."""
         return len(self.q_max)
 
+    @property
+    def gradient_sensitive(self) -> bool:
+        """Whether the isotherm equilibrium depends on gradient (salt/pH).
+
+        Competitive Langmuir K_L constants are fixed parameters — they do not
+        depend on salt concentration or pH.  Only SMA-type isotherms (where
+        K_eq is modulated by salt) or pH-dependent variants return True.
+
+        Returns:
+            False — K_L does not depend on salt/pH.
+        """
+        return False
+
     def equilibrium_loading(self, C: np.ndarray) -> np.ndarray:
         """Compute equilibrium loading for all components.
 

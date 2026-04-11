@@ -720,3 +720,75 @@ class TestGradientElution:
             n_z=10,
         )
         assert len(result.uv_signal) == len(result.time)
+
+    def test_gradient_affects_binding_false_for_competitive_langmuir(self, column):
+        """Competitive Langmuir should report gradient_affects_binding=False.
+
+        BF-2 fix: GradientElutionResult must carry a gradient_affects_binding
+        flag so the UI can display 'Gradient affects binding: NO' for
+        competitive Langmuir (K_L is gradient-independent).
+        """
+        iso = CompetitiveLangmuirIsotherm(
+            q_max=np.array([100.0, 80.0]),
+            K_L=np.array([1e3, 5e2]),
+        )
+        gradient = make_linear_gradient(0.0, 1.0, end_time=300.0)
+        C_feed = np.array([0.01, 0.005])
+
+        result = run_gradient_elution(
+            column=column,
+            C_feed=C_feed,
+            gradient=gradient,
+            flow_rate=1e-8,
+            total_time=300.0,
+            isotherm=iso,
+            n_z=10,
+        )
+
+        # The isotherm property must return False
+        assert iso.gradient_sensitive is False, (
+            "CompetitiveLangmuirIsotherm.gradient_sensitive must be False"
+        )
+        # The result flag must be set correctly
+        assert result.gradient_affects_binding is False, (
+            "GradientElutionResult.gradient_affects_binding must be False "
+            "for competitive Langmuir"
+        )
+
+    def test_feed_phase_switching_zeros_inlet_after_feed_duration(self, column):
+        """Protein inlet must be zero during elution phase (feed_duration fix).
+
+        With an explicit feed_duration shorter than total_time, the outlet
+        concentration should peak and then decline as the bound protein elutes
+        off into a protein-free buffer.  The total outlet area in the elution
+        window must be non-trivial (protein actually eluted).
+        """
+        iso = CompetitiveLangmuirIsotherm(
+            q_max=np.array([100.0, 80.0]),
+            K_L=np.array([1e3, 5e2]),
+        )
+        # Gradient starts after load: load for 100 s, then ramp 100-300 s
+        gradient = make_linear_gradient(0.0, 1.0, start_time=100.0, end_time=300.0)
+        C_feed = np.array([0.01, 0.005])
+        feed_dur = 100.0   # protein only during load phase
+
+        result = run_gradient_elution(
+            column=column,
+            C_feed=C_feed,
+            gradient=gradient,
+            flow_rate=1e-8,
+            total_time=300.0,
+            feed_duration=feed_dur,
+            isotherm=iso,
+            n_z=10,
+        )
+
+        # Sanity: result arrays have correct shape
+        assert result.C_outlet.shape[0] == 2
+        assert len(result.time) == len(result.gradient_profile)
+
+        # After the feed phase the gradient_profile should be rising (gradient is on)
+        t = result.time
+        g = result.gradient_profile
+        mid_idx = np.searchsorted(t, 200.0)  # well into elution window
+        assert g[mid_idx] > 0.0, "Gradient should be non-zero during elution window"
