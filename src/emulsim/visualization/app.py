@@ -916,10 +916,13 @@ if _tab_m2 is not None:
                     _target_acs = _default_target
                 else:
                     _target_acs = _REAGENT_PROFILES[_reagent_key].target_acs
+                # Set product_acs for activation steps (needed to create EPOXIDE/VS profiles)
+                _product_acs = _REAGENT_PROFILES[_reagent_key].product_acs
                 m2_steps.append(ModificationStep(
                     step_type=_step_type_enum,
                     reagent_key=_reagent_key,
                     target_acs=_target_acs,
+                    product_acs=_product_acs,
                     temperature=_temp_C + 273.15,
                     time=_time_h * 3600,
                     ph=_ph,
@@ -967,6 +970,7 @@ if _tab_m2 is not None:
                 except Exception as _m2_ex:
                     st.error(f"Module 2 failed: {_m2_ex}")
                     st.session_state.pop("m2_result", None)
+                    st.stop()  # Don't rerun — show the error
             st.rerun()
 
         # ── M2 Results Display ───────────────────────────────────────────
