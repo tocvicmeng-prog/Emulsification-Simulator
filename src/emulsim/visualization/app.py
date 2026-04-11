@@ -92,6 +92,14 @@ _mode_map = {
 }
 model_mode_enum = _mode_map[model_mode]
 
+# P1-1: Pipeline Scope selector
+pipeline_scope = st.sidebar.radio(
+    "Pipeline Scope",
+    ["M1: Fabrication Only", "M1+M2: + Functionalization", "M1+M2+M3: Full Pipeline"],
+    index=0,
+    help="M1: microsphere fabrication. M1+M2: adds surface functionalization. M1+M2+M3: adds performance simulation."
+)
+
 st.sidebar.subheader("Emulsification (L1)")
 
 if is_stirred:
@@ -225,7 +233,9 @@ from emulsim.level3_crosslinking.solver import (
     available_amine_concentration,
     recommended_crosslinker_concentration,
 )
-_DDA = 0.90  # TODO: make user-adjustable in future
+# P1-2: DDA slider (replaces hardcoded 0.90)
+_DDA = st.sidebar.slider("DDA (degree of deacetylation)", 0.50, 0.99, 0.85, step=0.01,
+                          help="Chitosan degree of deacetylation. Affects NH2 density and crosslinking capacity.")
 _M_GlcN = 161.16
 _c_chit_kg = c_chitosan_pct * 10.0  # % -> kg/m3
 _NH2 = available_amine_concentration(_c_chit_kg, _DDA, _M_GlcN)
@@ -253,6 +263,26 @@ T_xlink_C = st.sidebar.slider("Crosslinking Temperature (°C)", 0, 120,
 t_xlink_h = st.sidebar.slider("Crosslinking Time (hours)", 1, 48,
                                 min(_t_xlink_default_h, 48))
 
+# P1-3: Validate M1 inputs and display blockers/warnings in sidebar
+from emulsim.visualization.ui_validators import validate_m1_inputs as _validate_m1
+_m1_val = _validate_m1(
+    rpm=float(rpm),
+    phi_d=phi_d,
+    c_agarose=c_agarose_pct,
+    c_chitosan=c_chitosan_pct,
+    dda=_DDA,
+    crosslinker_key=_xl_sel_key,
+    crosslinker_conc=float(c_genipin_mM),
+    T_crosslink=float(T_xlink_C),
+    T_oil=float(T_oil_C),
+)
+if _m1_val.blockers:
+    for _blk in _m1_val.blockers:
+        st.sidebar.error(f"BLOCKER: {_blk}")
+if _m1_val.warnings:
+    for _wrn in _m1_val.warnings:
+        st.sidebar.warning(_wrn)
+
 # UV intensity slider (only relevant for UV-initiated crosslinkers)
 if xl.kinetics_model == 'uv_dose':
     uv_intensity = st.sidebar.slider("UV Intensity (mW/cm\u00b2)", 1.0, 100.0, 20.0, step=1.0)
@@ -270,6 +300,72 @@ else:
     target_d_mode = target_d32
     target_pore = st.sidebar.number_input("Target Pore Size (nm)", 10, 500, 80, step=10)
 target_G = st.sidebar.number_input("Target G_DN (kPa)", 1.0, 500.0, 10.0, step=1.0)
+
+# ─── P2-1: Module 2 Sidebar Section ──────────────────────────────────────────
+
+m2_steps = []
+if "M2" in pipeline_scope:
+    from emulsim.module2_functionalization.reagent_profiles import REAGENT_PROFILES as _REAGENT_PROFILES
+    from emulsim.module2_functionalization import ModificationStep, ModificationStepType, ACSSiteType
+
+    st.sidebar.divider()
+    st.sidebar.header("Module 2: Functionalization")
+
+    n_m2_steps = st.sidebar.number_input("Modification Steps", 0, 3, 1, key="m2_n_steps")
+    for i in range(int(n_m2_steps)):
+        with st.sidebar.expander(f"Step {i + 1}", expanded=(i == 0)):
+            step_type = st.selectbox(
+                "Chemistry",
+                ["Secondary Crosslinking", "Hydroxyl Activation"],
+                key=f"m2_type_{i}",
+            )
+            if "Crosslinking" in step_type:
+                _reagent_options = {
+                    "Genipin": "genipin_secondary",
+                    "Glutaraldehyde": "glutaraldehyde_secondary",
+                }
+            else:
+                _reagent_options = {
+                    "ECH (Epichlorohydrin)": "ech_activation",
+                    "DVS (Divinyl Sulfone)": "dvs_activation",
+                }
+            _reagent_label = st.selectbox("Reagent", list(_reagent_options.keys()), key=f"m2_reagent_{i}")
+            _reagent_key = _reagent_options[_reagent_label]
+
+            _profile = _REAGENT_PROFILES[_reagent_key]
+            st.caption(f"k={_profile.k_forward:.1e} | E_a={_profile.E_a / 1000:.0f} kJ/mol")
+
+            _conc = st.number_input("Concentration (mM)", 0.5, 200.0, 10.0, key=f"m2_conc_{i}")
+            _temp_C = st.slider(
+                "Temperature (C)",
+                4, 80,
+                int(_profile.temperature_default - 273.15),
+                key=f"m2_temp_{i}",
+            )
+            _time_h = st.number_input(
+                "Time (h)", 0.25, 48.0, float(_profile.time_default / 3600), key=f"m2_time_{i}"
+            )
+            _ph = st.slider("pH", 3.0, 14.0, float(_profile.ph_optimum), step=0.5, key=f"m2_ph_{i}")
+
+            _target_acs = ACSSiteType.AMINE_PRIMARY if "Crosslinking" in step_type else ACSSiteType.HYDROXYL
+            _step_type_enum = (
+                ModificationStepType.SECONDARY_CROSSLINKING
+                if "Crosslinking" in step_type
+                else ModificationStepType.ACTIVATION
+            )
+            m2_steps.append(ModificationStep(
+                step_type=_step_type_enum,
+                reagent_key=_reagent_key,
+                target_acs=_target_acs,
+                temperature=_temp_C + 273.15,
+                time=_time_h * 3600,
+                ph=_ph,
+                reagent_concentration=_conc,
+            ))
+
+    st.sidebar.caption(
+        "Planned (not yet implemented): Ligand Coupling, Protein Coupling, Quenching"
+    )
 
 # ─── Material Constants (per-constant Literature / Custom + protocol link) ─
 
@@ -512,6 +608,41 @@ if run_btn:
             st.stop()
         elapsed = time.time() - t_start
 
+        progress.progress(40, text=f"M1 complete in {elapsed:.1f}s")
+
+        # P2-2: Module 2 execution
+        if "M2" in pipeline_scope and m2_steps:
+            progress.progress(50, text="Module 2: Functionalization...")
+            from emulsim.pipeline.orchestrator import export_for_module2
+            from emulsim.module2_functionalization import ModificationOrchestrator
+
+            db_trust = PropertyDatabase()
+            props_trust_m2 = db_trust.update_for_conditions(
+                params.formulation.T_oil, params.formulation.c_agarose,
+                params.formulation.c_chitosan, params.formulation.c_span80,
+            )
+            for _k, _v in _custom_props_overrides.items():
+                if hasattr(props_trust_m2, _k):
+                    setattr(props_trust_m2, _k, _v)
+            _trust_m2 = assess_trust(result, params, props_trust_m2,
+                                     crosslinker_key=_xl_sel_key,
+                                     l2_mode=l2_mode)
+            try:
+                _contract = export_for_module2(
+                    result, _trust_m2,
+                    crosslinker_key=_xl_sel_key,
+                    props=props_trust_m2,
+                )
+                _m2_orch = ModificationOrchestrator()
+                _m2_result = _m2_orch.run(_contract, m2_steps)
+                st.session_state["m2_result"] = _m2_result
+                st.session_state["m1_contract"] = _contract
+            except Exception as _m2_ex:
+                st.warning(f"Module 2 failed: {_m2_ex}")
+                st.session_state.pop("m2_result", None)
+        else:
+            st.session_state.pop("m2_result", None)
+
         progress.progress(100, text=f"Complete in {elapsed:.1f}s")
 
     st.session_state["result"] = result
@@ -593,10 +724,17 @@ if "result" in st.session_state:
 
     # ── Detailed Results by Level ─────────────────────────────────────
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    _tab_labels = [
         "📈 Dashboard", "🫧 L1: Emulsification", "🧊 L2: Gelation",
         "🔗 L3: Crosslinking", "💪 L4: Mechanical",
-    ])
+    ]
+    _show_m2_tab = "M2" in pipeline_scope and "m2_result" in st.session_state
+    if _show_m2_tab:
+        _tab_labels.append("🧪 M2: Functionalization")
+
+    _all_tabs = st.tabs(_tab_labels)
+    tab1, tab2, tab3, tab4, tab5 = _all_tabs[:5]
+    tab_m2 = _all_tabs[5] if _show_m2_tab else None
 
     with tab1:
         st.plotly_chart(plot_results_dashboard(result), use_container_width=True)
@@ -698,6 +836,62 @@ if "result" in st.session_state:
             st.write(
                 f"Phenomenological: {_G_pheno/1000:.1f} kPa | "
                 f"{'Affine IPN' if _model_label == 'flory_rehner_affine' else _model_label}: {m.G_DN/1000:.1f} kPa"
+            )
+
+    # ── P2-3: Module 2 Results Tab ────────────────────────────────────
+
+    if _show_m2_tab and tab_m2 is not None:
+        with tab_m2:
+            from emulsim.visualization.plots_m2 import plot_acs_waterfall, plot_surface_area_comparison
+            _m2 = st.session_state["m2_result"]
+            st.subheader("Module 2: Surface Functionalization")
+
+            # KPI row
+            _mc1, _mc2, _mc3 = st.columns(3)
+            _mc1.metric("Steps Executed", len(_m2.modification_history))
+            _mc2.metric("G_DN Updated", f"{_m2.G_DN_updated / 1000:.1f} kPa")
+            _mc3.metric("E* Updated", f"{_m2.E_star_updated / 1000:.1f} kPa")
+
+            st.divider()
+
+            # ACS site summary
+            st.markdown("**ACS Site Inventory (remaining after all steps)**")
+            for _site_type, _profile in _m2.acs_profiles.items():
+                st.write(
+                    f"**{_site_type.value}**: remaining = {_profile.remaining_sites:.2e} mol/particle"
+                )
+
+            st.divider()
+
+            # Modification history
+            st.markdown("**Modification History**")
+            for _i, _mr in enumerate(_m2.modification_history):
+                _tgt = _mr.step.target_acs
+                _sites_before = _mr.acs_before.get(_tgt)
+                _consumed_str = ""
+                if _sites_before is not None:
+                    _consumed = _mr.conversion * _sites_before.remaining_sites
+                    _consumed_str = f" | sites consumed: {_consumed:.2e} mol/particle"
+                st.write(
+                    f"Step {_i + 1}: {_mr.step.reagent_key} — "
+                    f"conversion {_mr.conversion:.1%}{_consumed_str}"
+                )
+
+            st.divider()
+
+            # ACS waterfall chart
+            _fig_wf = plot_acs_waterfall(_m2.modification_history)
+            if _fig_wf is not None:
+                st.plotly_chart(_fig_wf, use_container_width=True)
+
+            # Surface area breakdown
+            _fig_sa = plot_surface_area_comparison(_m2.surface_model)
+            if _fig_sa is not None:
+                st.plotly_chart(_fig_sa, use_container_width=True)
+
+            st.caption(
+                "[!] semi_quantitative — ACS inventory uses simplified site-density model. "
+                "Default rate constants are illustrative — user calibration required."
             )
 
     # ── Optimization Assessment ───────────────────────────────────────
