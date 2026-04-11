@@ -161,6 +161,29 @@ def solve_modification_step(
     # --- Snapshot before ---
     acs_before = _snapshot_acs(acs_state)
 
+    # --- Validate reagent compatibility BEFORE any early returns (Codex R3-F1) ---
+    _STEP_ALLOWED_RTYPES = {
+        ModificationStepType.SECONDARY_CROSSLINKING: {"crosslinking"},
+        ModificationStepType.ACTIVATION: {"activation"},
+        ModificationStepType.LIGAND_COUPLING: {"coupling"},
+        ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
+        ModificationStepType.QUENCHING: {"blocking"},
+    }
+    allowed = _STEP_ALLOWED_RTYPES.get(step.step_type, set())
+    if allowed and reagent_profile.reaction_type not in allowed:
+        raise ValueError(
+            f"Reagent '{step.reagent_key}' has reaction_type "
+            f"'{reagent_profile.reaction_type}' incompatible with step type "
+            f"'{step.step_type.value}'. Allowed: {sorted(allowed)}."
+        )
+    # Also check target_acs match (mirrors orchestrator Rule 3)
+    if reagent_profile.target_acs != step.target_acs:
+        raise ValueError(
+            f"Reagent '{step.reagent_key}' targets "
+            f"{reagent_profile.target_acs.value} but step targets "
+            f"{step.target_acs.value}. Reagent-target mismatch."
+        )
+
     # --- Validate target exists ---
     if step.target_acs not in acs_state:
         raise ValueError(
@@ -185,30 +208,12 @@ def solve_modification_step(
         )
 
     # --- Convert per-particle sites to bulk concentration ---
-    # ACS remaining is in [mol/particle].
-    # To get a bulk concentration [mol/m^3], we need volume per particle.
     V_bead = surface_model.bead_volume  # [m^3/particle]
 
     if V_bead <= 0:
         raise ValueError(f"Bead volume must be positive, got {V_bead}")
 
     acs_concentration = remaining / V_bead  # [mol/m^3]
-
-    # --- Validate reagent-steptype compatibility (Codex F1 fix: public API guard) ---
-    _STEP_ALLOWED_RTYPES = {
-        ModificationStepType.SECONDARY_CROSSLINKING: {"crosslinking"},
-        ModificationStepType.ACTIVATION: {"activation"},
-        ModificationStepType.LIGAND_COUPLING: {"coupling"},
-        ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
-        ModificationStepType.QUENCHING: {"blocking"},
-    }
-    allowed = _STEP_ALLOWED_RTYPES.get(step.step_type, set())
-    if allowed and reagent_profile.reaction_type not in allowed:
-        raise ValueError(
-            f"Reagent '{step.reagent_key}' has reaction_type "
-            f"'{reagent_profile.reaction_type}' incompatible with step type "
-            f"'{step.step_type.value}'. Allowed: {sorted(allowed)}."
-        )
 
     # --- Dispatch by step type ---
     if step.step_type == ModificationStepType.SECONDARY_CROSSLINKING:

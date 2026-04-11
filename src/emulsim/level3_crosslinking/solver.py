@@ -72,7 +72,15 @@ def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:
 
     k(T) = k0 * exp(-E_a / (R*T))
     """
-    return k0 * np.exp(-E_a / (R_GAS * T))
+    if k0 <= 0 or T <= 0:
+        return 0.0
+    exponent = -E_a / (R_GAS * T)
+    if exponent < -700:
+        return 0.0
+    if exponent > 700:
+        return min(k0, 1e10)
+    result = k0 * np.exp(exponent)
+    return min(float(result), 1e20)
 
 
 # Keep old name as alias for backward compatibility

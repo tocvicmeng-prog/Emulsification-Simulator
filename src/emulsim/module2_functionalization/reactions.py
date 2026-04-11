@@ -73,13 +73,16 @@ def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:
     """
     if k0 <= 0 or T <= 0:
         return 0.0
-    # Guard against overflow in both directions (Codex F2 fix)
+    # Guard against overflow: cap the product k0*exp(...) (Codex R3-F2)
     exponent = -E_a / (R_GAS * T)
-    if exponent < -700:  # exp(-700) ~ 1e-304, underflow to zero
+    if exponent < -700:
         return 0.0
-    if exponent > 700:   # exp(700) ~ 1e304, overflow guard (negative E_a)
-        return 1e300     # cap at large-but-finite rate
-    return k0 * math.exp(exponent)
+    if exponent > 700:
+        # Negative E_a (physically unusual). Cap at a safe max rate.
+        return min(k0, 1e10)  # k0 itself is the upper bound
+    result = k0 * math.exp(exponent)
+    # Final product cap to prevent inf propagation into ODE solvers
+    return min(result, 1e20)
 
 
 # ─── Template 1: Simple irreversible second-order ──────────────────────
