@@ -258,7 +258,7 @@ def test_sequential_workflow_ech_then_crosslink():
 
     # NH2 should be partially consumed from step 2
     nh2 = acs_state[ACSSiteType.AMINE_PRIMARY]
-    assert nh2.consumed_sites > 0
+    assert nh2.crosslinked_sites > 0
 
     # All profiles valid
     for profile in acs_state.values():
@@ -296,15 +296,17 @@ def test_acs_conservation_across_steps():
     assert nh2.total_sites == pytest.approx(nh2_initial_total, rel=1e-10), \
         "Total NH2 sites should be conserved"
 
-    # consumed + blocked + remaining = accessible
-    assert (nh2.consumed_sites + nh2.blocked_sites + nh2.remaining_sites) == \
+    # terminal_sum + remaining = accessible (new conservation law)
+    assert (nh2.crosslinked_sites + nh2.hydrolyzed_sites
+            + nh2.ligand_coupled_sites + nh2.blocked_sites
+            + nh2.remaining_sites) == \
         pytest.approx(nh2.accessible_sites, rel=1e-10), \
-        "consumed + blocked + remaining should equal accessible"
+        "terminal_sum + remaining should equal accessible"
 
     # OH should be untouched
     oh = acs_state[ACSSiteType.HYDROXYL]
     assert oh.total_sites == pytest.approx(oh_initial_total, rel=1e-10)
-    assert oh.consumed_sites == 0.0
+    assert oh.crosslinked_sites == 0.0
 
 
 # ─── Test: Orchestrator end-to-end ────────────────────────────────────
@@ -554,3 +556,252 @@ def test_temperature_affects_conversion():
         f"Higher temperature should give higher conversion via Arrhenius: "
         f"conv(310K)={conversion_310:.6f} vs conv(298K)={conversion_298:.6f}"
     )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# W12: Integration tests for new workflows (Ligand, Protein, Quench)
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_full_activation_coupling_quench_pipeline():
+    """Full Activation -> DEAE Coupling -> Ethanolamine Quench pipeline.
+
+    Conservation must hold after each step and at the end.
+    Quenching must only update blocked_sites (audit F1 fix).
+    """
+    contract = _make_contract(nh2_bulk=100.0, oh_bulk=400.0, G_DN=5000.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.LIGAND_COUPLING,
+            reagent_key="deae_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=100.0, ph=10.5,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="ethanolamine_quench",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=1000.0, ph=8.5,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+
+    # All 3 steps executed
+    assert len(result.modification_history) == 3
+
+    # Conservation must pass
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"
+
+    # EPOXIDE profile should have coupling + quench results
+    epox = result.acs_profiles[ACSSiteType.EPOXIDE]
+    assert epox.ligand_coupled_sites > 0, "DEAE should have coupled"
+    assert epox.blocked_sites > 0, "Ethanolamine should have blocked"
+    assert epox.remaining_activated == pytest.approx(0.0, abs=1e-20), \
+        "All activated sites should be consumed by coupling + quench"
+
+    # G_DN should NOT increase (no crosslinking in coupling/quench)
+    assert result.G_DN_updated == pytest.approx(contract.G_DN, rel=1e-10)
+
+
+def test_quench_95pct_conservation_regression():
+    """Audit F1 regression: 95%+ quenching must not violate conservation.
+
+    Previously, quenching incremented both consumed_sites and blocked_sites,
+    causing double-counting. With the new terminal-state model, quenching
+    only increments blocked_sites.
+    """
+    contract = _make_contract(oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="ethanolamine_quench",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=1000.0, ph=8.5,  # 1M = very high
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    violations = result.validate()
+    assert violations == [], f"F1 regression: conservation violated at >95% quench: {violations}"
+
+    epox = result.acs_profiles[ACSSiteType.EPOXIDE]
+    # Quench conversion should be >95%
+    quench_result = result.modification_history[1]
+    assert quench_result.conversion > 0.95, \
+        f"Expected >95% quench conversion, got {quench_result.conversion:.4f}"
+
+    # remaining_activated should be ~0
+    assert epox.remaining_activated < epox.activated_sites * 0.05, \
+        f"remaining_activated should be <5% of activated after 95%+ quench"
+
+    # blocked_sites should be ~= activated_sites
+    assert epox.blocked_sites > 0.95 * epox.activated_sites * 0.99
+
+
+def test_protein_coupling_steric_limit():
+    """Protein coupling respects steric jamming limit."""
+    contract = _make_contract(oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.PROTEIN_COUPLING,
+            reagent_key="protein_a_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=277.15, time=57600.0,
+            reagent_concentration=0.01,  # 10 uM protein
+            ph=9.0,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"
+
+    epox = result.acs_profiles[ACSSiteType.EPOXIDE]
+    # Protein A has activity_retention = 0.60
+    if epox.ligand_coupled_sites > 0:
+        ratio = epox.ligand_functional_sites / epox.ligand_coupled_sites
+        assert ratio == pytest.approx(0.60, rel=0.01), \
+            f"Activity retention should be ~0.60, got {ratio:.3f}"
+
+
+def test_backend_blocks_coupling_without_activation():
+    """Backend validation blocks coupling on non-activated sites."""
+    contract = _make_contract(nh2_bulk=100.0, oh_bulk=400.0)
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.LIGAND_COUPLING,
+            reagent_key="deae_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=100.0, ph=10.5,
+        ),
+    ]
+
+    orchestrator = ModificationOrchestrator()
+    with pytest.raises(ValueError, match="no prior activation"):
+        orchestrator.run(contract, steps)
+
+
+def test_backend_blocks_step_after_quench():
+    """Backend validation blocks steps after quenching on same target."""
+    contract = _make_contract(oh_bulk=400.0)
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="ethanolamine_quench",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=1000.0, ph=8.5,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.LIGAND_COUPLING,
+            reagent_key="deae_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=100.0, ph=10.5,
+        ),
+    ]
+
+    orchestrator = ModificationOrchestrator()
+    with pytest.raises(ValueError, match="already quenched"):
+        orchestrator.run(contract, steps)
+
+
+def test_functional_media_contract_iex():
+    """FunctionalMediaContract maps DEAE ligand density to q_max."""
+    from emulsim.module2_functionalization.orchestrator import build_functional_media_contract
+
+    contract = _make_contract(oh_bulk=400.0, G_DN=5000.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.LIGAND_COUPLING,
+            reagent_key="deae_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=100.0, ph=10.5,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    fmc = build_functional_media_contract(result)
+
+    assert fmc.ligand_type == "iex_anion"
+    assert fmc.installed_ligand == "DEAE"
+    assert fmc.functional_ligand_density > 0
+    assert fmc.estimated_q_max > 0
+    assert fmc.q_max_confidence == "mapped_estimated"
+
+
+def test_backend_blocks_reagent_target_mismatch():
+    """Backend validation blocks reagent-target ACS mismatch."""
+    contract = _make_contract(nh2_bulk=100.0, oh_bulk=400.0)
+
+    steps = [
+        # ethanolamine_quench targets EPOXIDE, but step says AMINE_PRIMARY
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="ethanolamine_quench",
+            target_acs=ACSSiteType.AMINE_PRIMARY,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=1000.0,
+        ),
+    ]
+
+    orchestrator = ModificationOrchestrator()
+    with pytest.raises(ValueError, match="Reagent-target mismatch"):
+        orchestrator.run(contract, steps)

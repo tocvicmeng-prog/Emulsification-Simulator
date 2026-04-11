@@ -25,11 +25,31 @@ from __future__ import annotations
 
 import logging
 import math
+from dataclasses import dataclass, field
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
 logger = logging.getLogger(__name__)
+
+
+# ─── CouplingResult Dataclass ──────────────────────────────────────────
+
+@dataclass
+class CouplingResult:
+    """Structured output from coupling/quenching ODE solvers."""
+    conversion: float = 0.0            # [0,1] fraction of target sites consumed
+    sites_consumed: float = 0.0        # [mol/particle] absolute sites consumed
+    sites_hydrolyzed: float = 0.0      # [mol/particle] lost to hydrolysis
+    sites_coupled: float = 0.0         # [mol/particle] successfully coupled to ligand
+    sites_blocked: float = 0.0         # [mol/particle] capped by quenching
+    reagent_remaining_fraction: float = 0.0  # [0,1]
+    hydrolysis_fraction: float = 0.0   # Fraction of consumed activated sites lost to hydrolysis
+    solver_success: bool = True
+    solver_message: str = ""
+    site_balance_error: float = 0.0    # Residual of conservation check
+    warnings: list[str] = field(default_factory=list)
+
 
 # ─── Constants ──────────────────────────────────────────────────────────
 
@@ -281,3 +301,299 @@ def _steric_binding_rhs(
         -rate,   # d[active]/dt
         -rate,   # d[ligand_free]/dt
     ])
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Public ODE Wrappers (W4 — returns CouplingResult with diagnostics)
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def solve_competitive_coupling(
+    activated_sites_mol_per_particle: float,
+    ligand_concentration: float,
+    k_forward: float,
+    E_a: float,
+    temperature: float,
+    time: float,
+    bead_volume: float,
+    hydrolysis_rate: float = 0.0,
+    stoichiometry: float = 1.0,
+    ph: float = 7.0,
+    ph_min: float = 0.0,
+    ph_max: float = 14.0,
+) -> CouplingResult:
+    """Solve ligand coupling with competitive hydrolysis (Template 2 wrapper).
+
+    Converts mol/particle <-> mol/m^3 for the ODE, then back.
+    Returns structured CouplingResult with hydrolysis tracking.
+
+    Args:
+        activated_sites_mol_per_particle: Remaining activated sites [mol/particle].
+        ligand_concentration: Free ligand in solution [mol/m^3].
+        k_forward: Forward rate constant [m^3/(mol*s)] at reference T.
+        E_a: Activation energy [J/mol].
+        temperature: Reaction temperature [K].
+        time: Reaction time [s].
+        bead_volume: Volume of one bead [m^3/particle].
+        hydrolysis_rate: First-order hydrolysis rate constant [1/s].
+        stoichiometry: Moles ligand per mole site consumed [-].
+        ph: Reaction pH.
+        ph_min: Minimum valid pH for this chemistry.
+        ph_max: Maximum valid pH for this chemistry.
+
+    Returns:
+        CouplingResult with conversion, sites_coupled, sites_hydrolyzed, diagnostics.
+    """
+    warnings: list[str] = []
+
+    # pH validity gate
+    if ph < ph_min or ph > ph_max:
+        warnings.append(
+            f"pH {ph:.1f} outside valid range [{ph_min:.1f}, {ph_max:.1f}]; "
+            f"rate constants may not apply."
+        )
+
+    # Degenerate cases
+    if activated_sites_mol_per_particle <= 0 or ligand_concentration <= 0 or time <= 0:
+        return CouplingResult(warnings=warnings)
+    if bead_volume <= 0:
+        return CouplingResult(solver_success=False, solver_message="bead_volume <= 0",
+                              warnings=warnings)
+
+    # Arrhenius rate constant
+    k0 = k_forward / max(math.exp(-E_a / (R_GAS * 298.15)), 1e-30) if E_a > 0 else 0.0
+    k = arrhenius_rate_constant(temperature, k0, E_a) if E_a > 0 and k0 > 0 else k_forward
+
+    if k <= 0:
+        return CouplingResult(warnings=warnings)
+
+    # Convert to bulk concentration [mol/m^3]
+    active_conc = activated_sites_mol_per_particle / bead_volume
+
+    # ODE initial state: [active, ligand, coupled, hydrolyzed]
+    y0 = np.array([active_conc, ligand_concentration, 0.0, 0.0])
+
+    sol = solve_ivp(
+        fun=_competitive_hydrolysis_rhs,
+        t_span=(0.0, time),
+        y0=y0,
+        method="Radau",
+        args=(k, hydrolysis_rate),
+        rtol=1e-8,
+        atol=1e-12,
+        max_step=time / 10.0,
+    )
+
+    if not sol.success:
+        warnings.append(f"ODE solver warning: {sol.message}")
+
+    # Extract final state [mol/m^3]
+    active_final = max(sol.y[0, -1], 0.0)
+    coupled_final = max(sol.y[2, -1], 0.0)
+    hydrolyzed_final = max(sol.y[3, -1], 0.0)
+    ligand_final = max(sol.y[1, -1], 0.0)
+
+    # Convert back to mol/particle
+    sites_coupled = coupled_final * bead_volume
+    sites_hydrolyzed = hydrolyzed_final * bead_volume
+    sites_consumed = sites_coupled + sites_hydrolyzed
+
+    # Conversion
+    conversion = sites_consumed / activated_sites_mol_per_particle if activated_sites_mol_per_particle > 0 else 0.0
+    conversion = max(0.0, min(conversion, 1.0))
+
+    # Hydrolysis fraction
+    hydrol_frac = sites_hydrolyzed / sites_consumed if sites_consumed > 0 else 0.0
+
+    # Reagent remaining
+    reagent_rem = ligand_final / ligand_concentration if ligand_concentration > 0 else 0.0
+
+    # Balance check: active_consumed should equal coupled + hydrolyzed
+    active_consumed_conc = active_conc - active_final
+    balance_error = abs(active_consumed_conc - coupled_final - hydrolyzed_final) / max(active_conc, 1e-30)
+
+    return CouplingResult(
+        conversion=conversion,
+        sites_consumed=sites_consumed,
+        sites_coupled=sites_coupled,
+        sites_hydrolyzed=sites_hydrolyzed,
+        reagent_remaining_fraction=max(0.0, min(reagent_rem, 1.0)),
+        hydrolysis_fraction=hydrol_frac,
+        solver_success=sol.success,
+        solver_message=sol.message if not sol.success else "",
+        site_balance_error=balance_error,
+        warnings=warnings,
+    )
+
+
+def solve_steric_coupling(
+    activated_sites_mol_per_particle: float,
+    ligand_concentration: float,
+    k_forward: float,
+    E_a: float,
+    temperature: float,
+    time: float,
+    bead_volume: float,
+    max_coupled_mol_per_particle: float,
+    ph: float = 7.0,
+    ph_min: float = 0.0,
+    ph_max: float = 14.0,
+) -> CouplingResult:
+    """Solve protein coupling with steric blocking (Template 3 wrapper).
+
+    Uses RSA-like steric factor: f_steric = max(1 - coupled/max_sites, 0).
+    Canonical unit = mol/particle; converts to mol/m^3 for ODE.
+
+    Args:
+        activated_sites_mol_per_particle: Remaining activated sites [mol/particle].
+        ligand_concentration: Free protein in solution [mol/m^3].
+        k_forward: Forward rate constant [m^3/(mol*s)] at reference T.
+        E_a: Activation energy [J/mol].
+        temperature: Reaction temperature [K].
+        time: Reaction time [s].
+        bead_volume: Volume of one bead [m^3/particle].
+        max_coupled_mol_per_particle: Steric jamming limit [mol/particle].
+        ph: Reaction pH.
+        ph_min: Minimum valid pH.
+        ph_max: Maximum valid pH.
+
+    Returns:
+        CouplingResult with conversion, sites_coupled, diagnostics.
+    """
+    warnings: list[str] = []
+
+    if ph < ph_min or ph > ph_max:
+        warnings.append(
+            f"pH {ph:.1f} outside valid range [{ph_min:.1f}, {ph_max:.1f}]."
+        )
+
+    if activated_sites_mol_per_particle <= 0 or ligand_concentration <= 0 or time <= 0:
+        return CouplingResult(warnings=warnings)
+    if bead_volume <= 0:
+        return CouplingResult(solver_success=False, solver_message="bead_volume <= 0",
+                              warnings=warnings)
+
+    # Arrhenius
+    k0 = k_forward / max(math.exp(-E_a / (R_GAS * 298.15)), 1e-30) if E_a > 0 else 0.0
+    k = arrhenius_rate_constant(temperature, k0, E_a) if E_a > 0 and k0 > 0 else k_forward
+
+    if k <= 0:
+        return CouplingResult(warnings=warnings)
+
+    # Convert to mol/m^3 (canonical ODE unit)
+    active_conc = activated_sites_mol_per_particle / bead_volume
+    max_sites_conc = max_coupled_mol_per_particle / bead_volume
+
+    # ODE initial state: [coupled, active, ligand_free]
+    y0 = np.array([0.0, active_conc, ligand_concentration])
+
+    sol = solve_ivp(
+        fun=_steric_binding_rhs,
+        t_span=(0.0, time),
+        y0=y0,
+        method="Radau",
+        args=(k, max_sites_conc),
+        rtol=1e-8,
+        atol=1e-12,
+        max_step=time / 10.0,
+    )
+
+    if not sol.success:
+        warnings.append(f"ODE solver warning: {sol.message}")
+
+    coupled_final = max(sol.y[0, -1], 0.0)
+    active_final = max(sol.y[1, -1], 0.0)
+    ligand_final = max(sol.y[2, -1], 0.0)
+
+    sites_coupled = coupled_final * bead_volume
+    sites_consumed = sites_coupled  # No hydrolysis in steric model
+
+    conversion = sites_consumed / activated_sites_mol_per_particle if activated_sites_mol_per_particle > 0 else 0.0
+    conversion = max(0.0, min(conversion, 1.0))
+
+    reagent_rem = ligand_final / ligand_concentration if ligand_concentration > 0 else 0.0
+
+    # Balance: active_consumed = coupled
+    active_consumed = active_conc - active_final
+    balance_error = abs(active_consumed - coupled_final) / max(active_conc, 1e-30)
+
+    return CouplingResult(
+        conversion=conversion,
+        sites_consumed=sites_consumed,
+        sites_coupled=sites_coupled,
+        sites_hydrolyzed=0.0,
+        reagent_remaining_fraction=max(0.0, min(reagent_rem, 1.0)),
+        hydrolysis_fraction=0.0,
+        solver_success=sol.success,
+        solver_message=sol.message if not sol.success else "",
+        site_balance_error=balance_error,
+        warnings=warnings,
+    )
+
+
+def solve_quenching(
+    activated_sites_mol_per_particle: float,
+    reagent_concentration: float,
+    k_forward: float,
+    E_a: float,
+    temperature: float,
+    time: float,
+    bead_volume: float,
+    stoichiometry: float = 1.0,
+    hydrolysis_rate: float = 0.0,
+) -> CouplingResult:
+    """Solve quenching reaction (Template 1 wrapper — high [reagent], fast blocking).
+
+    Quenching uses the simple second-order ODE but returns sites_blocked
+    instead of sites_coupled. No hydrolysis tracking needed (quench reagents
+    are typically stable).
+
+    Args:
+        activated_sites_mol_per_particle: Remaining activated sites [mol/particle].
+        reagent_concentration: Quenching reagent concentration [mol/m^3].
+        k_forward: Forward rate constant [m^3/(mol*s)].
+        E_a: Activation energy [J/mol].
+        temperature: Reaction temperature [K].
+        time: Reaction time [s].
+        bead_volume: Volume of one bead [m^3/particle].
+        stoichiometry: Moles reagent per mole site blocked [-].
+        hydrolysis_rate: Reagent hydrolysis rate [1/s] (usually 0 for quench).
+
+    Returns:
+        CouplingResult with sites_blocked populated.
+    """
+    if activated_sites_mol_per_particle <= 0 or reagent_concentration <= 0 or time <= 0:
+        return CouplingResult()
+    if bead_volume <= 0:
+        return CouplingResult(solver_success=False, solver_message="bead_volume <= 0")
+
+    # Convert to mol/m^3
+    active_conc = activated_sites_mol_per_particle / bead_volume
+
+    # Arrhenius
+    k0 = k_forward / max(math.exp(-E_a / (R_GAS * 298.15)), 1e-30) if E_a > 0 else 0.0
+
+    conversion, reagent_rem = solve_second_order_consumption(
+        acs_concentration=active_conc,
+        reagent_concentration=reagent_concentration,
+        k_forward=k_forward,
+        stoichiometry=stoichiometry,
+        time=time,
+        temperature=temperature,
+        E_a=E_a,
+        k0=k0,
+        hydrolysis_rate=hydrolysis_rate,
+    )
+
+    sites_blocked = conversion * activated_sites_mol_per_particle
+
+    return CouplingResult(
+        conversion=conversion,
+        sites_consumed=sites_blocked,
+        sites_blocked=sites_blocked,
+        sites_coupled=0.0,
+        sites_hydrolyzed=0.0,
+        reagent_remaining_fraction=reagent_rem,
+        hydrolysis_fraction=0.0,
+        solver_success=True,
+    )

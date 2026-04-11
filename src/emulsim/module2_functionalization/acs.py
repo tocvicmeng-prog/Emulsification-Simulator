@@ -1,15 +1,19 @@
 """Available Coupling Site (ACS) inventory for Module 2 functionalization.
 
-Phase A: Data Model + ACS Surface-Area Core.
-Architecture: module2_module3_final_implementation_plan.md, Phase A.
+Phase A+: Revised ACS state model with explicit terminal states.
+Architecture: docs/18_m2_expansion_final_plan.md, Phase 1.
 
 Provides ACSProfile — a state-machine dataclass tracking the full hierarchy
-of reactive sites through sequential modification steps:
+of reactive sites through sequential modification steps.
 
-    total >= accessible >= activated >= consumed + remaining
-    ligand_functional <= ligand_coupled <= activated
+Conservation invariant (v2 — terminal-state model):
+    accessible_sites = remaining_sites
+                     + crosslinked_sites     (consumed by crosslinking)
+                     + hydrolyzed_sites      (lost to aqueous hydrolysis)
+                     + ligand_coupled_sites  (coupled to functional ligand)
+                     + blocked_sites         (capped by quenching)
 
-Conservation invariant: at every modification step, the hierarchy must hold.
+Every accessible site ends in exactly ONE terminal state.
 The validate() method checks this and returns a list of violations.
 """
 
@@ -61,20 +65,33 @@ class ACSSiteType(Enum):
 class ACSProfile:
     """Available Coupling Site inventory for a single site type.
 
-    Full hierarchy (all in [mol/particle]):
+    Terminal-state conservation model (v2):
+        accessible_sites = remaining_sites
+                         + crosslinked_sites
+                         + hydrolyzed_sites
+                         + ligand_coupled_sites
+                         + blocked_sites
+
+    Every accessible site ends in exactly ONE terminal state.
+
+    Hierarchy constraints:
         total_sites >= accessible_sites >= activated_sites
-        consumed_sites + blocked_sites + remaining_sites = accessible_sites
-        ligand_functional_sites <= ligand_coupled_sites <= activated_sites
+        ligand_functional_sites <= ligand_coupled_sites
+        terminal_sum <= accessible_sites
+
+    For activated product profiles (EPOXIDE, VINYL_SULFONE, ALDEHYDE):
+        ligand_coupled + hydrolyzed + blocked <= activated_sites
 
     Attributes:
         site_type: Type of reactive group.
         total_sites: Total sites per particle (bulk, including buried) [mol/particle].
         accessible_sites: Sites accessible to reagent (surface + pore) [mol/particle].
         activated_sites: Sites activated by chemistry (epoxy, aldehyde, etc.) [mol/particle].
-        consumed_sites: Sites consumed by coupling or side reactions [mol/particle].
-        blocked_sites: Sites intentionally blocked (quenching) [mol/particle].
+        crosslinked_sites: Sites consumed by crosslinking (contributes to G_DN) [mol/particle].
+        hydrolyzed_sites: Sites lost to aqueous hydrolysis (waste) [mol/particle].
         ligand_coupled_sites: Ligand molecules coupled to activated sites [mol/particle].
         ligand_functional_sites: Coupled ligand retaining biological activity [mol/particle].
+        blocked_sites: Sites intentionally blocked by quenching [mol/particle].
         total_density: Total site density on reagent-accessible area [mol/m^2].
         accessible_density: Accessible site density [mol/m^2].
         accessibility_model: Name of surface area tier used.
@@ -84,10 +101,13 @@ class ACSProfile:
     total_sites: float = 0.0           # [mol/particle]
     accessible_sites: float = 0.0      # [mol/particle]
     activated_sites: float = 0.0       # [mol/particle]
-    consumed_sites: float = 0.0        # [mol/particle]
-    blocked_sites: float = 0.0         # [mol/particle]
-    ligand_coupled_sites: float = 0.0  # [mol/particle]
-    ligand_functional_sites: float = 0.0  # [mol/particle]
+
+    # ── Terminal states (mutually exclusive destinations) ──
+    crosslinked_sites: float = 0.0     # [mol/particle] consumed by crosslinking
+    hydrolyzed_sites: float = 0.0      # [mol/particle] lost to hydrolysis
+    ligand_coupled_sites: float = 0.0  # [mol/particle] coupled to ligand
+    ligand_functional_sites: float = 0.0  # [mol/particle] subset retaining activity
+    blocked_sites: float = 0.0         # [mol/particle] capped by quenching
 
     # Surface-normalised densities [mol/m^2]
     total_density: float = 0.0
@@ -97,15 +117,42 @@ class ACSProfile:
     uncertainty_fraction: float = 0.1
 
     @property
+    def _terminal_sum(self) -> float:
+        """Sum of all terminal-state site counts [mol/particle]."""
+        return (self.crosslinked_sites + self.hydrolyzed_sites
+                + self.ligand_coupled_sites + self.blocked_sites)
+
+    @property
     def remaining_sites(self) -> float:
         """Sites still available for further chemistry [mol/particle].
 
-        remaining = accessible - consumed - blocked (clamped to >= 0).
+        remaining = accessible - terminal_sum (clamped to >= 0).
+        Terminal states: crosslinked + hydrolyzed + ligand_coupled + blocked.
         """
-        return max(self.accessible_sites - self.consumed_sites - self.blocked_sites, 0.0)
+        return max(self.accessible_sites - self._terminal_sum, 0.0)
+
+    @property
+    def remaining_activated(self) -> float:
+        """Activated sites not yet consumed by coupling, hydrolysis, or quenching.
+
+        For activated product profiles (EPOXIDE, VINYL_SULFONE, ALDEHYDE):
+        remaining_activated = activated - (ligand_coupled + hydrolyzed + blocked)
+        """
+        used = self.ligand_coupled_sites + self.hydrolyzed_sites + self.blocked_sites
+        return max(self.activated_sites - used, 0.0)
+
+    # Backward compatibility: consumed_sites as computed property
+    @property
+    def consumed_sites(self) -> float:
+        """Backward-compatible view: total sites in any terminal state.
+
+        Equivalent to the old consumed_sites + blocked_sites combined.
+        Use terminal-state fields directly for new code.
+        """
+        return self._terminal_sum
 
     def validate(self) -> list[str]:
-        """Conservation hierarchy checks.
+        """Conservation hierarchy checks (v2 terminal-state model).
 
         Returns:
             List of violation messages (empty = valid).
@@ -121,23 +168,28 @@ class ACSProfile:
         if self.activated_sites > self.accessible_sites * _CONSERVATION_TOL:
             errors.append(f"{name}: activated ({self.activated_sites:.4e}) > accessible ({self.accessible_sites:.4e})")
 
-        # Hierarchy: ligand_coupled <= activated
-        if self.ligand_coupled_sites > self.activated_sites * _CONSERVATION_TOL:
-            errors.append(f"{name}: ligand_coupled ({self.ligand_coupled_sites:.4e}) > activated ({self.activated_sites:.4e})")
-
         # Hierarchy: ligand_functional <= ligand_coupled
         if self.ligand_functional_sites > self.ligand_coupled_sites * _CONSERVATION_TOL:
             errors.append(f"{name}: ligand_functional ({self.ligand_functional_sites:.4e}) > ligand_coupled ({self.ligand_coupled_sites:.4e})")
 
-        # Sum check: consumed + blocked <= accessible
-        used = self.consumed_sites + self.blocked_sites
-        if used > self.accessible_sites * _CONSERVATION_TOL:
-            errors.append(f"{name}: consumed+blocked ({used:.4e}) > accessible ({self.accessible_sites:.4e})")
+        # Terminal-sum conservation: crosslinked + hydrolyzed + coupled + blocked <= accessible
+        ts = self._terminal_sum
+        if ts > self.accessible_sites * _CONSERVATION_TOL:
+            errors.append(f"{name}: terminal_sum ({ts:.4e}) > accessible ({self.accessible_sites:.4e})")
+
+        # For activated product profiles: ligand_coupled + hydrolyzed + blocked <= activated
+        activated_used = self.ligand_coupled_sites + self.hydrolyzed_sites + self.blocked_sites
+        if self.activated_sites > 0 and activated_used > self.activated_sites * _CONSERVATION_TOL:
+            errors.append(
+                f"{name}: ligand_coupled+hydrolyzed+blocked ({activated_used:.4e}) "
+                f"> activated ({self.activated_sites:.4e})"
+            )
 
         # Non-negativity
         for attr in ("total_sites", "accessible_sites", "activated_sites",
-                      "consumed_sites", "blocked_sites",
-                      "ligand_coupled_sites", "ligand_functional_sites"):
+                      "crosslinked_sites", "hydrolyzed_sites",
+                      "ligand_coupled_sites", "ligand_functional_sites",
+                      "blocked_sites"):
             val = getattr(self, attr)
             if val < 0:
                 errors.append(f"{name}: {attr} is negative ({val:.4e})")
@@ -232,10 +284,11 @@ def initialize_acs_from_m1(
             total_sites=n_total,
             accessible_sites=n_accessible,
             activated_sites=0.0,
-            consumed_sites=0.0,
-            blocked_sites=0.0,
+            crosslinked_sites=0.0,
+            hydrolyzed_sites=0.0,
             ligand_coupled_sites=0.0,
             ligand_functional_sites=0.0,
+            blocked_sites=0.0,
             total_density=total_density,
             accessible_density=accessible_density,
             accessibility_model=surface_model.tier.value,

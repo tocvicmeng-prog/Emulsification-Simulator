@@ -227,7 +227,7 @@ class TestACSProfileValidation:
             total_sites=1e-9,
             accessible_sites=0.8e-9,
             activated_sites=0.5e-9,
-            consumed_sites=0.2e-9,
+            crosslinked_sites=0.2e-9,
             blocked_sites=0.1e-9,
             ligand_coupled_sites=0.15e-9,
             ligand_functional_sites=0.10e-9,
@@ -293,7 +293,7 @@ class TestACSRemainingSites:
         profile = ACSProfile(
             site_type=ACSSiteType.AMINE_PRIMARY,
             accessible_sites=1e-9,
-            consumed_sites=0.3e-9,
+            crosslinked_sites=0.3e-9,
             blocked_sites=0.2e-9,
         )
         expected = 1e-9 - 0.3e-9 - 0.2e-9
@@ -303,7 +303,7 @@ class TestACSRemainingSites:
         profile = ACSProfile(
             site_type=ACSSiteType.AMINE_PRIMARY,
             accessible_sites=1e-9,
-            consumed_sites=0.6e-9,
+            crosslinked_sites=0.6e-9,
             blocked_sites=0.6e-9,  # sum > accessible
         )
         assert profile.remaining_sites == 0.0
@@ -400,13 +400,12 @@ class TestACSConservationSyntheticSequence:
 
         # --- Step 1: Consume 30% of accessible NH2 (secondary crosslinking) ---
         consumed_fraction = 0.30
-        nh2.consumed_sites = consumed_fraction * nh2.accessible_sites
-        nh2.activated_sites = nh2.consumed_sites  # direct coupling, no separate activation
+        nh2.crosslinked_sites = consumed_fraction * nh2.accessible_sites
 
         errors = nh2.validate()
         assert errors == [], f"Step 1 NH2 violations: {errors}"
-        # remaining + consumed + blocked = accessible
-        balance = nh2.remaining_sites + nh2.consumed_sites + nh2.blocked_sites
+        # remaining + terminal_sum = accessible
+        balance = nh2.remaining_sites + nh2._terminal_sum
         assert math.isclose(balance, nh2.accessible_sites, rel_tol=1e-10)
 
         # --- Step 2: Activate 50% of accessible OH (ECH epoxidation) ---
@@ -416,14 +415,13 @@ class TestACSConservationSyntheticSequence:
         errors = oh.validate()
         assert errors == [], f"Step 2 OH violations: {errors}"
 
-        # --- Step 3: Block all remaining activated OH sites ---
-        oh.consumed_sites = 0.0  # no ligand coupled yet
-        oh.blocked_sites = oh.activated_sites  # quench all activated
+        # --- Step 3: Block all remaining activated OH sites (quenching) ---
+        oh.blocked_sites = oh.activated_sites  # quench all activated — only blocked_sites
 
         errors = oh.validate()
         assert errors == [], f"Step 3 OH violations: {errors}"
-        # Sum check: consumed + blocked <= accessible
-        assert (oh.consumed_sites + oh.blocked_sites) <= oh.accessible_sites * 1.001
+        # Terminal sum check: terminal_sum <= accessible
+        assert oh._terminal_sum <= oh.accessible_sites * 1.001
 
     def test_ligand_coupling_sub_sequence(self):
         """After activation, couple ligand to 60% of activated sites,
@@ -438,7 +436,6 @@ class TestACSConservationSyntheticSequence:
 
         # Couple ligand to 60% of activated
         oh.ligand_coupled_sites = 0.60 * oh.activated_sites
-        oh.consumed_sites = oh.ligand_coupled_sites  # coupling consumes sites
 
         # 80% of coupled ligand retains activity
         oh.ligand_functional_sites = 0.80 * oh.ligand_coupled_sites
