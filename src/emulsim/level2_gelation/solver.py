@@ -11,9 +11,10 @@ kinetics for mobility arrest.
 """
 
 from __future__ import annotations
+import logging
 import numpy as np
 from scipy import sparse
-from scipy.sparse.linalg import factorized, spsolve
+from scipy.sparse.linalg import factorized, spsolve, splu
 
 from ..datatypes import GelationResult, GelationTimingResult, MaterialProperties, SimulationParameters
 from .spatial import (
@@ -27,6 +28,8 @@ from .pore_analysis import (
     characteristic_wavelength_2d, chord_length_distribution_2d, compute_porosity_2d,
     morphology_descriptors,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _find_spinodal_temperature(A_chi: float, B_chi: float, N_p: float,
@@ -338,16 +341,7 @@ class CahnHilliard2DSolver:
         N = self.N_grid
         total = N * N
 
-        # -- Setup ----------------------------------------------------------
-        # Cap domain at 1.5 µm so grid spacing h ≤ 11.7 nm at N=128,
-        # giving ≥ 6 points per 80 nm pore wavelength.
-        L_domain = min(2.0 * R_droplet, 1.5e-6)
-        x, y, h = create_2d_grid(L_domain, N)
-        L_std = build_laplacian_2d(N, h)      # standard (constant-coeff) Laplacian
-        L_std_csc = L_std.tocsc()
-        I_mat = sparse.eye(total, format='csc')
-
-        # Physical parameters
+        # -- Physical parameters (needed for adaptive domain sizing) ----------
         T_init = params.formulation.T_oil
         T_ambient = 293.15
         cooling_rate = params.formulation.cooling_rate
@@ -370,6 +364,30 @@ class CahnHilliard2DSolver:
         hydration_factor = 6.0  # typical for agarose helix bundles
         phi_0_dry = (params.formulation.c_agarose + params.formulation.c_chitosan) / 1400.0
         phi_0 = float(np.clip(phi_0_dry * hydration_factor, 0.05, 0.45))
+
+        # -- Setup ----------------------------------------------------------
+        # Adaptive domain size: fit at least 5 Cahn-Hilliard spinodal wavelengths.
+        # The CH wavelength lambda_CH = 2*pi*sqrt(2*kappa / f'') where f'' is the
+        # Flory-Huggins second derivative at the mean composition.
+        # This solver is a local-patch (RVE) representation, not the whole droplet.
+        _chi_ref = A_chi / max(T_init, 100.0) + B_chi
+        _f_pp = max(abs(1.0 / max(phi_0, 0.01) + 1.0 / max(1.0 - phi_0, 0.01) - 2.0 * _chi_ref), 1.0)
+        lambda_CH = 2.0 * np.pi * np.sqrt(2.0 * kappa / _f_pp)
+        # Domain must fit at least 5 wavelengths, with a minimum of 0.5 µm
+        L_domain = min(2.0 * R_droplet, max(5.0 * lambda_CH, 0.5e-6))
+        # Hard ceiling for computational feasibility
+        L_domain = min(L_domain, 3.0e-6)
+        if L_domain < 2.0 * R_droplet:
+            logger.info("L2: domain %.1f nm < droplet %.1f nm (local-patch RVE mode)",
+                        L_domain * 1e9, 2 * R_droplet * 1e9)
+        if R_droplet < 5 * lambda_CH:
+            logger.warning("L2: droplet R=%.0f nm is within 5x of spinodal wavelength "
+                           "%.0f nm — confinement effects may be significant",
+                           R_droplet * 1e9, lambda_CH * 1e9)
+        x, y, h = create_2d_grid(L_domain, N)
+        L_std = build_laplacian_2d(N, h)      # standard (constant-coeff) Laplacian
+        L_std_csc = L_std.tocsc()
+        I_mat = sparse.eye(total, format='csc')
 
         rng = np.random.default_rng(rng_seed)
         phi_2d = phi_0 + 0.005 * rng.standard_normal((N, N))
@@ -416,6 +434,30 @@ class CahnHilliard2DSolver:
         step = 0
         max_steps = 200000
 
+        # -- Pre-loop: contractive constant (computed once at deepest quench) --
+        chi_deep = A_chi / max(T_ambient, 200.0) + B_chi
+        C_contract = contractive_constant(
+            (max(0.03, phi_0 * 0.3), min(0.97, phi_0 * 3.0)),
+            T_ambient, chi_deep, N_p, v0,
+        )
+
+        # -- Pre-loop: initial LU factorization ---------------------------------
+        # Build mobility for the initial phi field
+        M_flat_init = mobility(phi, 0.0, M_0, beta)
+        M_2d_init = M_flat_init.reshape(N, N)
+        L_M = build_mobility_laplacian_2d(M_2d_init, N, h)
+        L_M_csc = L_M.tocsc()
+        LM_L = L_M_csc @ L_std_csc
+        A_mat = I_mat + dt * C_contract * L_M_csc + dt * kappa * LM_L
+        try:
+            A_factor = splu(A_mat.tocsc())
+        except Exception:
+            A_factor = None
+        M_cached = M_2d_init.copy()
+
+        REBUILD_INTERVAL = 10   # rebuild operator every N steps at most
+        rebuild_counter = 0     # steps since last rebuild
+
         while t < t_final and step < max_steps:
             # Current temperature
             T = cooling_temperature(t, T_init, T_ambient, cooling_rate)
@@ -445,41 +487,54 @@ class CahnHilliard2DSolver:
 
             M_2d = M_flat.reshape(N, N)
 
-            # Build mobility-weighted Laplacian: L_M = div(M * grad(.))
-            L_M = build_mobility_laplacian_2d(M_2d, N, h)
-            L_M_csc = L_M.tocsc()
-
-            # Contractive constant for Eyre splitting
-            if step == 0:
-                # Precompute contractive constant once at the deepest expected quench
-                chi_deep = A_chi / max(T_ambient, 200.0) + B_chi
-                C_contract = contractive_constant(
-                    (max(0.03, phi_0 * 0.3), min(0.97, phi_0 * 3.0)),
-                    T_ambient, chi_deep, N_p, v0,
-                )
-
             # Explicit chemical potential: mu_e = f'(phi) + C*phi
             mu_explicit = flory_huggins_mu(phi, T, chi, N_p, v0) + C_contract * phi
 
-            # RHS: phi + dt * L_M @ mu_e
+            # RHS: phi + dt * L_M @ mu_e   (uses current L_M, cached between rebuilds)
             rhs = phi + dt * (L_M @ mu_explicit)
 
-            # LHS: I + dt*C*L_M + dt*kappa*(L_M @ L_std)
-            # The implicit part handles -C*phi - kappa*laplacian(phi)
-            LM_L = L_M_csc @ L_std_csc
-            A_mat = I_mat + dt * C_contract * L_M_csc + dt * kappa * LM_L
+            # -- Decide whether to rebuild the operator -----------------------
+            rebuild_counter += 1
+            need_rebuild = (rebuild_counter >= REBUILD_INTERVAL) or (A_factor is None)
 
-            # Solve
+            # Also rebuild if mobility has drifted significantly from cached value
+            if not need_rebuild:
+                M_avg_cached = float(np.mean(M_cached)) + 1e-30
+                if np.max(np.abs(M_2d - M_cached)) / M_avg_cached > 0.05:
+                    need_rebuild = True
+
+            if need_rebuild:
+                L_M = build_mobility_laplacian_2d(M_2d, N, h)
+                L_M_csc = L_M.tocsc()
+                LM_L = L_M_csc @ L_std_csc
+                A_mat = I_mat + dt * C_contract * L_M_csc + dt * kappa * LM_L
+                try:
+                    A_factor = splu(A_mat.tocsc())
+                except Exception:
+                    A_factor = None
+                M_cached = M_2d.copy()
+                rebuild_counter = 0
+
+            # Solve using cached LU factorization (or fall back to spsolve)
             try:
-                phi_new = spsolve(A_mat, rhs)
+                if A_factor is not None:
+                    phi_new = A_factor.solve(rhs)
+                else:
+                    phi_new = spsolve(A_mat, rhs)
             except Exception:
                 dt *= 0.25
+                # Force rebuild on next step with the new dt
+                A_factor = None
+                rebuild_counter = REBUILD_INTERVAL
                 if dt < 1e-10:
                     break
                 continue
 
             if not np.all(np.isfinite(phi_new)):
                 dt *= 0.25
+                # Force rebuild on next step with the new dt
+                A_factor = None
+                rebuild_counter = REBUILD_INTERVAL
                 if dt < 1e-10:
                     break
                 continue
@@ -493,9 +548,16 @@ class CahnHilliard2DSolver:
             if change > 0 and change < 0.2:
                 ratio = change_target / change
                 ratio = np.clip(ratio, 0.25, 4.0)
-                dt = np.clip(dt * ratio, 1e-10, self.dt_max)
+                new_dt = np.clip(dt * ratio, 1e-10, self.dt_max)
+                # If dt changes significantly, force operator rebuild next step
+                if abs(new_dt - dt) / (dt + 1e-50) > 0.05:
+                    A_factor = None
+                    rebuild_counter = REBUILD_INTERVAL
+                dt = new_dt
             elif change >= 0.2:
                 dt = max(dt * 0.1, 1e-10)
+                A_factor = None
+                rebuild_counter = REBUILD_INTERVAL
                 continue  # retry with smaller dt
 
             phi = phi_new
