@@ -864,14 +864,22 @@ if _tab_m2 is not None:
                 elif step_type == "Ligand Coupling":
                     _reagent_options = {
                         "DEAE (Weak Anion Exchange)": "deae_coupling",
-                        "IDA (IMAC Chelator)": "ida_coupling",
-                        "Phenyl (HIC)": "phenyl_coupling",
+                        "Q (Strong Anion Exchange)": "q_coupling",
+                        "CM (Weak Cation Exchange)": "cm_coupling",
                         "Sulfopropyl (Strong Cation)": "sp_coupling",
+                        "IDA (IMAC Chelator)": "ida_coupling",
+                        "NTA (IMAC His-tag)": "nta_coupling",
+                        "Phenyl (HIC)": "phenyl_coupling",
+                        "Butyl (HIC Mild)": "butyl_coupling",
+                        "Glutathione (GST-tag)": "glutathione_coupling",
+                        "Heparin (Affinity+IEX)": "heparin_coupling",
                     }
                 elif step_type == "Protein Coupling":
                     _reagent_options = {
                         "Protein A (IgG Affinity)": "protein_a_coupling",
                         "Protein G (IgG Broad Subclass)": "protein_g_coupling",
+                        "Protein A/G Fusion (Broadest IgG)": "protein_ag_coupling",
+                        "Streptavidin (Biotin-tag)": "streptavidin_coupling",
                     }
                 else:  # Quenching
                     _reagent_options = {
@@ -891,6 +899,26 @@ if _tab_m2 is not None:
                     _reagent_key = list(_reagent_options.values())[0]
                     _profile = _REAGENT_PROFILES[_reagent_key]
                 st.caption(f"k={_profile.k_forward:.1e} | E_a={_profile.E_a / 1000:.0f} kJ/mol")
+                # Audit F16: display confidence, calibration, hazard
+                _conf = getattr(_profile, 'confidence_tier', 'semi_quantitative')
+                _cal = getattr(_profile, 'calibration_source', '')[:60]
+                _haz = getattr(_profile, 'hazard_class', '') or 'low'
+                st.caption(f"Confidence: {_conf} | Hazard: {_haz}")
+
+                # Spacer selectbox for coupling/protein steps
+                if step_type in ("Ligand Coupling", "Protein Coupling"):
+                    _spacer_options = {
+                        "None (Direct Coupling)": "",
+                        "DADPA (13 A, EAH-standard)": "dadpa_spacer",
+                        "AHA (10 A, NHS-standard)": "aha_spacer",
+                        "DAH (9 A, AH-standard)": "dah_spacer",
+                    }
+                    _spacer_label = st.selectbox(
+                        "Spacer Arm (optional)",
+                        list(_spacer_options.keys()),
+                        key=f"m2_spacer_{i}_{step_type.replace(' ', '_').lower()}",
+                    )
+                    _selected_spacer = _spacer_options.get(_spacer_label, "")
 
                 # Keys include step_type AND reagent so switching either resets defaults (Codex R3-F4)
                 _wk = f"{step_type.replace(' ', '_').lower()}_{_reagent_key}"

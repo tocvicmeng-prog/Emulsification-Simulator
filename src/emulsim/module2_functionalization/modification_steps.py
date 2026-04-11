@@ -473,8 +473,12 @@ def _solve_ligand_coupling_step(
     )
 
     # Update ACS — ligand coupling terminal states
+    # Apply spacer multiplier on activity_retention (audit F2, capped at 1.0)
+    _activity_ret = getattr(reagent_profile, 'activity_retention', 1.0)
+    _spacer_mult = getattr(reagent_profile, 'spacer_activity_multiplier', 1.0)
+    _effective_activity = min(_activity_ret * _spacer_mult, 1.0)
     target_profile.ligand_coupled_sites += cr.sites_coupled
-    target_profile.ligand_functional_sites += cr.sites_coupled * reagent_profile.activity_retention
+    target_profile.ligand_functional_sites += cr.sites_coupled * _effective_activity
     target_profile.hydrolyzed_sites += cr.sites_hydrolyzed
 
     step.conversion = cr.conversion
@@ -545,10 +549,12 @@ def _solve_protein_coupling_step(
         ph_max=getattr(reagent_profile, 'ph_max', 14.0),
     )
 
-    # Update ACS — protein coupling with activity retention
+    # Update ACS — protein coupling with activity retention + spacer multiplier
     activity_ret = getattr(reagent_profile, 'activity_retention', 1.0)
+    spacer_mult = getattr(reagent_profile, 'spacer_activity_multiplier', 1.0)
+    effective_activity = min(activity_ret * spacer_mult, 1.0)  # cap at 1.0
     target_profile.ligand_coupled_sites += cr.sites_coupled
-    target_profile.ligand_functional_sites += cr.sites_coupled * activity_ret
+    target_profile.ligand_functional_sites += cr.sites_coupled * effective_activity
 
     step.conversion = cr.conversion
 

@@ -899,3 +899,138 @@ def test_p2_1_activation_uses_activated_consumed_not_crosslinked():
 
     violations = result.validate()
     assert violations == [], f"Conservation violations: {violations}"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# WN-7/8/9: v5.7 expansion tests
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_all_25_profiles_have_required_metadata():
+    """Every profile must have non-empty confidence_tier and valid reaction_type."""
+    for key, profile in REAGENT_PROFILES.items():
+        assert profile.confidence_tier in ("semi_quantitative", "ranking_only"), \
+            f"{key}: invalid confidence_tier '{profile.confidence_tier}'"
+        assert profile.reaction_type in (
+            "crosslinking", "activation", "coupling", "protein_coupling", "blocking", "spacer"
+        ), f"{key}: invalid reaction_type '{profile.reaction_type}'"
+
+
+def test_iex_profiles_have_charge_type():
+    """All IEX ligand profiles must have explicit charge_type."""
+    iex_keys = ["deae_coupling", "q_coupling", "sp_coupling", "cm_coupling"]
+    for key in iex_keys:
+        profile = REAGENT_PROFILES[key]
+        assert profile.charge_type in ("anion", "cation"), \
+            f"{key}: IEX profile missing charge_type, got '{profile.charge_type}'"
+
+
+def test_imac_profiles_have_metal_ion():
+    """IMAC profiles must declare metal_ion."""
+    for key in ["ida_coupling", "nta_coupling"]:
+        profile = REAGENT_PROFILES[key]
+        assert profile.metal_ion != "", \
+            f"{key}: IMAC profile missing metal_ion"
+        assert profile.metal_loaded_fraction > 0, \
+            f"{key}: metal_loaded_fraction should be > 0"
+
+
+def test_spacer_profiles_are_not_executable():
+    """Spacer profiles have reaction_type='spacer' and k_forward=0."""
+    spacer_keys = ["dadpa_spacer", "aha_spacer", "dah_spacer"]
+    for key in spacer_keys:
+        profile = REAGENT_PROFILES[key]
+        assert profile.reaction_type == "spacer", \
+            f"{key}: spacer should have reaction_type='spacer'"
+        assert profile.k_forward == 0.0, \
+            f"{key}: spacer k_forward should be 0 (not executable)"
+        assert profile.spacer_activity_multiplier >= 1.0, \
+            f"{key}: spacer_activity_multiplier should be >= 1.0"
+
+
+def test_heparin_is_macromolecule():
+    """Heparin must be treated as macromolecule (audit F6)."""
+    profile = REAGENT_PROFILES["heparin_coupling"]
+    assert profile.is_macromolecule is True
+    assert profile.ligand_mw > 10000
+
+
+def test_glutathione_has_reduced_activity():
+    """Glutathione activity_retention should be <1.0 (audit F8)."""
+    profile = REAGENT_PROFILES["glutathione_coupling"]
+    assert profile.activity_retention < 1.0
+    assert profile.activity_retention_uncertainty > 0
+
+
+def test_spacer_multiplier_capped_at_1():
+    """effective_activity = activity_retention * spacer_mult must not exceed 1.0."""
+    contract = _make_contract(oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.PROTEIN_COUPLING,
+            reagent_key="streptavidin_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=277.15, time=57600.0,
+            reagent_concentration=0.01, ph=9.0,
+        ),
+    ]
+    result = orchestrator.run(contract, steps)
+    epox = result.acs_profiles.get(ACSSiteType.EPOXIDE)
+    if epox and epox.ligand_coupled_sites > 0:
+        ratio = epox.ligand_functional_sites / epox.ligand_coupled_sites
+        assert ratio <= 1.0, f"Effective activity should be <= 1.0, got {ratio:.4f}"
+        assert ratio == pytest.approx(0.70 * 1.22, rel=0.02)
+
+
+def test_fmc_q_maps_to_iex_anion():
+    """Q maps to iex_anion via charge_type (audit F14)."""
+    from emulsim.module2_functionalization.orchestrator import build_functional_media_contract
+    contract = _make_contract(oh_bulk=400.0, G_DN=5000.0)
+    orchestrator = ModificationOrchestrator()
+    steps = [
+        ModificationStep(step_type=ModificationStepType.ACTIVATION, reagent_key="ech_activation",
+                         target_acs=ACSSiteType.HYDROXYL, product_acs=ACSSiteType.EPOXIDE,
+                         temperature=298.15, time=7200.0, reagent_concentration=100.0, ph=12.0),
+        ModificationStep(step_type=ModificationStepType.LIGAND_COUPLING, reagent_key="q_coupling",
+                         target_acs=ACSSiteType.EPOXIDE, temperature=298.15, time=14400.0,
+                         reagent_concentration=100.0, ph=10.5),
+    ]
+    result = orchestrator.run(contract, steps)
+    fmc = build_functional_media_contract(result)
+    assert fmc.ligand_type == "iex_anion"
+    assert fmc.estimated_q_max > 0
+
+
+def test_fmc_biotin_stoich_2_5():
+    """Streptavidin q_max uses stoich=2.5 not 4 (audit F7)."""
+    from emulsim.module2_functionalization.orchestrator import build_functional_media_contract
+    contract = _make_contract(oh_bulk=400.0, G_DN=5000.0)
+    orchestrator = ModificationOrchestrator()
+    steps = [
+        ModificationStep(step_type=ModificationStepType.ACTIVATION, reagent_key="ech_activation",
+                         target_acs=ACSSiteType.HYDROXYL, product_acs=ACSSiteType.EPOXIDE,
+                         temperature=298.15, time=7200.0, reagent_concentration=100.0, ph=12.0),
+        ModificationStep(step_type=ModificationStepType.PROTEIN_COUPLING, reagent_key="streptavidin_coupling",
+                         target_acs=ACSSiteType.EPOXIDE, temperature=277.15, time=57600.0,
+                         reagent_concentration=0.01, ph=9.0),
+    ]
+    result = orchestrator.run(contract, steps)
+    fmc = build_functional_media_contract(result)
+    assert fmc.ligand_type == "biotin_affinity"
+    assert "2.5" in fmc.q_max_mapping_notes
+    assert fmc.binding_model_hint == "near_irreversible"
+
+
+def test_profile_count_is_25():
+    """Canonical: 14 existing + 8 coupling + 3 spacer = 25."""
+    assert len(REAGENT_PROFILES) == 25

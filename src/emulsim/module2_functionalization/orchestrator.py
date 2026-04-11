@@ -101,6 +101,13 @@ class FunctionalMediaContract:
     q_max_confidence: str = "not_mapped"  # "mapped_estimated" | "not_mapped"
     q_max_mapping_notes: str = ""
 
+    # ── Area basis (audit F13) ──
+    ligand_density_area_basis: str = ""  # "reagent_accessible", "ligand_accessible", "external"
+    q_max_area_basis_note: str = ""      # Human-readable note on q_max derivation
+
+    # ── Binding model hint for M3 (audit F15) ──
+    binding_model_hint: str = ""         # Passed from reagent profile for M3 routing
+
     # ── Trust ──
     confidence_tier: str = "semi_quantitative"
     warnings: list[str] = field(default_factory=list)
@@ -144,62 +151,114 @@ def build_functional_media_contract(
                 fm = getattr(rp, 'functional_mode', '')
 
                 # Map functional_mode to ligand_type
+                # Audit F14: use charge_type for IEX instead of string heuristic
+                _ct = getattr(rp, 'charge_type', '')
                 _mode_map = {
-                    "iex_ligand": "iex_anion" if "anion" in installed_ligand.lower() or "deae" in installed_ligand.lower()
-                                  else "iex_cation",
+                    "iex_ligand": "iex_anion" if _ct == "anion" else (
+                        "iex_cation" if _ct == "cation" else "iex_anion"),
                     "affinity_ligand": "affinity",
                     "imac_chelator": "imac",
                     "hic_ligand": "hic",
+                    "gst_affinity": "gst_affinity",
+                    "biotin_affinity": "biotin_affinity",
+                    "heparin_affinity": "heparin_affinity",
                 }
                 ligand_type = _mode_map.get(fm, "none")
                 _last_coupling_rp = rp  # carry for density area selection
 
-    # Compute densities from ACS profiles
-    # Codex P2-3: use reagent_accessible_area for small molecules,
-    # ligand_accessible_area for macromolecules
+    # Compute densities from ACS profiles (audit F13: track area basis)
     _is_macro = getattr(_last_coupling_rp, 'is_macromolecule', False) if _last_coupling_rp is not None else False
+    _area_basis = "reagent_accessible"
     for _st, profile in microsphere.acs_profiles.items():
         if profile.ligand_coupled_sites > 0:
             if _is_macro and surface.ligand_accessible_area > 0:
                 area = surface.ligand_accessible_area
+                _area_basis = "ligand_accessible"
             else:
                 area = surface.reagent_accessible_area if surface.reagent_accessible_area > 0 else surface.ligand_accessible_area
+                _area_basis = "reagent_accessible" if surface.reagent_accessible_area > 0 else "ligand_accessible"
             if area > 0:
                 coupled_density = profile.ligand_coupled_sites / area
                 functional_density = profile.ligand_functional_sites / area
 
     # Estimate q_max for IEX and affinity
-    if ligand_type in ("iex_anion", "iex_cation") and functional_density > 0:
-        # Ionic capacity = functional_density * specific_surface_area * (1 - bed_porosity)
-        # Approximate specific surface area: 6*(1-eps)/(d_p)
-        d_p = contract.bead_d50
-        eps_b = 0.38  # default bed porosity
-        if d_p > 0:
-            a_v = 6.0 * (1.0 - eps_b) / d_p  # [m^2/m^3 bed]
-            q_max_est = functional_density * a_v  # [mol/m^3 bed]
+    # ── q_max mapping (audit F13: area basis, F7: stoichiometry corrections) ──
+    d_p = contract.bead_d50
+    eps_b = 0.38  # default bed porosity
+    _q_max_area_note = f"Area basis: {_area_basis}."
+    _binding_hint = getattr(_last_coupling_rp, 'binding_model_hint', '') if _last_coupling_rp else ''
+
+    if d_p > 0 and functional_density > 0:
+        a_v = 6.0 * (1.0 - eps_b) / d_p  # [m^2/m^3 bed] external geometric
+
+        if ligand_type in ("iex_anion", "iex_cation"):
+            q_max_est = functional_density * a_v
             confidence = "mapped_estimated"
             q_max_notes = (
-                f"IEX: q_max = ligand_density * a_v. "
-                f"a_v = 6(1-eps)/d_p = {a_v:.0f} m^2/m^3. "
-                f"Assumes bed porosity = {eps_b:.2f}."
+                f"IEX: q_max = ligand_density * a_v = {q_max_est:.2f} mol/m^3. "
+                f"a_v = {a_v:.0f} m^2/m^3 (external). {_q_max_area_note} "
+                f"Bed porosity = {eps_b:.2f}."
             )
-    elif ligand_type == "affinity" and functional_density > 0:
-        d_p = contract.bead_d50
-        eps_b = 0.38
-        if d_p > 0:
-            a_v = 6.0 * (1.0 - eps_b) / d_p
-            binding_stoich = 2.0  # 1 Protein A binds 2 IgG Fc
+        elif ligand_type == "affinity":
+            binding_stoich = 2.0  # Protein A/G: ~2 IgG per ligand
             q_max_est = functional_density * a_v * binding_stoich
             confidence = "mapped_estimated"
             q_max_notes = (
-                f"Affinity: q_max = functional_density * a_v * stoich. "
-                f"Binding stoichiometry = {binding_stoich:.0f} (Protein A:IgG). "
-                f"Ranking only — calibrate with frontal analysis."
+                f"Affinity (Fc): q_max = density * a_v * stoich({binding_stoich:.0f}). "
+                f"{_q_max_area_note} Ranking only."
             )
+        elif ligand_type == "imac":
+            binding_stoich = 1.0
+            _mi = getattr(_last_coupling_rp, 'metal_ion', 'Ni2+') if _last_coupling_rp else 'Ni2+'
+            _mlf = getattr(_last_coupling_rp, 'metal_loaded_fraction', 1.0) if _last_coupling_rp else 1.0
+            q_max_est = functional_density * a_v * binding_stoich * _mlf
+            confidence = "mapped_estimated"
+            q_max_notes = (
+                f"IMAC: q_max = density * a_v * stoich * metal_frac. "
+                f"Assumes fully {_mi}-loaded (frac={_mlf:.0%}), "
+                f"no leaching, no competing chelators. {_q_max_area_note}"
+            )
+        elif ligand_type == "gst_affinity":
+            binding_stoich = 1.0  # 1 GST per glutathione
+            q_max_est = functional_density * a_v * binding_stoich
+            confidence = "mapped_estimated"
+            q_max_notes = (
+                f"GST affinity: 1:1 GST:glutathione. {_q_max_area_note}"
+            )
+        elif ligand_type == "biotin_affinity":
+            binding_stoich = 2.5  # Audit F7: capped from theoretical 4
+            q_max_est = functional_density * a_v * binding_stoich
+            confidence = "mapped_estimated"
+            q_max_notes = (
+                f"Biotin affinity: stoich={binding_stoich} (capped from theoretical 4 "
+                f"due to steric occlusion). Near-irreversible binding. {_q_max_area_note}"
+            )
+        elif ligand_type == "heparin_affinity":
+            binding_stoich = 1.0  # approximate, highly target-dependent
+            q_max_est = functional_density * a_v * binding_stoich
+            confidence = "mapped_estimated"
+            q_max_notes = (
+                f"Heparin affinity: stoich~1 (approximate, target-dependent). "
+                f"Mixed affinity + cation exchange. {_q_max_area_note}"
+            )
+        elif ligand_type == "hic":
+            q_max_notes = (
+                f"HIC: q_max not mappable from ligand density alone. "
+                f"Requires salt-dependent adsorption isotherm. {_q_max_area_note}"
+            )
+        else:
+            q_max_notes = f"Ligand type '{ligand_type}' — q_max mapping not implemented."
+            if ligand_type != "none":
+                warnings.append(q_max_notes)
     else:
-        q_max_notes = f"Ligand type '{ligand_type}' — q_max mapping not implemented."
-        if ligand_type != "none":
-            warnings.append(q_max_notes)
+        if ligand_type != "none" and functional_density > 0:
+            q_max_notes = "q_max not computed: bead diameter is zero."
+        elif ligand_type != "none":
+            q_max_notes = "q_max not computed: no functional ligand density."
+
+    # Determine confidence tier
+    _ranking_types = {"affinity", "biotin_affinity", "heparin_affinity"}
+    _conf_tier = "ranking_only" if ligand_type in _ranking_types else "semi_quantitative"
 
     return FunctionalMediaContract(
         bead_d50=contract.bead_d50,
@@ -210,13 +269,16 @@ def build_functional_media_contract(
         functional_ligand_density=functional_density,
         total_coupled_density=coupled_density,
         charge_density=functional_density if ligand_type.startswith("iex") else 0.0,
-        active_protein_density=functional_density if ligand_type == "affinity" else 0.0,
+        active_protein_density=functional_density if ligand_type in ("affinity", "biotin_affinity") else 0.0,
         G_DN_updated=microsphere.G_DN_updated,
         E_star_updated=microsphere.E_star_updated,
         estimated_q_max=q_max_est,
         q_max_confidence=confidence,
         q_max_mapping_notes=q_max_notes,
-        confidence_tier="ranking_only" if ligand_type == "affinity" else "semi_quantitative",
+        ligand_density_area_basis=_area_basis,
+        q_max_area_basis_note=_q_max_area_note,
+        binding_model_hint=_binding_hint,
+        confidence_tier=_conf_tier,
         warnings=warnings,
     )
 
