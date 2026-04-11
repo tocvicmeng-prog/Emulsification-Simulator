@@ -63,7 +63,11 @@ def _arrhenius_prefactor(k_ref: float, E_a: float, T_ref: float) -> float:
     """
     if E_a <= 0 or T_ref <= 0 or k_ref <= 0:
         return 0.0
-    return k_ref * math.exp(E_a / (R_GAS * T_ref))
+    # Guard overflow for large E_a (Codex F2 fix)
+    exponent = E_a / (R_GAS * T_ref)
+    if exponent > 700:
+        return min(k_ref * 1e300, 1e30)  # cap at finite value
+    return k_ref * math.exp(exponent)
 
 
 # ─── Enums ──────────────────────────────────────────────────────────────
@@ -189,6 +193,22 @@ def solve_modification_step(
         raise ValueError(f"Bead volume must be positive, got {V_bead}")
 
     acs_concentration = remaining / V_bead  # [mol/m^3]
+
+    # --- Validate reagent-steptype compatibility (Codex F1 fix: public API guard) ---
+    _STEP_ALLOWED_RTYPES = {
+        ModificationStepType.SECONDARY_CROSSLINKING: {"crosslinking"},
+        ModificationStepType.ACTIVATION: {"activation"},
+        ModificationStepType.LIGAND_COUPLING: {"coupling"},
+        ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
+        ModificationStepType.QUENCHING: {"blocking"},
+    }
+    allowed = _STEP_ALLOWED_RTYPES.get(step.step_type, set())
+    if allowed and reagent_profile.reaction_type not in allowed:
+        raise ValueError(
+            f"Reagent '{step.reagent_key}' has reaction_type "
+            f"'{reagent_profile.reaction_type}' incompatible with step type "
+            f"'{step.step_type.value}'. Allowed: {sorted(allowed)}."
+        )
 
     # --- Dispatch by step type ---
     if step.step_type == ModificationStepType.SECONDARY_CROSSLINKING:
@@ -334,6 +354,11 @@ def _solve_activation_step(
 
     # Sites consumed from target (hydroxyl) — activation consumes into activated_consumed
     # (Codex P2-1: activation is NOT crosslinking, does not contribute to G_DN)
+    # NOTE (Codex F4): The same sites appear as terminal on the parent (OH) profile
+    # AND as new accessible/activated on the product (EPOXIDE) profile. This is by
+    # design — each ACS profile tracks conservation independently. A global sum across
+    # profiles will double-count, which is correct: the OH site is consumed, and a new
+    # EPOXIDE site is created. They are chemically distinct inventory entries.
     sites_consumed = conversion * target_profile.remaining_sites
     target_profile.activated_consumed_sites += sites_consumed
 
@@ -556,11 +581,20 @@ def _solve_quenching_step(
     Updates: blocked_sites ONLY (not crosslinked_sites — fixes audit F1).
     No G_DN change. No product sites created.
     """
-    # Codex P1-2: Use remaining_activated for activated sites, remaining_sites for native
+    # Codex P1-2 + F5: Use remaining_activated for activated product profiles,
+    # remaining_sites for explicitly native site types (AMINE_PRIMARY, HYDROXYL).
+    # Other profiles with activated_sites==0 are likely malformed — warn and skip.
+    _NATIVE_SITE_TYPES = {ACSSiteType.AMINE_PRIMARY, ACSSiteType.HYDROXYL}
     if target_profile.activated_sites > 0:
         available = target_profile.remaining_activated
-    else:
+    elif target_profile.site_type in _NATIVE_SITE_TYPES:
         available = target_profile.remaining_sites
+    else:
+        logger.warning(
+            "Quenching targets %s with activated_sites=0 and non-native type. Skipping.",
+            target_profile.site_type.value,
+        )
+        available = 0.0
 
     if available <= 0:
         step.conversion = 0.0

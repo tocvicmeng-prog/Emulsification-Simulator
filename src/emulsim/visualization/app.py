@@ -888,12 +888,14 @@ if _tab_m2 is not None:
                 _profile = _REAGENT_PROFILES[_reagent_key]
                 st.caption(f"k={_profile.k_forward:.1e} | E_a={_profile.E_a / 1000:.0f} kJ/mol")
 
-                _conc = st.number_input("Concentration (mM)", 0.5, 200.0, 10.0, key=f"m2_conc_{i}")
+                # Keys include step_type so switching chemistry resets defaults (Codex F6 fix)
+                _sk = step_type.replace(' ', '_').lower()
+                _conc = st.number_input("Concentration (mM)", 0.5, 200.0, 10.0, key=f"m2_conc_{i}_{_sk}")
                 _temp_C = st.slider("Temperature (C)", 4, 80,
-                                     int(_profile.temperature_default - 273.15), key=f"m2_temp_{i}")
+                                     int(_profile.temperature_default - 273.15), key=f"m2_temp_{i}_{_sk}")
                 _time_h = st.number_input("Time (h)", 0.25, 48.0,
-                                           float(_profile.time_default / 3600), key=f"m2_time_{i}")
-                _ph = st.slider("pH", 3.0, 14.0, float(_profile.ph_optimum), step=0.5, key=f"m2_ph_{i}")
+                                           float(_profile.time_default / 3600), key=f"m2_time_{i}_{_sk}")
+                _ph = st.slider("pH", 3.0, 14.0, float(_profile.ph_optimum), step=0.5, key=f"m2_ph_{i}_{_sk}")
 
                 if step_type == "Protein Coupling":
                     st.caption("Ranking only — activity retention and steric limits are illustrative defaults.")

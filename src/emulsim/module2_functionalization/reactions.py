@@ -73,10 +73,12 @@ def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:
     """
     if k0 <= 0 or T <= 0:
         return 0.0
-    # Guard against overflow: clamp exponent to prevent inf
+    # Guard against overflow in both directions (Codex F2 fix)
     exponent = -E_a / (R_GAS * T)
-    if exponent < -700:  # exp(-700) ~ 1e-304, safe floor
+    if exponent < -700:  # exp(-700) ~ 1e-304, underflow to zero
         return 0.0
+    if exponent > 700:   # exp(700) ~ 1e304, overflow guard (negative E_a)
+        return 1e300     # cap at large-but-finite rate
     return k0 * math.exp(exponent)
 
 

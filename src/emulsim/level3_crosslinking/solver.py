@@ -397,9 +397,9 @@ def _solve_reaction_diffusion(
         logger.warning("Reaction-diffusion solver did not converge: %s",
                        sol.message)
 
-    # Extract final spatial profiles
-    G_final = sol.y[:n, -1]
-    NH2_final = sol.y[n:, -1]
+    # Extract final spatial profiles — clamp to non-negative (Codex F3 fix)
+    G_final = np.maximum(sol.y[:n, -1], 0.0)
+    NH2_final = np.maximum(sol.y[n:, -1], 0.0)
 
     # Volume-weighted average using spherical shells: int(f * r^2 dr) / int(r^2 dr)
     r2 = r ** 2
@@ -407,7 +407,7 @@ def _solve_reaction_diffusion(
 
     G_avg_final = np.dot(w, G_final)
     NH2_avg_final = np.dot(w, NH2_final)
-    X_consumed = c_crosslinker - G_avg_final  # volume-avg crosslinker consumed
+    X_consumed = max(c_crosslinker - G_avg_final, 0.0)  # volume-avg crosslinker consumed
     p_avg = 1.0 - NH2_avg_final / NH2_total if NH2_total > 0 else 0.0
     p_avg = float(np.clip(p_avg, 0.0, 1.0))
 
@@ -418,8 +418,8 @@ def _solve_reaction_diffusion(
     )
 
     # Build time-resolved arrays (volume-averaged at each output time)
-    G_spatial = sol.y[:n, :]  # shape (n, N_t)
-    X_arr = c_crosslinker - np.dot(w, G_spatial)  # volume-avg consumed at each t
+    G_spatial = np.maximum(sol.y[:n, :], 0.0)  # clamp negatives (Codex F3)
+    X_arr = np.maximum(c_crosslinker - np.dot(w, G_spatial), 0.0)  # volume-avg consumed
 
     nu_e_arr = np.zeros_like(sol.t)
     Mc_arr = np.zeros_like(sol.t)
