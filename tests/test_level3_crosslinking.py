@@ -77,3 +77,78 @@ class TestCrosslinkingSolver:
         r_low = solve_crosslinking(params_low, props)
         r_high = solve_crosslinking(params_high, props)
         assert r_high.p_final >= r_low.p_final
+
+
+class TestReactionDiffusionPDE:
+    """Tests for _solve_reaction_diffusion (diffusion-limited regime, Phi > 1)."""
+
+    def test_pde_solver_runs_and_converges(self):
+        """Large droplet + fast kinetics triggers Phi > 1 PDE path."""
+        from emulsim.level3_crosslinking.solver import (
+            _solve_reaction_diffusion,
+            compute_thiele_modulus,
+            available_amine_concentration,
+        )
+        params = SimulationParameters()
+        # Large droplet radius to push Thiele > 1
+        params.formulation.c_genipin = 50.0   # high crosslinker
+        params.formulation.t_crosslink = 3600.0  # 1 hour
+        props = MaterialProperties()
+
+        R_droplet = 500e-6  # 500 um — large enough for Phi > 1
+        D_xlink = 1e-10
+
+        # Verify Phi > 1
+        from emulsim.level3_crosslinking.solver import arrhenius_rate_constant
+        k_rate = arrhenius_rate_constant(
+            params.formulation.T_crosslink, props.k_xlink_0, props.E_a_xlink
+        )
+        NH2 = available_amine_concentration(
+            params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+        )
+        Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
+        assert Phi > 1.0, f"Test setup error: Phi={Phi:.2f} should be > 1"
+
+        # Run PDE solver
+        result, Phi_out = _solve_reaction_diffusion(params, props, R_droplet, D_xlink)
+
+        # Basic validity checks
+        assert result.p_final >= 0.0
+        assert result.p_final <= 1.0
+        assert len(result.t_array) > 0
+        assert result.G_chitosan_final >= 0.0
+        assert result.xi_final > 0.0
+
+    def test_pde_no_negative_concentrations(self):
+        """BDF solver should not produce negative concentrations after clamp fix."""
+        from emulsim.level3_crosslinking.solver import _solve_reaction_diffusion
+        params = SimulationParameters()
+        params.formulation.c_genipin = 100.0  # very high — stress test
+        params.formulation.t_crosslink = 7200.0
+        props = MaterialProperties()
+
+        R_droplet = 300e-6
+        result, _ = _solve_reaction_diffusion(params, props, R_droplet, 1e-10)
+
+        # Conversion should be valid
+        assert 0.0 <= result.p_final <= 1.0
+        # X_array (crosslinker consumed) should be non-negative
+        assert np.all(result.X_array >= -1e-15), \
+            f"X_array has negative values: min={result.X_array.min()}"
+
+    def test_pde_conversion_valid_range(self):
+        """PDE solver with different droplet sizes produces valid results."""
+        from emulsim.level3_crosslinking.solver import _solve_reaction_diffusion
+        params = SimulationParameters()
+        params.formulation.c_genipin = 10.0
+        params.formulation.t_crosslink = 14400.0  # 4 hours
+        props = MaterialProperties()
+
+        # Two different bead sizes — both should produce valid results
+        for R in [200e-6, 500e-6]:
+            result, Phi = _solve_reaction_diffusion(params, props, R_droplet=R)
+            assert 0.0 <= result.p_final <= 1.0, \
+                f"p_final out of range for R={R*1e6:.0f} um: {result.p_final}"
+            assert result.G_chitosan_final >= 0.0
+            assert result.xi_final > 0.0
+            assert Phi > 0.0

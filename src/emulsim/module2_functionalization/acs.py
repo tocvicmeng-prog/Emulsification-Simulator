@@ -103,7 +103,8 @@ class ACSProfile:
     activated_sites: float = 0.0       # [mol/particle]
 
     # ── Terminal states (mutually exclusive destinations) ──
-    crosslinked_sites: float = 0.0     # [mol/particle] consumed by crosslinking
+    crosslinked_sites: float = 0.0     # [mol/particle] consumed by crosslinking (G_DN)
+    activated_consumed_sites: float = 0.0  # [mol/particle] consumed by activation chemistry (not crosslinking)
     hydrolyzed_sites: float = 0.0      # [mol/particle] lost to hydrolysis
     ligand_coupled_sites: float = 0.0  # [mol/particle] coupled to ligand
     ligand_functional_sites: float = 0.0  # [mol/particle] subset retaining activity
@@ -119,8 +120,9 @@ class ACSProfile:
     @property
     def _terminal_sum(self) -> float:
         """Sum of all terminal-state site counts [mol/particle]."""
-        return (self.crosslinked_sites + self.hydrolyzed_sites
-                + self.ligand_coupled_sites + self.blocked_sites)
+        return (self.crosslinked_sites + self.activated_consumed_sites
+                + self.hydrolyzed_sites + self.ligand_coupled_sites
+                + self.blocked_sites)
 
     @property
     def remaining_sites(self) -> float:
@@ -187,7 +189,8 @@ class ACSProfile:
 
         # Non-negativity
         for attr in ("total_sites", "accessible_sites", "activated_sites",
-                      "crosslinked_sites", "hydrolyzed_sites",
+                      "crosslinked_sites", "activated_consumed_sites",
+                      "hydrolyzed_sites",
                       "ligand_coupled_sites", "ligand_functional_sites",
                       "blocked_sites"):
             val = getattr(self, attr)
@@ -285,6 +288,7 @@ def initialize_acs_from_m1(
             accessible_sites=n_accessible,
             activated_sites=0.0,
             crosslinked_sites=0.0,
+            activated_consumed_sites=0.0,
             hydrolyzed_sites=0.0,
             ligand_coupled_sites=0.0,
             ligand_functional_sites=0.0,

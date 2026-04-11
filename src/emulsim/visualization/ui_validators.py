@@ -47,8 +47,11 @@ class ValidationResult:
 
 # ─── M1 Validators (9 rules) ──────────────────────────────────────────────────
 
-# Step types supported by M2; others are planned but unimplemented.
-_M2_SUPPORTED_STEP_TYPES = {"secondary_crosslinking", "activation"}
+# Step types supported by M2.
+_M2_SUPPORTED_STEP_TYPES = {
+    "secondary_crosslinking", "activation",
+    "ligand_coupling", "protein_coupling", "quenching",
+}
 
 # Temperature above which standard agarose gel re-melts [Celsius].
 _T_GEL_REMELT_LIMIT_C = 85.0
@@ -230,21 +233,10 @@ def validate_m2_inputs(
             val = str(s)
         step_type_values.append(val)
 
-    # R3–R6: Check each step type
-    _PLANNED_UNSUPPORTED = {
-        "ligand_coupling":  "LIGAND_COUPLING",
-        "protein_coupling": "PROTEIN_COUPLING",
-        "quenching":        "QUENCHING",
-    }
+    # R3–R6: Check each step type is supported
     seen_types = []
     for val in step_type_values:
-        if val in _PLANNED_UNSUPPORTED:
-            display = _PLANNED_UNSUPPORTED[val]
-            result.add_blocker(
-                f"Step type {display} is planned but not yet implemented. "
-                "This step will appear as 'Planned' in the UI and cannot be simulated."
-            )
-        elif val not in _M2_SUPPORTED_STEP_TYPES:
+        if val not in _M2_SUPPORTED_STEP_TYPES:
             result.add_blocker(
                 f"Unknown step type '{val}'. "
                 f"Supported types: {sorted(_M2_SUPPORTED_STEP_TYPES)}."

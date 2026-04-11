@@ -356,8 +356,10 @@ def _solve_reaction_diffusion(
     n = N_r + 1  # number of spatial nodes
 
     def rhs(_t, y):
-        G = y[:n]
-        NH2 = y[n:]
+        # Clamp state to non-negative to prevent BDF numerical undershoot
+        # from contaminating diffusion Laplacian term
+        G = np.maximum(y[:n], 0.0)
+        NH2 = np.maximum(y[n:], 0.0)
 
         dGdt = np.zeros(n)
         dNH2dt = np.zeros(n)

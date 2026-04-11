@@ -127,6 +127,7 @@ def build_functional_media_contract(
     # Find the last coupling step to determine ligand type
     ligand_type = "none"
     installed_ligand = ""
+    _last_coupling_rp = None
     functional_density = 0.0
     coupled_density = 0.0
     confidence = "not_mapped"
@@ -151,11 +152,18 @@ def build_functional_media_contract(
                     "hic_ligand": "hic",
                 }
                 ligand_type = _mode_map.get(fm, "none")
+                _last_coupling_rp = rp  # carry for density area selection
 
     # Compute densities from ACS profiles
+    # Codex P2-3: use reagent_accessible_area for small molecules,
+    # ligand_accessible_area for macromolecules
+    _is_macro = getattr(_last_coupling_rp, 'is_macromolecule', False) if _last_coupling_rp is not None else False
     for _st, profile in microsphere.acs_profiles.items():
         if profile.ligand_coupled_sites > 0:
-            area = surface.ligand_accessible_area if surface.ligand_accessible_area > 0 else surface.reagent_accessible_area
+            if _is_macro and surface.ligand_accessible_area > 0:
+                area = surface.ligand_accessible_area
+            else:
+                area = surface.reagent_accessible_area if surface.reagent_accessible_area > 0 else surface.ligand_accessible_area
             if area > 0:
                 coupled_density = profile.ligand_coupled_sites / area
                 functional_density = profile.ligand_functional_sites / area
@@ -324,6 +332,15 @@ _COUPLING_TYPES = {
     ModificationStepType.PROTEIN_COUPLING,
 }
 
+# Rule 4: Allowed reaction_type values per step type (Codex P1-1 fix)
+_STEP_ALLOWED_REACTION_TYPES: dict[ModificationStepType, set[str]] = {
+    ModificationStepType.SECONDARY_CROSSLINKING: {"crosslinking"},
+    ModificationStepType.ACTIVATION: {"activation"},
+    ModificationStepType.LIGAND_COUPLING: {"coupling"},
+    ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
+    ModificationStepType.QUENCHING: {"blocking"},
+}
+
 
 def _validate_workflow_ordering(
     steps: list[ModificationStep],
@@ -335,6 +352,7 @@ def _validate_workflow_ordering(
         1. Coupling/quenching requires activated sites on target ACS type.
         2. No steps after quenching on the same target ACS type.
         3. Reagent-target ACS type must match reagent profile's target_acs.
+        4. Reagent reaction_type must be compatible with step type.
 
     Raises:
         ValueError: On blocker-level violations.
@@ -346,7 +364,10 @@ def _validate_workflow_ordering(
     for i, step in enumerate(steps):
         idx = i + 1
 
-        # Rule 2: No steps after quenching on same target
+        # Rule 2: No steps after quenching on same target.
+        # NOTE: Cross-target workflows (e.g., Quench(EPOXIDE) then Crosslink(AMINE))
+        # are intentionally allowed — quenching one group does not block chemistry
+        # on a chemically distinct group (validated against wetlab practice).
         if step.target_acs in quenched_targets:
             raise ValueError(
                 f"Step {idx}: {step.step_type.value} targets "
@@ -393,6 +414,17 @@ def _validate_workflow_ordering(
                     f"Step {idx}: reagent '{step.reagent_key}' targets "
                     f"{rp.target_acs.value} but step targets {step.target_acs.value}. "
                     f"Reagent-target mismatch."
+                )
+
+        # Rule 4: Reagent reaction_type must match step type (Codex P1-1 fix)
+        if step.reagent_key in REAGENT_PROFILES:
+            rp_r4 = REAGENT_PROFILES[step.reagent_key]
+            allowed = _STEP_ALLOWED_REACTION_TYPES.get(step.step_type, set())
+            if allowed and rp_r4.reaction_type not in allowed:
+                raise ValueError(
+                    f"Step {idx}: reagent '{step.reagent_key}' has reaction_type "
+                    f"'{rp_r4.reaction_type}' which is incompatible with step type "
+                    f"'{step.step_type.value}'. Allowed reaction_types: {sorted(allowed)}."
                 )
 
         # Track quenching

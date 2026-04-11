@@ -219,22 +219,23 @@ class TestValidationM2:
         result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
         assert result.valid is True
 
-    def test_ligand_coupling_blocker(self):
-        """LIGAND_COUPLING step type triggers a blocker."""
+    def test_ligand_coupling_accepted(self):
+        """LIGAND_COUPLING step type is now supported (Codex P2-5 fix)."""
         steps = [self._FakeStep("ligand_coupling")]
         result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
-        assert result.valid is False
-        assert any("LIGAND_COUPLING" in b or "ligand_coupling" in b for b in result.blockers)
+        assert result.valid is True
 
-    def test_protein_coupling_blocker(self):
+    def test_protein_coupling_accepted(self):
+        """PROTEIN_COUPLING step type is now supported."""
         steps = [self._FakeStep("protein_coupling")]
         result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
-        assert result.valid is False
+        assert result.valid is True
 
-    def test_quenching_blocker(self):
+    def test_quenching_accepted(self):
+        """QUENCHING step type is now supported."""
         steps = [self._FakeStep("quenching")]
         result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
-        assert result.valid is False
+        assert result.valid is True
 
     def test_unknown_step_type_blocker(self):
         steps = [self._FakeStep("magic_enchantment")]

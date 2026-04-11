@@ -332,9 +332,10 @@ def _solve_activation_step(
         hydrolysis_rate=reagent_profile.hydrolysis_rate,
     )
 
-    # Sites consumed from target (hydroxyl) — activation consumes into crosslinked terminal state
+    # Sites consumed from target (hydroxyl) — activation consumes into activated_consumed
+    # (Codex P2-1: activation is NOT crosslinking, does not contribute to G_DN)
     sites_consumed = conversion * target_profile.remaining_sites
-    target_profile.crosslinked_sites += sites_consumed
+    target_profile.activated_consumed_sites += sites_consumed
 
     step.conversion = conversion
 
@@ -364,6 +365,7 @@ def _solve_activation_step(
                 accessible_sites=product_sites,
                 activated_sites=product_sites,
                 crosslinked_sites=0.0,
+                activated_consumed_sites=0.0,
                 hydrolyzed_sites=0.0,
                 ligand_coupled_sites=0.0,
                 ligand_functional_sites=0.0,
@@ -544,23 +546,32 @@ def _solve_quenching_step(
     reagent_profile: ReagentProfile,
     V_bead: float,
 ) -> ModificationResult:
-    """Block remaining activated sites with quenching reagent.
+    """Block remaining sites with quenching reagent.
 
-    Operates on remaining_activated sites. Uses solve_quenching (Template 1).
+    For activated product profiles (EPOXIDE, VINYL_SULFONE, ALDEHYDE):
+        operates on remaining_activated sites.
+    For native profiles (AMINE_PRIMARY, HYDROXYL) where activated_sites == 0:
+        operates on remaining_sites (Codex P1-2 fix — acetic anhydride on amines).
+
     Updates: blocked_sites ONLY (not crosslinked_sites — fixes audit F1).
     No G_DN change. No product sites created.
     """
-    remaining_act = target_profile.remaining_activated
-    if remaining_act <= 0:
+    # Codex P1-2: Use remaining_activated for activated sites, remaining_sites for native
+    if target_profile.activated_sites > 0:
+        available = target_profile.remaining_activated
+    else:
+        available = target_profile.remaining_sites
+
+    if available <= 0:
         step.conversion = 0.0
         return ModificationResult(
             step=step, acs_before={}, acs_after={},
             conversion=0.0, delta_G_DN=0.0,
-            notes="Quenching: no remaining activated sites to block.",
+            notes="Quenching: no remaining sites to block.",
         )
 
     cr = solve_quenching(
-        activated_sites_mol_per_particle=remaining_act,
+        activated_sites_mol_per_particle=available,
         reagent_concentration=step.reagent_concentration,
         k_forward=reagent_profile.k_forward,
         E_a=reagent_profile.E_a,

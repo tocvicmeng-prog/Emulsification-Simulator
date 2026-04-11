@@ -805,3 +805,97 @@ def test_backend_blocks_reagent_target_mismatch():
     orchestrator = ModificationOrchestrator()
     with pytest.raises(ValueError, match="Reagent-target mismatch"):
         orchestrator.run(contract, steps)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Codex P1-1, P1-2, P2-1 regression tests
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_p1_1_reagent_steptype_mismatch_blocked():
+    """Codex P1-1: QUENCHING with a coupling reagent must raise ValueError."""
+    contract = _make_contract(oh_bulk=400.0)
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        # WRONG: using a coupling reagent for a quenching step
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="deae_coupling",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0,
+        ),
+    ]
+
+    orchestrator = ModificationOrchestrator()
+    with pytest.raises(ValueError, match="incompatible with step type"):
+        orchestrator.run(contract, steps)
+
+
+def test_p1_2_acetic_anhydride_quench_on_native_amine():
+    """Codex P1-2: Acetic anhydride quench on AMINE_PRIMARY must achieve conversion > 0."""
+    contract = _make_contract(nh2_bulk=100.0, oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="acetic_anhydride_quench",
+            target_acs=ACSSiteType.AMINE_PRIMARY,
+            temperature=298.15, time=3600.0,
+            reagent_concentration=500.0, ph=7.5,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    quench_result = result.modification_history[0]
+
+    assert quench_result.conversion > 0, \
+        f"Acetic anhydride should block native amines, got conversion={quench_result.conversion}"
+
+    nh2 = result.acs_profiles[ACSSiteType.AMINE_PRIMARY]
+    assert nh2.blocked_sites > 0, \
+        "blocked_sites should be > 0 after acetic anhydride quench"
+
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"
+
+
+def test_p2_1_activation_uses_activated_consumed_not_crosslinked():
+    """Codex P2-1: Activation should put consumed OH into activated_consumed_sites,
+    not crosslinked_sites."""
+    contract = _make_contract(oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    oh = result.acs_profiles[ACSSiteType.HYDROXYL]
+
+    # Activation should NOT increment crosslinked_sites
+    assert oh.crosslinked_sites == 0.0, \
+        f"Activation should not use crosslinked_sites, got {oh.crosslinked_sites}"
+
+    # Should use activated_consumed_sites instead
+    assert oh.activated_consumed_sites > 0, \
+        f"Activation should use activated_consumed_sites, got {oh.activated_consumed_sites}"
+
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"

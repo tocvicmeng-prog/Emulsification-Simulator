@@ -146,11 +146,11 @@ M1_MECHANICAL_META = OutputMetadata(
 M2_ACS_META = OutputMetadata(
     model_basis=ModelBasis.SEMI_QUANTITATIVE,
     confidence=ConfidenceLevel.LOW,
-    validity_range="SECONDARY_CROSSLINKING and ACTIVATION workflows only",
+    validity_range="All 5 workflows: SECONDARY_CROSSLINKING, ACTIVATION, LIGAND_COUPLING, PROTEIN_COUPLING, QUENCHING",
     calibration_required=True,
     warnings=(
         "ACS inventory uses simplified site-density model.",
-        "LIGAND_COUPLING, PROTEIN_COUPLING, QUENCHING steps are not implemented.",
+        "Protein coupling outputs are ranking_only unless calibrated.",
         "pH and temperature effects use Arrhenius approximation only.",
     ),
     recommended_use="Relative comparison of surface site availability between formulations.",

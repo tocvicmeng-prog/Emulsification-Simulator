@@ -73,7 +73,11 @@ def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:
     """
     if k0 <= 0 or T <= 0:
         return 0.0
-    return k0 * math.exp(-E_a / (R_GAS * T))
+    # Guard against overflow: clamp exponent to prevent inf
+    exponent = -E_a / (R_GAS * T)
+    if exponent < -700:  # exp(-700) ~ 1e-304, safe floor
+        return 0.0
+    return k0 * math.exp(exponent)
 
 
 # ─── Template 1: Simple irreversible second-order ──────────────────────
@@ -361,7 +365,9 @@ def solve_competitive_coupling(
                               warnings=warnings)
 
     # Arrhenius rate constant
-    k0 = k_forward / max(math.exp(-E_a / (R_GAS * 298.15)), 1e-30) if E_a > 0 else 0.0
+    # Back-calculate Arrhenius prefactor; clamp to prevent overflow
+    _exp_ref = math.exp(max(-E_a / (R_GAS * 298.15), -700))
+    k0 = min(k_forward / max(_exp_ref, 1e-30), 1e30) if E_a > 0 else 0.0
     k = arrhenius_rate_constant(temperature, k0, E_a) if E_a > 0 and k0 > 0 else k_forward
 
     if k <= 0:
@@ -474,7 +480,9 @@ def solve_steric_coupling(
                               warnings=warnings)
 
     # Arrhenius
-    k0 = k_forward / max(math.exp(-E_a / (R_GAS * 298.15)), 1e-30) if E_a > 0 else 0.0
+    # Back-calculate Arrhenius prefactor; clamp to prevent overflow
+    _exp_ref = math.exp(max(-E_a / (R_GAS * 298.15), -700))
+    k0 = min(k_forward / max(_exp_ref, 1e-30), 1e30) if E_a > 0 else 0.0
     k = arrhenius_rate_constant(temperature, k0, E_a) if E_a > 0 and k0 > 0 else k_forward
 
     if k <= 0:
@@ -506,6 +514,7 @@ def solve_steric_coupling(
     ligand_final = max(sol.y[2, -1], 0.0)
 
     sites_coupled = coupled_final * bead_volume
+    sites_coupled = min(sites_coupled, max_coupled_mol_per_particle)  # Codex P2-4: hard clamp
     sites_consumed = sites_coupled  # No hydrolysis in steric model
 
     conversion = sites_consumed / activated_sites_mol_per_particle if activated_sites_mol_per_particle > 0 else 0.0
@@ -571,7 +580,9 @@ def solve_quenching(
     active_conc = activated_sites_mol_per_particle / bead_volume
 
     # Arrhenius
-    k0 = k_forward / max(math.exp(-E_a / (R_GAS * 298.15)), 1e-30) if E_a > 0 else 0.0
+    # Back-calculate Arrhenius prefactor; clamp to prevent overflow
+    _exp_ref = math.exp(max(-E_a / (R_GAS * 298.15), -700))
+    k0 = min(k_forward / max(_exp_ref, 1e-30), 1e30) if E_a > 0 else 0.0
 
     conversion, reagent_rem = solve_second_order_consumption(
         acs_concentration=active_conc,

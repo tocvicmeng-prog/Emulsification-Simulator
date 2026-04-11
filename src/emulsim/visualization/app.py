@@ -880,7 +880,9 @@ if _tab_m2 is not None:
                         "NaBH4 (Aldehyde Quench)": "nabh4_quench",
                         "Acetic Anhydride (Amine Quench)": "acetic_anhydride_quench",
                     }
-                _reagent_label = st.selectbox("Reagent", list(_reagent_options.keys()), key=f"m2_reagent_{i}")
+                # Key includes step_type to reset selection when chemistry changes
+                _reagent_sel_key = f"m2_reagent_{i}_{step_type.replace(' ', '_').lower()}"
+                _reagent_label = st.selectbox("Reagent", list(_reagent_options.keys()), key=_reagent_sel_key)
                 _reagent_key = _reagent_options[_reagent_label]
 
                 _profile = _REAGENT_PROFILES[_reagent_key]
