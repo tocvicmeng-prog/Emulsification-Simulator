@@ -14,6 +14,7 @@ class TrustAssessment:
     trustworthy: bool
     warnings: list[str] = field(default_factory=list)
     blockers: list[str] = field(default_factory=list)
+    upstream_trust_level: str = ""  # Inherited from upstream module (empty if this IS the first module)
 
     @property
     def level(self) -> str:

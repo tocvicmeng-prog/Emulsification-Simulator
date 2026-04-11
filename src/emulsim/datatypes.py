@@ -910,6 +910,50 @@ class FullResult:
 
 
 @dataclass
+class M1ExportContract:
+    """Stable interface between Module 1 (fabrication) and Module 2 (functionalization).
+
+    Contains all Module 1 outputs needed by Module 2, with explicit units,
+    types, and trust metadata. This is the ONLY object Module 2 should read
+    from Module 1 — it decouples the two modules.
+    """
+    # ── Geometry (from L1) ──
+    bead_radius: float              # [m] from d50/2
+    bead_d32: float                 # [m] Sauter mean diameter
+    bead_d50: float                 # [m] median diameter
+
+    # ── Pore structure (from L2) ──
+    pore_size_mean: float           # [m] mean pore diameter
+    pore_size_std: float            # [m] standard deviation of pore sizes
+    porosity: float                 # [-] particle porosity (fraction void)
+    l2_model_tier: str              # "empirical_calibrated" or "mechanistic"
+
+    # ── Network structure (from L3) ──
+    mesh_size_xi: float             # [m] crosslinked network mesh size
+    p_final: float                  # [-] crosslinking conversion fraction
+    primary_crosslinker: str        # e.g., "genipin", "dvs"
+
+    # ── Residual reactive groups (from L3 + formulation) ──
+    nh2_bulk_concentration: float   # [mol/m^3] residual NH2 after primary crosslinking
+    oh_bulk_concentration: float    # [mol/m^3] total agarose OH
+
+    # ── Mechanical properties (from L4) ──
+    G_DN: float                     # [Pa] double-network shear modulus
+    E_star: float                   # [Pa] effective Young's modulus
+    model_used: str                 # "phenomenological" or "flory_rehner_affine"
+
+    # ── Formulation (source parameters) ──
+    c_agarose: float                # [kg/m^3] agarose concentration
+    c_chitosan: float               # [kg/m^3] chitosan concentration
+    DDA: float                      # [-] degree of deacetylation
+
+    # ── Trust and uncertainty ──
+    trust_level: str                # "TRUSTWORTHY", "CAUTION", "UNRELIABLE"
+    trust_warnings: list[str] = field(default_factory=list)
+    uncertainty_notes: str = ""     # Human-readable uncertainty description
+
+
+@dataclass
 class OptimizationState:
     """State of the Bayesian optimization campaign."""
     X_observed: np.ndarray              # (N_eval, 7)

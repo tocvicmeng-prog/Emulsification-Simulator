@@ -12,15 +12,20 @@ from typing import Optional
 
 from ..datatypes import (
     FullResult,
+    M1ExportContract,
     MaterialProperties,
     SimulationParameters,
 )
+from ..trust import TrustAssessment, assess_trust
 from ..properties.database import PropertyDatabase
 from ..level1_emulsification.solver import PBESolver
 from ..level2_gelation.solver import solve_gelation, solve_gelation_timing
-from ..level3_crosslinking.solver import solve_crosslinking
+from ..level3_crosslinking.solver import (
+    solve_crosslinking,
+    available_amine_concentration,
+    available_hydroxyl_concentration,
+)
 from ..level4_mechanical.solver import solve_mechanical
-from ..trust import assess_trust
 
 logger = logging.getLogger(__name__)
 
@@ -265,3 +270,116 @@ class PipelineOrchestrator:
             logger.info("RPM=%d  d32=%.2f µm  (%.1fs)", rpm, emul.d32 * 1e6, dt)
 
         return results
+
+
+# ─── Amine-reactive crosslinker families ──────────────────────────────────────
+# Crosslinkers in this set react with primary amines (NH2 on chitosan).
+# Hydroxyl-reactive crosslinkers (DVS, ECH, citric acid) leave NH2 pools intact.
+_AMINE_REACTIVE_FAMILIES = frozenset({"amine_covalent"})
+_HYDROXYL_REACTIVE_FAMILIES = frozenset({"hydroxyl_covalent"})
+
+
+def export_for_module2(result: FullResult,
+                       trust: TrustAssessment,
+                       crosslinker_key: str = "genipin",
+                       props: Optional[MaterialProperties] = None) -> M1ExportContract:
+    """Extract Module 2 inputs from Module 1 FullResult.
+
+    Computes residual NH2 and OH concentrations from the crosslinking
+    result and formulation parameters.  NH2 is only depleted when an
+    amine-reactive crosslinker (e.g. genipin, glutaraldehyde) was used;
+    hydroxyl-reactive crosslinkers (DVS, ECH) leave the NH2 pool intact.
+
+    Parameters
+    ----------
+    result : FullResult
+        Output of PipelineOrchestrator.run_single().
+    trust : TrustAssessment
+        Output of assess_trust() for the same run.
+    crosslinker_key : str
+        Name of the primary crosslinker (used for labelling only; chemistry
+        family is read from result.crosslinking.network_metadata.solver_family).
+    props : MaterialProperties, optional
+        Material properties object containing DDA and M_GlcN.  If None,
+        default values are used (DDA=0.90, M_GlcN=161.16).
+
+    Returns
+    -------
+    M1ExportContract
+        Fully populated stable interface object for Module 2.
+    """
+    params = result.parameters
+    emul = result.emulsification
+    gel = result.gelation
+    xl = result.crosslinking
+    mech = result.mechanical
+
+    # Formulation source parameters
+    c_agarose = params.formulation.c_agarose
+    c_chitosan = params.formulation.c_chitosan
+
+    # DDA and M_GlcN: prefer props (interpolated), fall back to defaults
+    DDA = props.DDA if props is not None else 0.90
+    M_GlcN = props.M_GlcN if props is not None else 161.16
+
+    # ── Residual reactive groups ─────────────────────────────────────────
+    # Total amine pool before any crosslinking
+    nh2_total = available_amine_concentration(c_chitosan, DDA, M_GlcN)
+
+    # Determine which reactive pool was consumed during primary crosslinking
+    solver_family = (
+        xl.network_metadata.solver_family
+        if xl.network_metadata is not None
+        else "amine_covalent"
+    )
+
+    if solver_family in _AMINE_REACTIVE_FAMILIES:
+        # Amine-targeting crosslinker: NH2 is partially depleted by p_final
+        nh2_residual = nh2_total * (1.0 - xl.p_final)
+    else:
+        # Hydroxyl-targeting or independent-network crosslinker: NH2 intact
+        nh2_residual = nh2_total
+
+    # Total hydroxyl pool (agarose OH, not consumed by amine crosslinkers)
+    oh_total = available_hydroxyl_concentration(c_agarose)
+
+    # ── Uncertainty notes (Node 0.3) ────────────────────────────────────
+    notes = []
+    if gel.model_tier == "empirical_calibrated":
+        notes.append("Pore size from empirical correlation (+/-30%)")
+    if mech.model_used == "phenomenological":
+        notes.append("Modulus from phenomenological DN model (ranking only)")
+    if xl.p_final < 0.05:
+        notes.append("Low crosslinking conversion -- residual ACS estimate uncertain")
+    uncertainty_notes = "; ".join(notes) if notes else "No special uncertainty flags"
+
+    return M1ExportContract(
+        # Geometry
+        bead_radius=emul.d50 / 2.0,
+        bead_d32=emul.d32,
+        bead_d50=emul.d50,
+        # Pore structure
+        pore_size_mean=gel.pore_size_mean,
+        pore_size_std=gel.pore_size_std,
+        porosity=gel.porosity,
+        l2_model_tier=gel.model_tier,
+        # Network structure
+        mesh_size_xi=xl.xi_final,
+        p_final=xl.p_final,
+        primary_crosslinker=crosslinker_key,
+        # Residual reactive groups
+        nh2_bulk_concentration=nh2_residual,
+        oh_bulk_concentration=oh_total,
+        # Mechanical
+        G_DN=mech.G_DN,
+        E_star=mech.E_star,
+        model_used=mech.model_used,
+        # Formulation
+        c_agarose=c_agarose,
+        c_chitosan=c_chitosan,
+        DDA=DDA,
+        # Trust
+        trust_level=trust.level,
+        trust_warnings=list(trust.warnings),
+        uncertainty_notes=uncertainty_notes,
+    )
