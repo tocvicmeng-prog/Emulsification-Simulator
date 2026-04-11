@@ -367,6 +367,92 @@ if "M2" in pipeline_scope:
         "Planned (not yet implemented): Ligand Coupling, Protein Coupling, Quenching"
     )
 
+# ─── P3-5: Module 3 Sidebar Section ──────────────────────────────────────────
+
+m3_app_mode = "Chromatography"
+chrom_mode = "Breakthrough"
+col_diam_mm = 10.0
+bed_height_cm = 10.0
+bed_porosity = 0.38
+flow_rate_mL = 1.0
+C_feed_mg = 1.0
+feed_dur_min = 10.0
+total_time_min = 20.0
+q_max = 100.0
+K_L = 1000.0
+ext_coeff = 36000.0
+grad_start = 0.0
+grad_end = 500.0
+grad_dur_min = 10.0
+V_max = 1.0
+K_m = 1.0
+S_feed = 10.0
+D_eff = 1e-10
+k_deact = 0.0
+cat_time_h = 1.0
+
+if "M3" in pipeline_scope:
+    st.sidebar.divider()
+    st.sidebar.header("Module 3: Performance")
+
+    m3_app_mode = st.sidebar.radio("Application", ["Chromatography", "Catalysis"], key="m3_mode")
+
+    # Column geometry (shared between modes)
+    st.sidebar.subheader("Column/Reactor")
+    col_diam_mm = st.sidebar.number_input("Column I.D. (mm)", 1.0, 50.0, 10.0, key="m3_col_d")
+    bed_height_cm = st.sidebar.number_input("Bed height (cm)", 1.0, 30.0, 10.0, key="m3_bed_h")
+    bed_porosity = st.sidebar.slider("Bed porosity", 0.25, 0.50, 0.38, step=0.01, key="m3_eps_b")
+    flow_rate_mL = st.sidebar.number_input("Flow rate (mL/min)", 0.01, 20.0, 1.0, step=0.1, key="m3_flow")
+
+    # Real-time pressure preview (if M2 result available)
+    if "m2_result" in st.session_state:
+        m2r = st.session_state["m2_result"]
+        from emulsim.module3_performance.hydrodynamics import ColumnGeometry as _CG_preview
+        _preview_col = _CG_preview(
+            diameter=col_diam_mm / 1000, bed_height=bed_height_cm / 100,
+            particle_diameter=m2r.m1_contract.bead_d50,
+            bed_porosity=bed_porosity,
+            G_DN=m2r.G_DN_updated, E_star=m2r.E_star_updated)
+        _dP = _preview_col.pressure_drop(flow_rate_mL / 60e6)
+        st.sidebar.metric("Pressure drop", f"{_dP / 1000:.1f} kPa")
+
+    if m3_app_mode == "Chromatography":
+        # Phase 4: Chromatography mode selector
+        chrom_mode = st.sidebar.radio("Mode", ["Breakthrough", "Gradient Elution"], key="m3_chrom_mode")
+
+        st.sidebar.subheader("Feed")
+        C_feed_mg = st.sidebar.number_input("Feed conc. (mg/mL)", 0.01, 50.0, 1.0, key="m3_Cfeed")
+        feed_dur_min = st.sidebar.number_input("Feed duration (min)", 1.0, 60.0, 10.0, key="m3_feed_dur")
+        total_time_min = st.sidebar.number_input("Total time (min)", 5.0, 120.0, 20.0, key="m3_total_t")
+
+        # Isotherm
+        st.sidebar.subheader("Isotherm")
+        q_max = st.sidebar.number_input("q_max (mol/m\u00b3)", 1.0, 500.0, 100.0, key="m3_qmax")
+        K_L = st.sidebar.number_input("K_L (m\u00b3/mol)", 10.0, 1e5, 1000.0, key="m3_KL")
+        st.sidebar.caption("Default isotherm parameters are illustrative — user calibration required.")
+
+        # Detection
+        ext_coeff = st.sidebar.number_input(
+            "\u03b5\u2082\u2088\u2080 (1/(M\u00b7cm))", 1000.0, 200000.0, 36000.0, key="m3_ext"
+        )
+
+        # Phase 4: Gradient elution controls
+        if chrom_mode == "Gradient Elution":
+            st.sidebar.subheader("Gradient")
+            grad_start = st.sidebar.number_input("Start (mM)", 0.0, 1000.0, 0.0, key="m3_grad_start")
+            grad_end = st.sidebar.number_input("End (mM)", 0.0, 1000.0, 500.0, key="m3_grad_end")
+            grad_dur_min = st.sidebar.number_input("Duration (min)", 1.0, 60.0, 10.0, key="m3_grad_dur")
+
+    elif m3_app_mode == "Catalysis":
+        # Phase 5: Catalysis UI
+        st.sidebar.subheader("Enzyme Kinetics")
+        V_max = st.sidebar.number_input("V_max (mol/(m\u00b3\u00b7s))", 0.001, 100.0, 1.0, key="m3_Vmax")
+        K_m = st.sidebar.number_input("K_m (mM)", 0.01, 100.0, 1.0, key="m3_Km")
+        S_feed = st.sidebar.number_input("Substrate feed (mM)", 0.1, 100.0, 10.0, key="m3_Sfeed")
+        D_eff = st.sidebar.number_input("D_eff (m\u00b2/s)", 1e-12, 1e-8, 1e-10, format="%.1e", key="m3_Deff")
+        k_deact = st.sidebar.number_input("k_d (1/s)", 0.0, 1e-3, 0.0, format="%.1e", key="m3_kd")
+        cat_time_h = st.sidebar.number_input("Sim. time (h)", 0.1, 48.0, 1.0, key="m3_cat_t")
+
 # ─── Material Constants (per-constant Literature / Custom + protocol link) ─
 
 st.sidebar.divider()
@@ -643,6 +729,113 @@ if run_btn:
         else:
             st.session_state.pop("m2_result", None)
 
+        # ── Phase 6: Module 3 execution ──────────────────────────────────
+        if "M3" in pipeline_scope and "m2_result" in st.session_state:
+            progress.progress(75, text="Module 3: Performance simulation...")
+            from emulsim.module3_performance.hydrodynamics import ColumnGeometry
+            m2r = st.session_state["m2_result"]
+            column = ColumnGeometry(
+                diameter=col_diam_mm / 1000,
+                bed_height=bed_height_cm / 100,
+                particle_diameter=m2r.m1_contract.bead_d50,
+                bed_porosity=bed_porosity,
+                particle_porosity=m2r.m1_contract.porosity,
+                G_DN=m2r.G_DN_updated,
+                E_star=m2r.E_star_updated,
+            )
+            st.session_state.pop("m3_result_bt", None)
+            st.session_state.pop("m3_result_ge", None)
+            st.session_state.pop("m3_result_cat", None)
+
+            if m3_app_mode == "Chromatography":
+                from emulsim.module3_performance import (
+                    LangmuirIsotherm,
+                    run_breakthrough,
+                    CompetitiveLangmuirIsotherm,
+                    run_gradient_elution,
+                )
+                from emulsim.module3_performance.gradient import make_linear_gradient
+                from emulsim.visualization.ui_validators import validate_m3_chromatography, validate_m3_result
+                MW_Da = 66500.0  # default BSA
+                C_feed_mol = C_feed_mg / (MW_Da * 1e-3)  # mg/mL → mol/m³
+
+                _is_grad = (chrom_mode == "Gradient Elution")
+                _col_val = validate_m3_chromatography(
+                    flow_rate=flow_rate_mL / 60e6,
+                    column=column,
+                    isotherm_type="competitive_langmuir" if _is_grad else "langmuir",
+                    gradient_enabled=_is_grad,
+                )
+                for _blk in _col_val.blockers:
+                    st.warning(f"M3 input blocker: {_blk}")
+                for _wrn in _col_val.warnings:
+                    st.info(f"M3 note: {_wrn}")
+
+                if not _col_val.blockers:
+                    try:
+                        if chrom_mode == "Breakthrough":
+                            isotherm = LangmuirIsotherm(q_max=q_max, K_L=K_L)
+                            bt = run_breakthrough(
+                                column, microsphere=m2r,
+                                C_feed=C_feed_mol, flow_rate=flow_rate_mL / 60e6,
+                                feed_duration=feed_dur_min * 60,
+                                total_time=total_time_min * 60,
+                                extinction_coeff=ext_coeff,
+                            )
+                            st.session_state["m3_result_bt"] = bt
+                            _res_val = validate_m3_result(
+                                mass_balance_error=bt.mass_balance_error,
+                                pressure_drop=bt.pressure_drop,
+                            )
+                            st.session_state["m3_result_val"] = _res_val
+                        else:
+                            gradient = make_linear_gradient(
+                                grad_start / 1000.0, grad_end / 1000.0, 0, grad_dur_min * 60
+                            )
+                            comp_iso = CompetitiveLangmuirIsotherm(
+                                q_max=np.array([q_max]),
+                                K_L=np.array([K_L]),
+                                component_names=["Protein"],
+                            )
+                            ge = run_gradient_elution(
+                                column,
+                                C_feed=np.array([C_feed_mol]),
+                                gradient=gradient,
+                                flow_rate=flow_rate_mL / 60e6,
+                                total_time=total_time_min * 60,
+                                isotherm=comp_iso,
+                                feed_duration=feed_dur_min * 60,
+                            )
+                            st.session_state["m3_result_ge"] = ge
+                    except Exception as _m3_ex:
+                        st.warning(f"Module 3 chromatography failed: {_m3_ex}")
+
+            elif m3_app_mode == "Catalysis":
+                from emulsim.module3_performance.catalysis.packed_bed import solve_packed_bed
+                # K_m and S_feed input as mM → convert to mol/m³
+                K_m_mol = K_m  # mM = mol/m³ (since 1 mM = 1e-3 mol/L = 1 mol/m³)
+                S_feed_mol = S_feed  # same unit
+                try:
+                    cat = solve_packed_bed(
+                        bed_length=bed_height_cm / 100,
+                        bed_diameter=col_diam_mm / 1000,
+                        particle_diameter=m2r.m1_contract.bead_d50,
+                        bed_porosity=bed_porosity,
+                        particle_porosity=m2r.m1_contract.porosity,
+                        V_max=V_max,
+                        K_m=K_m_mol,
+                        S_feed=S_feed_mol,
+                        flow_rate=flow_rate_mL / 60e6,
+                        D_eff=D_eff,
+                        k_deact=k_deact,
+                        total_time=cat_time_h * 3600,
+                    )
+                    st.session_state["m3_result_cat"] = cat
+                except Exception as _m3_ex:
+                    st.warning(f"Module 3 catalysis failed: {_m3_ex}")
+        elif "M3" in pipeline_scope and "m2_result" not in st.session_state:
+            st.warning("Module 3 requires Module 2 results. Enable M1+M2 scope and run with M2 steps defined.")
+
         progress.progress(100, text=f"Complete in {elapsed:.1f}s")
 
     st.session_state["result"] = result
@@ -732,9 +925,29 @@ if "result" in st.session_state:
     if _show_m2_tab:
         _tab_labels.append("🧪 M2: Functionalization")
 
+    _show_m3_bt_tab = "m3_result_bt" in st.session_state
+    _show_m3_ge_tab = "m3_result_ge" in st.session_state
+    _show_m3_cat_tab = "m3_result_cat" in st.session_state
+    if _show_m3_bt_tab:
+        _tab_labels.append("📊 M3: Breakthrough")
+    if _show_m3_ge_tab:
+        _tab_labels.append("📊 M3: Gradient Elution")
+    if _show_m3_cat_tab:
+        _tab_labels.append("⚗️ M3: Catalysis")
+
     _all_tabs = st.tabs(_tab_labels)
     tab1, tab2, tab3, tab4, tab5 = _all_tabs[:5]
-    tab_m2 = _all_tabs[5] if _show_m2_tab else None
+    _tab_idx = 5
+    tab_m2 = _all_tabs[_tab_idx] if _show_m2_tab else None
+    if _show_m2_tab:
+        _tab_idx += 1
+    tab_m3_bt = _all_tabs[_tab_idx] if _show_m3_bt_tab else None
+    if _show_m3_bt_tab:
+        _tab_idx += 1
+    tab_m3_ge = _all_tabs[_tab_idx] if _show_m3_ge_tab else None
+    if _show_m3_ge_tab:
+        _tab_idx += 1
+    tab_m3_cat = _all_tabs[_tab_idx] if _show_m3_cat_tab else None
 
     with tab1:
         st.plotly_chart(plot_results_dashboard(result), use_container_width=True)
@@ -894,6 +1107,207 @@ if "result" in st.session_state:
                 "Default rate constants are illustrative — user calibration required."
             )
 
+    # ── Phase 6: Module 3 Results Tabs ───────────────────────────────────
+
+    from emulsim.visualization.plots_m3 import (
+        plot_chromatogram,
+        plot_breakthrough_curve,
+        plot_peak_table,
+        plot_michaelis_menten,
+        plot_effectiveness_factor,
+        plot_activity_decay,
+        plot_conversion_vs_time,
+        plot_pressure_flow_curve,
+    )
+
+    if _show_m3_bt_tab and tab_m3_bt is not None:
+        with tab_m3_bt:
+            from emulsim.visualization.ui_validators import validate_m3_result as _val_m3_res
+            _bt = st.session_state["m3_result_bt"]
+            st.subheader("Module 3: Breakthrough Chromatography")
+
+            # Validation badges
+            _bt_val = _val_m3_res(
+                mass_balance_error=_bt.mass_balance_error,
+                pressure_drop=_bt.pressure_drop,
+            )
+            _mb_pct = abs(_bt.mass_balance_error) * 100.0
+            if _mb_pct > 5.0:
+                st.error(f"Mass balance error = {_mb_pct:.1f}% — results numerically unreliable.")
+            elif _mb_pct > 2.0:
+                st.warning(f"Mass balance error = {_mb_pct:.1f}% — treat with caution.")
+            else:
+                st.success(f"Mass balance error = {_mb_pct:.2f}% — acceptable.")
+            if _bt_val.blockers:
+                for _blk in _bt_val.blockers:
+                    st.error(f"Blocker: {_blk}")
+
+            # DBC KPI row
+            _dbc_c1, _dbc_c2, _dbc_c3, _dbc_c4 = st.columns(4)
+            _dbc_c1.metric("DBC\u2085%", f"{_bt.dbc_5pct:.1f} mol/m\u00b3" if not np.isnan(_bt.dbc_5pct) else "N/A")
+            _dbc_c2.metric("DBC\u2081\u2080%", f"{_bt.dbc_10pct:.1f} mol/m\u00b3" if not np.isnan(_bt.dbc_10pct) else "N/A")
+            _dbc_c3.metric("DBC\u2085\u2080%", f"{_bt.dbc_50pct:.1f} mol/m\u00b3" if not np.isnan(_bt.dbc_50pct) else "N/A")
+            _dbc_c4.metric("Pressure drop", f"{_bt.pressure_drop / 1000:.1f} kPa")
+
+            st.divider()
+
+            # Breakthrough curve
+            _MW_Da_bt = 66500.0
+            _C_feed_mol_bt = C_feed_mg / (_MW_Da_bt * 1e-3)
+            st.plotly_chart(
+                plot_breakthrough_curve(
+                    time=_bt.time,
+                    C_outlet=_bt.C_outlet,
+                    C_feed=_C_feed_mol_bt,
+                    dbc_5=_bt.dbc_5pct,
+                    dbc_10=_bt.dbc_10pct,
+                    dbc_50=_bt.dbc_50pct,
+                ),
+                use_container_width=True,
+            )
+
+            # UV chromatogram
+            st.plotly_chart(
+                plot_chromatogram(time=_bt.time, uv_signal=_bt.uv_signal),
+                use_container_width=True,
+            )
+
+            # Pressure-flow curve (requires ColumnGeometry from session state)
+            if "m2_result" in st.session_state:
+                from emulsim.module3_performance.hydrodynamics import ColumnGeometry as _CG_bt
+                _m2r_bt = st.session_state["m2_result"]
+                _col_bt = _CG_bt(
+                    diameter=col_diam_mm / 1000,
+                    bed_height=bed_height_cm / 100,
+                    particle_diameter=_m2r_bt.m1_contract.bead_d50,
+                    bed_porosity=bed_porosity,
+                    particle_porosity=_m2r_bt.m1_contract.porosity,
+                    G_DN=_m2r_bt.G_DN_updated,
+                    E_star=_m2r_bt.E_star_updated,
+                )
+                st.plotly_chart(plot_pressure_flow_curve(_col_bt), use_container_width=True)
+
+            st.caption(
+                "Mechanistic prediction: Lumped Rate Model (LRM) with Langmuir isotherm. "
+                "DBC values are model-based — calibrate isotherm parameters with batch uptake experiments."
+            )
+
+    if _show_m3_ge_tab and tab_m3_ge is not None:
+        with tab_m3_ge:
+            _ge = st.session_state["m3_result_ge"]
+            st.subheader("Module 3: Gradient Elution Chromatography")
+
+            # Gradient affects binding badge
+            _grad_affects = getattr(_ge, "gradient_affects_binding", False)
+            if _grad_affects:
+                st.success("Gradient affects binding: YES — competitive Langmuir mechanistically coupled.")
+            else:
+                st.info("Gradient affects binding: NO — gradient is diagnostic/display only (BF-2 not deployed).")
+
+            # Chromatogram with gradient overlay
+            _ge_time = getattr(_ge, "time", None)
+            _ge_uv = getattr(_ge, "uv_signal", None)
+            _ge_grad = getattr(_ge, "gradient_values", None)
+
+            if _ge_time is not None and _ge_uv is not None:
+                st.plotly_chart(
+                    plot_chromatogram(
+                        time=_ge_time,
+                        uv_signal=_ge_uv,
+                        gradient_values=_ge_grad,
+                        gradient_affects_binding=_grad_affects,
+                    ),
+                    use_container_width=True,
+                )
+
+            # Peak table
+            _ge_peaks = getattr(_ge, "peaks", [])
+            st.plotly_chart(plot_peak_table(_ge_peaks), use_container_width=True)
+
+            st.caption(
+                "Ranking only — multi-component gradient elution with competitive Langmuir. "
+                "Gradient salt concentration does not yet affect binding affinity (BF-2 pending). "
+                "Elution order is indicative; quantitative yields require isotherm calibration."
+            )
+
+    if _show_m3_cat_tab and tab_m3_cat is not None:
+        with tab_m3_cat:
+            _cat = st.session_state["m3_result_cat"]
+            st.subheader("Module 3: Packed-Bed Catalytic Reactor")
+
+            # KPI row
+            _cat_c1, _cat_c2, _cat_c3, _cat_c4 = st.columns(4)
+            _cat_c1.metric("Final Conversion", f"{_cat.conversion:.1%}")
+            _cat_c2.metric("Effectiveness Factor \u03b7", f"{_cat.effectiveness_factor:.3f}")
+            _cat_c3.metric("Thiele Modulus \u03a6", f"{_cat.thiele_modulus:.2f}")
+            _cat_c4.metric("Productivity", f"{_cat.productivity:.3e} mol/(m\u00b3\u00b7s)")
+
+            _mb_cat_pct = abs(_cat.mass_balance_error) * 100.0
+            if _mb_cat_pct > 5.0:
+                st.error(f"Catalysis mass balance error = {_mb_cat_pct:.1f}% — results unreliable.")
+            elif _mb_cat_pct > 2.0:
+                st.warning(f"Catalysis mass balance error = {_mb_cat_pct:.1f}% — treat with caution.")
+            else:
+                st.success(f"Catalysis mass balance error = {_mb_cat_pct:.2f}% — acceptable.")
+
+            st.divider()
+
+            # Conversion vs time
+            _time_h_cat = _cat.time / 3600.0
+            _S_in = float(_cat.S_outlet[0]) if len(_cat.S_outlet) > 0 else 1.0
+            if _S_in <= 0:
+                _S_in = S_feed  # fallback to sidebar value (in mol/m³ = mM)
+            _conversion_arr = np.clip(1.0 - _cat.S_outlet / max(_S_in, 1e-12), 0.0, 1.0)
+            st.plotly_chart(
+                plot_conversion_vs_time(time_hours=_time_h_cat, conversion=_conversion_arr),
+                use_container_width=True,
+            )
+
+            # Michaelis-Menten curve
+            _S_range_mm = np.linspace(0.01, max(S_feed * 3, 10.0), 200)
+            st.plotly_chart(
+                plot_michaelis_menten(
+                    S_range=_S_range_mm,
+                    V_max=V_max,
+                    K_m=K_m,
+                    eta=_cat.effectiveness_factor,
+                ),
+                use_container_width=True,
+            )
+
+            # Effectiveness factor vs Thiele modulus
+            _phi_range = np.logspace(-2, 2, 200)
+            st.plotly_chart(
+                plot_effectiveness_factor(_phi_range),
+                use_container_width=True,
+            )
+
+            # Activity decay
+            if hasattr(_cat, "activity_history") and len(_cat.activity_history) > 0:
+                st.plotly_chart(
+                    plot_activity_decay(
+                        time_hours=_time_h_cat,
+                        activity=_cat.activity_history,
+                    ),
+                    use_container_width=True,
+                )
+
+            # Thiele regime diagnostic
+            _phi_val = _cat.thiele_modulus
+            if _phi_val < 0.3:
+                st.success(f"Thiele modulus \u03a6 = {_phi_val:.2f} — kinetic regime (no diffusion limitation).")
+            elif _phi_val < 3.0:
+                st.warning(f"Thiele modulus \u03a6 = {_phi_val:.2f} — transition regime (partial diffusion limitation).")
+            else:
+                st.error(f"Thiele modulus \u03a6 = {_phi_val:.2f} — diffusion-limited regime. "
+                         "Effectiveness factor \u03b7 is significantly < 1. Consider smaller particles or higher D_eff.")
+
+            st.caption(
+                "Mechanistic prediction: Transient PFR with Michaelis-Menten kinetics, "
+                "Thiele modulus effectiveness factor, and first-order deactivation. "
+                "K_m and V_max require calibration against your specific enzyme."
+            )
+
     # ── Optimization Assessment ───────────────────────────────────────
 
     st.divider()
@@ -1011,9 +1425,11 @@ if "result" in st.session_state:
 
 st.divider()
 st.caption(
-    "EmulSim v3.1 -- Modular process-modeling platform combining calibrated empirical models "
+    "EmulSim v4.0 -- Modular process-modeling platform combining calibrated empirical models "
     "and mechanistic submodels for emulsified hydrogel microsphere fabrication. "
     "L1: PBE emulsification (adaptive convergence) | L2: Empirical pore or Cahn-Hilliard 2D | "
     "L3: Chemistry-specific crosslinking (per-chemistry eta) | "
-    "L4: Phenomenological + Flory-Rehner affine IPN + Hashin-Shtrikman bounds."
+    "L4: Phenomenological + Flory-Rehner affine IPN + Hashin-Shtrikman bounds | "
+    "M2: Surface functionalization (secondary crosslinking, hydroxyl activation) | "
+    "M3: Chromatography (breakthrough + gradient elution) + Packed-bed catalysis."
 )
