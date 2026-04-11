@@ -883,9 +883,13 @@ if _tab_m2 is not None:
                 # Key includes step_type to reset selection when chemistry changes
                 _reagent_sel_key = f"m2_reagent_{i}_{step_type.replace(' ', '_').lower()}"
                 _reagent_label = st.selectbox("Reagent", list(_reagent_options.keys()), key=_reagent_sel_key)
-                _reagent_key = _reagent_options[_reagent_label]
+                # Defensive: if Streamlit returns a stale label from session state, fall back to first option
+                _reagent_key = _reagent_options.get(_reagent_label, list(_reagent_options.values())[0])
 
-                _profile = _REAGENT_PROFILES[_reagent_key]
+                _profile = _REAGENT_PROFILES.get(_reagent_key)
+                if _profile is None:
+                    _reagent_key = list(_reagent_options.values())[0]
+                    _profile = _REAGENT_PROFILES[_reagent_key]
                 st.caption(f"k={_profile.k_forward:.1e} | E_a={_profile.E_a / 1000:.0f} kJ/mol")
 
                 # Keys include step_type AND reagent so switching either resets defaults (Codex R3-F4)
