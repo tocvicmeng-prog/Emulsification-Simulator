@@ -80,6 +80,7 @@ class ModificationStepType(Enum):
     LIGAND_COUPLING = "ligand_coupling"
     PROTEIN_COUPLING = "protein_coupling"
     QUENCHING = "quenching"
+    SPACER_ARM = "spacer_arm"  # v5.8: consumes activated site, creates intermediate ACS
 
 
 # ─── Data classes ──────────────────────────────────────────────────────
@@ -169,6 +170,7 @@ def solve_modification_step(
         ModificationStepType.LIGAND_COUPLING: {"coupling"},
         ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
         ModificationStepType.QUENCHING: {"blocking"},
+        ModificationStepType.SPACER_ARM: {"spacer_arm", "heterobifunctional"},
     }
     allowed = _STEP_ALLOWED_RTYPES.get(step.step_type, set())
     if allowed and reagent_profile.reaction_type not in allowed:
@@ -242,11 +244,16 @@ def solve_modification_step(
             step, acs_state, target_profile,
             reagent_profile, V_bead,
         )
+    elif step.step_type == ModificationStepType.SPACER_ARM:
+        result = _solve_spacer_arm_step(
+            step, acs_state, target_profile,
+            reagent_profile, surface_model, V_bead,
+        )
     else:
         raise KeyError(
             f"Step type {step.step_type.value} not implemented. "
             f"Supported: SECONDARY_CROSSLINKING, ACTIVATION, LIGAND_COUPLING, "
-            f"PROTEIN_COUPLING, QUENCHING."
+            f"PROTEIN_COUPLING, QUENCHING, SPACER_ARM."
         )
 
     # --- Snapshot after ---
@@ -515,13 +522,30 @@ def _solve_protein_coupling_step(
     Updates: ligand_coupled_sites, ligand_functional_sites (x activity_retention).
     Trust label: ranking_only.
     """
+    # v5.8 WN-3: Maleimide decay — apply first-order hydrolysis before coupling
+    # if the target is MALEIMIDE, immobilized maleimide rings open over time
+    if target_profile.site_type == ACSSiteType.MALEIMIDE:
+        _k_decay = getattr(reagent_profile, 'maleimide_decay_rate', 0.0)
+        if _k_decay <= 0:
+            # Try to get decay rate from the MALEIMIDE profile itself (set by SM(PEG)n)
+            _k_decay = 1e-5  # ASSUMPTION: default maleimide hydrolysis at pH 7, 25C
+        _avail_before = target_profile.remaining_activated
+        if _avail_before > 0 and step.time > 0:
+            _frac_remaining = math.exp(-_k_decay * step.time)
+            _sites_decayed = _avail_before * (1.0 - _frac_remaining)
+            target_profile.hydrolyzed_sites += _sites_decayed
+            logger.info(
+                "Maleimide decay: k=%.1e /s, t=%.0f s, decayed=%.4e mol/particle (%.1f%%)",
+                _k_decay, step.time, _sites_decayed, (1 - _frac_remaining) * 100,
+            )
+
     remaining_act = target_profile.remaining_activated
     if remaining_act <= 0:
         step.conversion = 0.0
         return ModificationResult(
             step=step, acs_before={}, acs_after={},
             conversion=0.0, delta_G_DN=0.0,
-            notes="Protein coupling: no remaining activated sites.",
+            notes="Protein coupling: no remaining activated sites (maleimide may have decayed).",
         )
 
     # Steric jamming limit in mol/particle
@@ -643,6 +667,124 @@ def _solve_quenching_step(
     return ModificationResult(
         step=step, acs_before={}, acs_after={},
         conversion=cr.conversion, delta_G_DN=0.0, notes=notes,
+    )
+
+
+# ─── Workflow 6: Spacer Arm (v5.8 WN-2) ────────────────────────────
+
+def _solve_spacer_arm_step(
+    step: ModificationStep,
+    acs_state: dict[ACSSiteType, ACSProfile],
+    target_profile: ACSProfile,
+    reagent_profile: ReagentProfile,
+    surface_model: AccessibleSurfaceModel,
+    V_bead: float,
+) -> ModificationResult:
+    """Couple spacer arm or heterobifunctional crosslinker to activated sites.
+
+    Consumes activated sites on target profile and creates a NEW intermediate
+    ACS profile for the product site type (e.g., EPOXIDE -> AMINE_DISTAL,
+    or AMINE_DISTAL -> MALEIMIDE).
+
+    Key differences from ACTIVATION:
+    - Creates a new ACSProfile entry in acs_state (not just updating activated_sites)
+    - Applies distal_group_yield: not all consumed sites produce useful distal groups
+    - Bridged sites (1 - yield) go to crosslinked_sites on source profile
+    - Product profile gets profile_role based on reagent type
+    """
+    remaining_act = target_profile.remaining_activated
+    if remaining_act <= 0:
+        step.conversion = 0.0
+        return ModificationResult(
+            step=step, acs_before={}, acs_after={},
+            conversion=0.0, delta_G_DN=0.0,
+            notes="Spacer arm: no remaining activated sites.",
+        )
+
+    # Arrhenius prefactor
+    k0 = _arrhenius_prefactor(
+        reagent_profile.k_forward, reagent_profile.E_a,
+        reagent_profile.temperature_default,
+    ) if reagent_profile.E_a > 0 else 0.0
+
+    # ODE: same second-order consumption as crosslinking/activation
+    acs_concentration = remaining_act / V_bead
+    conversion, reagent_remaining = solve_second_order_consumption(
+        acs_concentration=acs_concentration,
+        reagent_concentration=step.reagent_concentration,
+        k_forward=reagent_profile.k_forward,
+        stoichiometry=step.stoichiometry,
+        time=step.time,
+        temperature=step.temperature,
+        E_a=reagent_profile.E_a,
+        k0=k0,
+        hydrolysis_rate=reagent_profile.hydrolysis_rate,
+    )
+
+    sites_consumed = conversion * remaining_act
+    step.conversion = conversion
+
+    # Apply distal group yield (audit F10): not all sites produce useful product
+    distal_yield = getattr(reagent_profile, 'distal_group_yield', 1.0)
+    sites_created = sites_consumed * distal_yield
+    sites_bridged = sites_consumed * (1.0 - distal_yield)
+
+    # Update source profile: ALL consumed sites go to ligand_coupled (attached to spacer)
+    # The distal yield reduction affects product creation, not source accounting
+    target_profile.ligand_coupled_sites += sites_consumed
+
+    # Determine product ACS type and profile role
+    product_type = step.product_acs or getattr(reagent_profile, 'product_acs', None)
+    if product_type is None:
+        logger.warning("Spacer arm step has no product_acs; no intermediate created.")
+        return ModificationResult(
+            step=step, acs_before={}, acs_after={},
+            conversion=conversion, delta_G_DN=0.0,
+            notes=f"Spacer arm: {sites_consumed:.4e} consumed, no product_acs specified.",
+        )
+
+    # Determine profile role for the new intermediate
+    _rt = getattr(reagent_profile, 'reaction_type', 'spacer_arm')
+    if _rt == "heterobifunctional":
+        _prod_role = "heterobifunctional_intermediate"
+    else:
+        _prod_role = "spacer_intermediate"
+
+    # Create or update product ACS profile
+    if product_type in acs_state:
+        # Accumulate onto existing intermediate (allowed for compatible chemistry)
+        acs_state[product_type].accessible_sites += sites_created
+        acs_state[product_type].total_sites += sites_created
+        acs_state[product_type].activated_sites += sites_created
+    else:
+        acs_state[product_type] = ACSProfile(
+            site_type=product_type,
+            total_sites=sites_created,
+            accessible_sites=sites_created,
+            activated_sites=sites_created,
+            crosslinked_sites=0.0,
+            activated_consumed_sites=0.0,
+            hydrolyzed_sites=0.0,
+            ligand_coupled_sites=0.0,
+            ligand_functional_sites=0.0,
+            blocked_sites=0.0,
+            total_density=0.0,
+            accessible_density=0.0,
+            accessibility_model=target_profile.accessibility_model,
+            uncertainty_fraction=target_profile.uncertainty_fraction,
+        )
+
+    notes = (
+        f"Spacer arm '{step.reagent_key}': conv={conversion:.4f}, "
+        f"consumed={sites_consumed:.4e}, created={sites_created:.4e} "
+        f"(yield={distal_yield:.0%}), bridged={sites_bridged:.4e}, "
+        f"product={product_type.value}, role={_prod_role}"
+    )
+    logger.info(notes)
+
+    return ModificationResult(
+        step=step, acs_before={}, acs_after={},
+        conversion=conversion, delta_G_DN=0.0, notes=notes,
     )
 
 

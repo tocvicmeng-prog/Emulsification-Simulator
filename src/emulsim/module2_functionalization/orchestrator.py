@@ -394,6 +394,12 @@ _COUPLING_TYPES = {
     ModificationStepType.PROTEIN_COUPLING,
 }
 
+# Types that require activated sites on target (includes SPACER_ARM)
+_REQUIRES_ACTIVATED = _COUPLING_TYPES | {
+    ModificationStepType.QUENCHING,
+    ModificationStepType.SPACER_ARM,
+}
+
 # Rule 4: Allowed reaction_type values per step type (Codex P1-1 fix)
 _STEP_ALLOWED_REACTION_TYPES: dict[ModificationStepType, set[str]] = {
     ModificationStepType.SECONDARY_CROSSLINKING: {"crosslinking"},
@@ -401,6 +407,7 @@ _STEP_ALLOWED_REACTION_TYPES: dict[ModificationStepType, set[str]] = {
     ModificationStepType.LIGAND_COUPLING: {"coupling"},
     ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
     ModificationStepType.QUENCHING: {"blocking"},
+    ModificationStepType.SPACER_ARM: {"spacer_arm", "heterobifunctional"},
 }
 
 
@@ -437,16 +444,16 @@ def _validate_workflow_ordering(
                 f"No further chemistry is possible on blocked sites."
             )
 
-        # Rule 1: Coupling/quenching requires activated sites
-        if step.step_type in _COUPLING_TYPES or step.step_type == ModificationStepType.QUENCHING:
+        # Rule 1: Coupling/quenching/spacer_arm requires activated sites
+        if step.step_type in _REQUIRES_ACTIVATED:
             target_profile = acs_profiles.get(step.target_acs)
             if target_profile is None:
-                # Target ACS type doesn't exist yet — it may be created by
-                # a prior activation step. Check if any prior step produces it.
+                # Target ACS type doesn't exist yet — may be created by prior step
                 prior_produces = any(
                     s.product_acs == step.target_acs
                     for s in steps[:i]
-                    if s.step_type == ModificationStepType.ACTIVATION
+                    if s.step_type in (ModificationStepType.ACTIVATION,
+                                       ModificationStepType.SPACER_ARM)
                 )
                 if not prior_produces:
                     raise ValueError(
@@ -459,7 +466,8 @@ def _validate_workflow_ordering(
                 prior_activates = any(
                     s.product_acs == step.target_acs
                     for s in steps[:i]
-                    if s.step_type == ModificationStepType.ACTIVATION
+                    if s.step_type in (ModificationStepType.ACTIVATION,
+                                       ModificationStepType.SPACER_ARM)
                 )
                 if not prior_activates:
                     logger.warning(

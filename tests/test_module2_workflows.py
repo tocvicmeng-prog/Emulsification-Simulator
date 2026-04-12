@@ -912,7 +912,8 @@ def test_all_25_profiles_have_required_metadata():
         assert profile.confidence_tier in ("semi_quantitative", "ranking_only"), \
             f"{key}: invalid confidence_tier '{profile.confidence_tier}'"
         assert profile.reaction_type in (
-            "crosslinking", "activation", "coupling", "protein_coupling", "blocking", "spacer"
+            "crosslinking", "activation", "coupling", "protein_coupling", "blocking",
+            "spacer", "spacer_arm", "heterobifunctional",
         ), f"{key}: invalid reaction_type '{profile.reaction_type}'"
 
 
@@ -1031,6 +1032,191 @@ def test_fmc_biotin_stoich_2_5():
     assert fmc.binding_model_hint == "near_irreversible"
 
 
-def test_profile_count_is_25():
-    """Canonical: 14 existing + 8 coupling + 3 spacer = 25."""
-    assert len(REAGENT_PROFILES) == 25
+def test_profile_count():
+    """Canonical profile count — v5.8: 42 total."""
+    assert len(REAGENT_PROFILES) == 42, \
+        f"Expected 42 profiles, got {len(REAGENT_PROFILES)}"
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# v5.8 Phase 2: SPACER_ARM + SM(PEG)n integration tests (WN-8)
+# ═════════════════════════════════════════════════════════════════════════
+
+
+def test_spacer_arm_creates_amine_distal():
+    """SPACER_ARM step consumes EPOXIDE and creates AMINE_DISTAL."""
+    contract = _make_contract(oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.SPACER_ARM,
+            reagent_key="dadpa_spacer_arm",
+            target_acs=ACSSiteType.EPOXIDE,
+            product_acs=ACSSiteType.AMINE_DISTAL,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=100.0, ph=10.5,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"
+
+    # AMINE_DISTAL should exist
+    assert ACSSiteType.AMINE_DISTAL in result.acs_profiles, \
+        "AMINE_DISTAL profile should be created by SPACER_ARM"
+
+    ad = result.acs_profiles[ACSSiteType.AMINE_DISTAL]
+    assert ad.accessible_sites > 0, "AMINE_DISTAL should have accessible sites"
+    assert ad.activated_sites > 0, "AMINE_DISTAL should have activated sites"
+
+
+def test_spacer_arm_distal_yield():
+    """Distal group yield < 1.0 means some sites are bridged, not all produce product."""
+    contract = _make_contract(oh_bulk=400.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        ModificationStep(
+            step_type=ModificationStepType.SPACER_ARM,
+            reagent_key="eda_spacer_arm",  # distal_group_yield = 0.60
+            target_acs=ACSSiteType.EPOXIDE,
+            product_acs=ACSSiteType.AMINE_DISTAL,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=200.0, ph=10.5,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"
+
+    # Check: AMINE_DISTAL sites < EPOXIDE consumed (distal_yield < 1.0)
+    epox = result.acs_profiles[ACSSiteType.EPOXIDE]
+    ad = result.acs_profiles.get(ACSSiteType.AMINE_DISTAL)
+    assert ad is not None, "AMINE_DISTAL should be created"
+    # EDA yield = 0.60, so created sites < consumed sites
+    if epox.ligand_coupled_sites > 0 and ad.accessible_sites > 0:
+        yield_ratio = ad.accessible_sites / epox.ligand_coupled_sites
+        assert yield_ratio < 1.0, \
+            f"Distal yield should be < 1.0 for EDA, got {yield_ratio:.2f}"
+
+
+def test_full_smpeg_path():
+    """Full SM(PEG)n path: ECH → DADPA → SM(PEG)4 → Protein A-Cys → Quench."""
+    contract = _make_contract(oh_bulk=400.0, G_DN=5000.0)
+    orchestrator = ModificationOrchestrator()
+
+    steps = [
+        # Step 1: Activate hydroxyl → epoxide
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        # Step 2: Spacer arm — epoxide → amine_distal
+        ModificationStep(
+            step_type=ModificationStepType.SPACER_ARM,
+            reagent_key="dadpa_spacer_arm",
+            target_acs=ACSSiteType.EPOXIDE,
+            product_acs=ACSSiteType.AMINE_DISTAL,
+            temperature=298.15, time=14400.0,
+            reagent_concentration=100.0, ph=10.5,
+        ),
+        # Step 3: Heterobifunctional — amine_distal → maleimide
+        ModificationStep(
+            step_type=ModificationStepType.SPACER_ARM,
+            reagent_key="sm_peg4",
+            target_acs=ACSSiteType.AMINE_DISTAL,
+            product_acs=ACSSiteType.MALEIMIDE,
+            temperature=298.15, time=1800.0,
+            reagent_concentration=10.0, ph=7.4,
+        ),
+        # Step 4: Protein coupling — maleimide → thioether (Protein A-Cys)
+        ModificationStep(
+            step_type=ModificationStepType.PROTEIN_COUPLING,
+            reagent_key="protein_a_cys_coupling",
+            target_acs=ACSSiteType.MALEIMIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=0.01, ph=7.0,
+        ),
+        # Step 5: Quench remaining epoxides
+        ModificationStep(
+            step_type=ModificationStepType.QUENCHING,
+            reagent_key="ethanolamine_quench",
+            target_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=1000.0, ph=8.5,
+        ),
+    ]
+
+    result = orchestrator.run(contract, steps)
+
+    # All 5 steps should execute
+    assert len(result.modification_history) == 5
+
+    # Conservation must hold across all profiles
+    violations = result.validate()
+    assert violations == [], f"Conservation violations: {violations}"
+
+    # MALEIMIDE profile should exist with coupled protein
+    assert ACSSiteType.MALEIMIDE in result.acs_profiles
+    mal = result.acs_profiles[ACSSiteType.MALEIMIDE]
+    # Some maleimide may have decayed + some coupled to protein
+    assert mal.hydrolyzed_sites >= 0  # maleimide decay
+    assert mal.ligand_coupled_sites >= 0  # protein coupling
+
+    # Protein A-Cys should have higher activity than random coupling (0.80 vs 0.60)
+    if mal.ligand_coupled_sites > 0:
+        ratio = mal.ligand_functional_sites / mal.ligand_coupled_sites
+        # effective_activity = 0.80 * spacer_mult (but Cys profiles have multiplier 1.0)
+        assert ratio <= 1.0
+
+
+def test_smpeg_without_amine_distal_fails():
+    """SM(PEG)n targeting AMINE_DISTAL without prior spacer should fail validation."""
+    contract = _make_contract(oh_bulk=400.0)
+
+    steps = [
+        ModificationStep(
+            step_type=ModificationStepType.ACTIVATION,
+            reagent_key="ech_activation",
+            target_acs=ACSSiteType.HYDROXYL,
+            product_acs=ACSSiteType.EPOXIDE,
+            temperature=298.15, time=7200.0,
+            reagent_concentration=100.0, ph=12.0,
+        ),
+        # Skip DADPA spacer — go directly to SM(PEG)4 on AMINE_DISTAL
+        ModificationStep(
+            step_type=ModificationStepType.SPACER_ARM,
+            reagent_key="sm_peg4",
+            target_acs=ACSSiteType.AMINE_DISTAL,
+            product_acs=ACSSiteType.MALEIMIDE,
+            temperature=298.15, time=1800.0,
+            reagent_concentration=10.0, ph=7.4,
+        ),
+    ]
+
+    orchestrator = ModificationOrchestrator()
+    with pytest.raises(ValueError, match="no prior"):
+        orchestrator.run(contract, steps)

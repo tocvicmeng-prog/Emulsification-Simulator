@@ -57,6 +57,9 @@ class ACSSiteType(Enum):
     EPOXIDE = "epoxide"
     ALDEHYDE = "aldehyde"
     VINYL_SULFONE = "vinyl_sulfone"
+    # v5.8 additions for SM(PEG)n heterobifunctional crosslinker path:
+    AMINE_DISTAL = "amine_distal"     # -NH2 at spacer arm terminus
+    MALEIMIDE = "maleimide"           # Maleimide at crosslinker terminus
 
 
 # ─── ACSProfile Dataclass ──────────────────────────────────────────────
