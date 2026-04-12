@@ -3,8 +3,8 @@
 v5.9.0: Enables M3 to consume M2's binding_model_hint and select the
 appropriate isotherm with correct process-state parameters.
 
-v5.9.5 hardening: Fixed SMA constructor (H1), array-safe irreversible (H2),
-added TODO for gradient process state (H6).
+v5.9.5 hardening: Fixed SMA constructor (H1), array-safe irreversible (H2).
+v6.0-beta: ProcessState dataclass, HIC isotherm routing.
 """
 
 from __future__ import annotations
@@ -24,23 +24,32 @@ class EquilibriumAdapter:
     This adapter carries process_state and dispatches accordingly.
     """
 
-    def __init__(self, isotherm, process_state: dict | None = None):
+    def __init__(self, isotherm, process_state=None):
         self._isotherm = isotherm
-        self._state = process_state or {}
+        # Accept both dict and ProcessState (v6.0-beta backward compat)
+        if process_state is None:
+            self._state = {}
+        elif hasattr(process_state, 'to_dict'):
+            self._state = process_state.to_dict()
+        elif isinstance(process_state, dict):
+            self._state = process_state
+        else:
+            self._state = {}
 
     def equilibrium_loading(self, C):
         """Compute equilibrium loading, passing process state to multi-param isotherms."""
         _cls_name = type(self._isotherm).__name__
 
         if _cls_name == "SMAIsotherm":
-            # SMA needs salt concentration [mol/m3]
-            salt = self._state.get("salt_concentration", 100.0)  # [mol/m3] default 100 mM
-            # SMA expects C as array of component concentrations
+            salt = self._state.get("salt_concentration", 100.0)
             C_arr = np.atleast_1d(np.asarray(C, dtype=float))
             return self._isotherm.equilibrium_loading(C_arr, salt)
         elif _cls_name == "IMACCompetitionIsotherm":
-            imidazole = self._state.get("imidazole", 0.0)  # [mol/m3]
+            imidazole = self._state.get("imidazole", 0.0)
             return self._isotherm.equilibrium_loading(C, imidazole)
+        elif _cls_name == "HICIsotherm":
+            salt = self._state.get("salt_concentration", 0.0)
+            return self._isotherm.equilibrium_loading(C, salt)
         else:
             return self._isotherm.equilibrium_loading(C)
 
@@ -86,7 +95,7 @@ class IrreversibleAdsorptionIsotherm:
         return self.k_ads * C * max(self.q_max - q, 0.0)
 
 
-def select_isotherm_from_fmc(fmc, process_state: dict | None = None):
+def select_isotherm_from_fmc(fmc, process_state=None):
     """Select and configure an isotherm based on FunctionalMediaContract.
 
     v5.9.5 H1: Fixed SMA constructor to use correct parameter names
@@ -103,7 +112,15 @@ def select_isotherm_from_fmc(fmc, process_state: dict | None = None):
 
     hint = getattr(fmc, 'binding_model_hint', '')
     q_max = getattr(fmc, 'estimated_q_max', 0.0)
-    state = process_state or {}
+    # v6.0-beta: Accept ProcessState or dict
+    if process_state is None:
+        state = {}
+    elif hasattr(process_state, 'to_dict'):
+        state = process_state.to_dict()
+    elif isinstance(process_state, dict):
+        state = process_state
+    else:
+        state = {}
 
     if q_max <= 0:
         logger.warning(
@@ -146,10 +163,17 @@ def select_isotherm_from_fmc(fmc, process_state: dict | None = None):
         return IrreversibleAdsorptionIsotherm(q_max=q_max, k_ads=100.0)
 
     elif hint == "salt_promoted":
-        # HIC - Langmuir placeholder
-        # TODO v6.0-beta: Replace with HICIsotherm(K_0, m_salt) when calibration framework exists
-        logger.info("M3 routing: salt_promoted -> Langmuir placeholder (HIC)")
-        return LangmuirIsotherm(q_max=q_max, K_L=100.0)
+        # v6.0-beta: HIC isotherm when K_0 and m_salt are calibrated
+        K_0 = state.get("K_0", 0.0)
+        m_salt = state.get("m_salt", 0.0)
+        if K_0 > 0 and m_salt > 0:
+            from ..isotherms.hic import HICIsotherm
+            iso = HICIsotherm(q_max=q_max, K_0=K_0, m_salt=m_salt)
+            logger.info("M3 routing: salt_promoted -> HIC (K_0=%.3e, m=%.3e)", K_0, m_salt)
+            return EquilibriumAdapter(iso, state)
+        else:
+            logger.info("M3 routing: salt_promoted -> Langmuir (HIC K_0/m_salt not calibrated)")
+            return LangmuirIsotherm(q_max=q_max, K_L=100.0)
 
     elif hint in ("fc_affinity", "kappa_light_chain_affinity",
                    "gst_glutathione", "mixed_mode"):
