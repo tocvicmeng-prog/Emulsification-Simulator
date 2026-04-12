@@ -259,3 +259,53 @@ def _accessibility_fraction(
     # Quadratic steric exclusion: f = (1 - (2*r_h/d_pore)^2) / tortuosity
     f = (1.0 - ratio ** 2) / tortuosity
     return max(f, 0.0)
+
+
+def _accessibility_fraction_psd(
+    solute_radius: float,
+    pore_diameter_mean: float,
+    pore_diameter_std: float,
+    tortuosity: float,
+    n_bins: int = 20,
+) -> float:
+    """Compute PSD-weighted accessible fraction using log-normal distribution.
+
+    v6.0: Uses pore_size_std from M1ExportContract for a log-normal
+    pore-size distribution approximation. When std=0, falls back to
+    mean-pore calculation.
+
+    The log-normal is discretized into n_bins and each bin's accessibility
+    is weighted by its probability density.
+
+    Args:
+        solute_radius: Hydrodynamic radius [m].
+        pore_diameter_mean: Mean pore diameter [m].
+        pore_diameter_std: Standard deviation of pore diameter [m].
+        tortuosity: Pore tortuosity [-].
+        n_bins: Number of log-normal bins.
+
+    Returns:
+        Weighted-average accessible fraction [-].
+    """
+    import numpy as _np
+
+    if pore_diameter_std <= 0 or pore_diameter_mean <= 0:
+        return _accessibility_fraction(solute_radius, pore_diameter_mean, tortuosity)
+
+    # Log-normal parameters from mean and std
+    cv = pore_diameter_std / pore_diameter_mean
+    sigma_ln = _np.sqrt(_np.log(1 + cv ** 2))
+    mu_ln = _np.log(pore_diameter_mean) - 0.5 * sigma_ln ** 2
+
+    # Discretize: n_bins from mu-3sigma to mu+3sigma
+    d_bins = _np.exp(_np.linspace(mu_ln - 3 * sigma_ln, mu_ln + 3 * sigma_ln, n_bins))
+    # Log-normal PDF weights
+    weights = _np.exp(-0.5 * ((_np.log(d_bins) - mu_ln) / sigma_ln) ** 2) / (d_bins * sigma_ln)
+    weights /= weights.sum()  # normalize
+
+    # Weighted-average accessibility
+    f_total = 0.0
+    for d_pore, w in zip(d_bins, weights):
+        f_total += w * _accessibility_fraction(solute_radius, d_pore, tortuosity)
+
+    return float(f_total)
