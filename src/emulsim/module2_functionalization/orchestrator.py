@@ -108,6 +108,19 @@ class FunctionalMediaContract:
     # ── Binding model hint for M3 (audit F15) ──
     binding_model_hint: str = ""         # Passed from reagent profile for M3 routing
 
+    # ── v5.9.0 FMC v2 fields ──
+    reagent_accessible_area_per_bed_volume: float = 0.0  # [m2/m3 bed]
+    ligand_accessible_area_per_bed_volume: float = 0.0   # [m2/m3 bed]
+    capacity_area_basis: str = ""        # "reagent_accessible" or "ligand_accessible"
+    activity_retention_uncertainty: float = 0.0  # +/- on activity_retention
+    q_max_lower: float = 0.0            # [mol/m3 bed] lower bound
+    q_max_upper: float = 0.0            # [mol/m3 bed] upper bound
+    m3_support_level: str = "not_mapped"  # "mapped_quantitative", "mapped_estimated",
+                                          # "not_mapped", "requires_user_calibration"
+    final_ligand_profile_key: str = ""   # Key of the last coupling reagent profile
+    process_state_requirements: str = "" # "salt_concentration", "imidazole", ""
+    residual_reagent_warnings: list[str] = field(default_factory=list)
+
     # ── Trust ──
     confidence_tier: str = "semi_quantitative"
     warnings: list[str] = field(default_factory=list)
@@ -181,27 +194,48 @@ def build_functional_media_contract(
                 coupled_density = profile.ligand_coupled_sites / area
                 functional_density = profile.ligand_functional_sites / area
 
-    # Estimate q_max for IEX and affinity
-    # ── q_max mapping (audit F13: area basis, F7: stoichiometry corrections) ──
+    # ── v5.9.0: Compute accessible area per bed volume ──
     d_p = contract.bead_d50
     eps_b = 0.38  # default bed porosity
-    _q_max_area_note = f"Area basis: {_area_basis}."
     _binding_hint = getattr(_last_coupling_rp, 'binding_model_hint', '') if _last_coupling_rp else ''
+    _m3_support = getattr(_last_coupling_rp, 'm3_support_level', 'not_mapped') if _last_coupling_rp else 'not_mapped'
+    _final_key = getattr(_last_coupling_rp, 'name', '') if _last_coupling_rp else ''
+    _act_unc = getattr(_last_coupling_rp, 'activity_retention_uncertainty', 0.0) if _last_coupling_rp else 0.0
 
-    if d_p > 0 and functional_density > 0:
-        a_v = 6.0 * (1.0 - eps_b) / d_p  # [m^2/m^3 bed] external geometric
+    # Accessible area per bed volume (v5.9.0 WN-0b)
+    _reagent_a_v = 0.0
+    _ligand_a_v = 0.0
+    if d_p > 0:
+        import math as _math_fmc
+        V_particle = (4.0 / 3.0) * _math_fmc.pi * (d_p / 2.0) ** 3
+        if V_particle > 0:
+            particles_per_bed_vol = (1.0 - eps_b) / V_particle
+            _reagent_a_v = surface.reagent_accessible_area * particles_per_bed_vol
+            _ligand_a_v = surface.ligand_accessible_area * particles_per_bed_vol
+
+    # Choose appropriate a_v for q_max based on molecule size
+    if _is_macro:
+        a_v_for_qmax = _ligand_a_v
+        _cap_basis = "ligand_accessible"
+    else:
+        a_v_for_qmax = _reagent_a_v if _reagent_a_v > 0 else _ligand_a_v
+        _cap_basis = "reagent_accessible" if _reagent_a_v > 0 else "ligand_accessible"
+
+    _q_max_area_note = f"Area basis: {_area_basis}. Bed a_v({_cap_basis}): {a_v_for_qmax:.0f} m2/m3."
+
+    if d_p > 0 and functional_density > 0 and a_v_for_qmax > 0:
 
         if ligand_type in ("iex_anion", "iex_cation"):
-            q_max_est = functional_density * a_v
+            q_max_est = functional_density * a_v_for_qmax
             confidence = "mapped_estimated"
             q_max_notes = (
                 f"IEX: q_max = ligand_density * a_v = {q_max_est:.2f} mol/m^3. "
-                f"a_v = {a_v:.0f} m^2/m^3 (external). {_q_max_area_note} "
+                f"a_v = {a_v_for_qmax:.0f} m^2/m^3 ({_cap_basis}). {_q_max_area_note} "
                 f"Bed porosity = {eps_b:.2f}."
             )
         elif ligand_type == "affinity":
             binding_stoich = 2.0  # Protein A/G: ~2 IgG per ligand
-            q_max_est = functional_density * a_v * binding_stoich
+            q_max_est = functional_density * a_v_for_qmax * binding_stoich
             confidence = "mapped_estimated"
             q_max_notes = (
                 f"Affinity (Fc): q_max = density * a_v * stoich({binding_stoich:.0f}). "
@@ -211,7 +245,7 @@ def build_functional_media_contract(
             binding_stoich = 1.0
             _mi = getattr(_last_coupling_rp, 'metal_ion', 'Ni2+') if _last_coupling_rp else 'Ni2+'
             _mlf = getattr(_last_coupling_rp, 'metal_loaded_fraction', 1.0) if _last_coupling_rp else 1.0
-            q_max_est = functional_density * a_v * binding_stoich * _mlf
+            q_max_est = functional_density * a_v_for_qmax * binding_stoich * _mlf
             confidence = "mapped_estimated"
             q_max_notes = (
                 f"IMAC: q_max = density * a_v * stoich * metal_frac. "
@@ -220,14 +254,14 @@ def build_functional_media_contract(
             )
         elif ligand_type == "gst_affinity":
             binding_stoich = 1.0  # 1 GST per glutathione
-            q_max_est = functional_density * a_v * binding_stoich
+            q_max_est = functional_density * a_v_for_qmax * binding_stoich
             confidence = "mapped_estimated"
             q_max_notes = (
                 f"GST affinity: 1:1 GST:glutathione. {_q_max_area_note}"
             )
         elif ligand_type == "biotin_affinity":
             binding_stoich = 2.5  # Audit F7: capped from theoretical 4
-            q_max_est = functional_density * a_v * binding_stoich
+            q_max_est = functional_density * a_v_for_qmax * binding_stoich
             confidence = "mapped_estimated"
             q_max_notes = (
                 f"Biotin affinity: stoich={binding_stoich} (capped from theoretical 4 "
@@ -235,7 +269,7 @@ def build_functional_media_contract(
             )
         elif ligand_type == "heparin_affinity":
             binding_stoich = 1.0  # approximate, highly target-dependent
-            q_max_est = functional_density * a_v * binding_stoich
+            q_max_est = functional_density * a_v_for_qmax * binding_stoich
             confidence = "mapped_estimated"
             q_max_notes = (
                 f"Heparin affinity: stoich~1 (approximate, target-dependent). "
@@ -260,6 +294,23 @@ def build_functional_media_contract(
     _ranking_types = {"affinity", "biotin_affinity", "heparin_affinity"}
     _conf_tier = "ranking_only" if ligand_type in _ranking_types else "semi_quantitative"
 
+    # Compute q_max uncertainty bounds from activity_retention_uncertainty
+    _q_lower = 0.0
+    _q_upper = 0.0
+    if q_max_est > 0 and _act_unc > 0:
+        # q_max scales linearly with activity_retention
+        _act_ret = getattr(_last_coupling_rp, 'activity_retention', 1.0) if _last_coupling_rp else 1.0
+        if _act_ret > 0:
+            _q_lower = q_max_est * max(_act_ret - _act_unc, 0.0) / _act_ret
+            _q_upper = q_max_est * min(_act_ret + _act_unc, 1.0) / _act_ret
+
+    # Process state requirements for M3 routing
+    _proc_req = ""
+    if _binding_hint == "charge_exchange":
+        _proc_req = "salt_concentration"
+    elif _binding_hint == "metal_chelation":
+        _proc_req = "imidazole"
+
     return FunctionalMediaContract(
         bead_d50=contract.bead_d50,
         porosity=contract.porosity,
@@ -278,6 +329,16 @@ def build_functional_media_contract(
         ligand_density_area_basis=_area_basis,
         q_max_area_basis_note=_q_max_area_note,
         binding_model_hint=_binding_hint,
+        # v5.9.0 FMC v2 fields
+        reagent_accessible_area_per_bed_volume=_reagent_a_v,
+        ligand_accessible_area_per_bed_volume=_ligand_a_v,
+        capacity_area_basis=_cap_basis,
+        activity_retention_uncertainty=_act_unc,
+        q_max_lower=_q_lower,
+        q_max_upper=_q_upper,
+        m3_support_level=_m3_support,
+        final_ligand_profile_key=_final_key,
+        process_state_requirements=_proc_req,
         confidence_tier=_conf_tier,
         warnings=warnings,
     )

@@ -848,7 +848,7 @@ if _tab_m2 is not None:
             with st.expander(f"Step {i + 1}", expanded=(i == 0)):
                 step_type = st.selectbox(
                     "Chemistry",
-                    ["Secondary Crosslinking", "Hydroxyl Activation", "Ligand Coupling", "Protein Coupling", "Quenching"],
+                    ["Secondary Crosslinking", "Hydroxyl Activation", "Ligand Coupling", "Protein Coupling", "Spacer Arm", "Quenching"],
                     key=f"m2_type_{i}",
                 )
                 if "Crosslinking" in step_type:
@@ -860,6 +860,7 @@ if _tab_m2 is not None:
                     _reagent_options = {
                         "ECH (Epichlorohydrin)": "ech_activation",
                         "DVS (Divinyl Sulfone)": "dvs_activation",
+                        "BDGE (18 A Long-Arm Epoxide)": "bdge_activation",
                     }
                 elif step_type == "Ligand Coupling":
                     _reagent_options = {
@@ -871,6 +872,7 @@ if _tab_m2 is not None:
                         "NTA (IMAC His-tag)": "nta_coupling",
                         "Phenyl (HIC)": "phenyl_coupling",
                         "Butyl (HIC Mild)": "butyl_coupling",
+                        "Octyl (HIC Strong)": "octyl_coupling",
                         "Glutathione (GST-tag)": "glutathione_coupling",
                         "Heparin (Affinity+IEX)": "heparin_coupling",
                     }
@@ -880,6 +882,23 @@ if _tab_m2 is not None:
                         "Protein G (IgG Broad Subclass)": "protein_g_coupling",
                         "Protein A/G Fusion (Broadest IgG)": "protein_ag_coupling",
                         "Streptavidin (Biotin-tag)": "streptavidin_coupling",
+                        "Protein L (Kappa Light Chain)": "protein_l_coupling",
+                        "Con A (Lectin, Mannose)": "con_a_coupling",
+                        "WGA (Lectin, GlcNAc)": "wga_coupling",
+                        "Protein A-Cys (Oriented)": "protein_a_cys_coupling",
+                        "Protein G-Cys (Oriented)": "protein_g_cys_coupling",
+                        "Generic Cys-Protein": "generic_cys_protein_coupling",
+                    }
+                elif step_type == "Spacer Arm":
+                    _reagent_options = {
+                        "DADPA (13 A, Amine)": "dadpa_spacer_arm",
+                        "DAH (9 A, Amine)": "dah_spacer_arm",
+                        "EDA (3 A, Amine)": "eda_spacer_arm",
+                        "PEG-diamine 600 (35 A)": "peg600_spacer_arm",
+                        "SM(PEG)2 (18 A, NHS-Maleimide)": "sm_peg2",
+                        "SM(PEG)4 (32 A, NHS-Maleimide)": "sm_peg4",
+                        "SM(PEG)12 (60 A, NHS-Maleimide)": "sm_peg12",
+                        "SM(PEG)24 (95 A, NHS-Maleimide)": "sm_peg24",
                     }
                 else:  # Quenching
                     _reagent_options = {
@@ -935,9 +954,10 @@ if _tab_m2 is not None:
                 _step_type_map = {
                     "Secondary Crosslinking": (ModificationStepType.SECONDARY_CROSSLINKING, ACSSiteType.AMINE_PRIMARY),
                     "Hydroxyl Activation": (ModificationStepType.ACTIVATION, ACSSiteType.HYDROXYL),
-                    "Ligand Coupling": (ModificationStepType.LIGAND_COUPLING, None),  # target from reagent
-                    "Protein Coupling": (ModificationStepType.PROTEIN_COUPLING, None),  # target from reagent
-                    "Quenching": (ModificationStepType.QUENCHING, None),  # target from reagent
+                    "Ligand Coupling": (ModificationStepType.LIGAND_COUPLING, None),
+                    "Protein Coupling": (ModificationStepType.PROTEIN_COUPLING, None),
+                    "Spacer Arm": (ModificationStepType.SPACER_ARM, None),
+                    "Quenching": (ModificationStepType.QUENCHING, None),
                 }
                 _step_type_enum, _default_target = _step_type_map[step_type]
                 if _default_target is not None:
