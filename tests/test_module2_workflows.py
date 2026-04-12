@@ -914,6 +914,7 @@ def test_all_25_profiles_have_required_metadata():
         assert profile.reaction_type in (
             "crosslinking", "activation", "coupling", "protein_coupling", "blocking",
             "spacer", "spacer_arm", "heterobifunctional",
+            "metal_charging", "metal_stripping", "protein_pretreatment", "washing",
         ), f"{key}: invalid reaction_type '{profile.reaction_type}'"
 
 
@@ -1033,9 +1034,9 @@ def test_fmc_biotin_stoich_2_5():
 
 
 def test_profile_count():
-    """Canonical profile count — v5.8: 42 total."""
-    assert len(REAGENT_PROFILES) == 42, \
-        f"Expected 42 profiles, got {len(REAGENT_PROFILES)}"
+    """Canonical profile count — v5.9: 52 total."""
+    assert len(REAGENT_PROFILES) == 52, \
+        f"Expected 52 profiles, got {len(REAGENT_PROFILES)}"
 
 
 # ═════════════════════════════════════════════════════════════════════════

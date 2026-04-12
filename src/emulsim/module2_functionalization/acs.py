@@ -60,6 +60,9 @@ class ACSSiteType(Enum):
     # v5.8 additions for SM(PEG)n heterobifunctional crosslinker path:
     AMINE_DISTAL = "amine_distal"     # -NH2 at spacer arm terminus
     MALEIMIDE = "maleimide"           # Maleimide at crosslinker terminus
+    # v5.9.3 additions for EDC/NHS carboxyl activation path:
+    CARBOXYL_DISTAL = "carboxyl_distal"  # -COOH at AHA spacer terminus
+    NHS_ESTER = "nhs_ester"              # NHS ester from EDC/NHS activation
 
 
 # ─── ACSProfile Dataclass ──────────────────────────────────────────────
@@ -112,6 +115,9 @@ class ACSProfile:
     ligand_coupled_sites: float = 0.0  # [mol/particle] coupled to ligand
     ligand_functional_sites: float = 0.0  # [mol/particle] subset retaining activity
     blocked_sites: float = 0.0         # [mol/particle] capped by quenching
+
+    # ── Metal state (v5.9.1 IMAC) ──
+    metal_loaded_fraction: float = 0.0  # [0,1] fraction of chelator sites loaded with metal
 
     # Surface-normalised densities [mol/m^2]
     total_density: float = 0.0

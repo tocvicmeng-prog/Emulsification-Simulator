@@ -56,6 +56,35 @@ class CouplingResult:
 R_GAS = 8.314  # [J/(mol*K)]
 
 
+# ─── pH Scaling Helper (v5.9.4) ─────────────────────────────────────────
+
+def ph_rate_scaling(ph: float, pKa: float, n_hill: float = 1.0) -> float:
+    """Sigmoid pH scaling for nucleophile ionization fraction.
+
+    Models the fraction of nucleophile in reactive (deprotonated) form:
+        fraction = 1 / (1 + 10^(n_hill * (pKa - ph)))
+
+    For amines (pKa ~10.5): at pH 10.5, 50% active; at pH 12, ~97% active.
+    For thiols (pKa ~8.3): at pH 7.0, ~5% thiolate; at pH 8.3, 50%.
+
+    Args:
+        ph: Reaction pH.
+        pKa: pKa of the nucleophilic group. 0 = disabled (returns 1.0).
+        n_hill: Hill coefficient for cooperativity (default 1.0).
+
+    Returns:
+        Fraction of nucleophile in active form [0, 1].
+    """
+    if pKa <= 0:
+        return 1.0  # disabled
+    exponent = n_hill * (pKa - ph)
+    if exponent > 300:
+        return 0.0
+    if exponent < -300:
+        return 1.0
+    return 1.0 / (1.0 + 10.0 ** exponent)
+
+
 # ─── Arrhenius helper ───────────────────────────────────────────────────
 
 def arrhenius_rate_constant(T: float, k0: float, E_a: float) -> float:

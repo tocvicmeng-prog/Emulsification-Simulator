@@ -141,6 +141,12 @@ class ReagentProfile:
     requires_reduced_thiol: bool = False    # True for maleimide-thiol coupling
     thiol_accessibility_fraction: float = 1.0  # Fraction of protein Cys accessible [0,1]
 
+    # ── v5.9.1-5.9.4 fields ──
+    metal_association_constant: float = 0.0  # [m3/mol] metal-chelator association constant
+    reduction_efficiency: float = 0.95       # [0,1] protein pretreatment efficiency
+    regulatory_limit_ppm: float = 0.0        # [ppm] for washing compliance check
+    pKa_nucleophile: float = 0.0             # pH scaling (0 = disabled)
+
     # ── Metadata ──
     confidence_tier: str = "semi_quantitative"
     calibration_source: str = ""
@@ -1378,5 +1384,209 @@ REAGENT_PROFILES: dict[str, ReagentProfile] = {
         confidence_tier="ranking_only",
         calibration_source="Generic; user must provide target-specific parameters",
         notes="Generic maleimide-thiol coupling; user must specify protein MW and activity",
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v5.9.1 — IMAC Metal Charging (5 profiles)
+    # ═══════════════════════════════════════════════════════════════════
+
+    "nickel_charging": ReagentProfile(
+        name="Nickel(II) charging (Ni-NTA/IDA)",
+        cas="7786-81-4", reagent_identity="Nickel(II) sulfate",
+        installed_ligand="Ni2+-loaded chelator",
+        functional_mode="metal_charging", reaction_type="metal_charging",
+        chemistry_class="metal_chelation",
+        target_acs=ACSSiteType.EPOXIDE, product_acs=None,
+        k_forward=0.0, E_a=0.0, stoichiometry=1.0,
+        metal_ion="Ni2+", metal_association_constant=3e11,
+        ph_optimum=7.0, ph_min=5.0, ph_max=8.0,
+        temperature_default=298.15, time_default=1800.0,
+        profile_role="native", m3_support_level="mapped_estimated",
+        confidence_tier="semi_quantitative",
+        calibration_source="log K(NTA-Ni)=11.5; Martell & Smith Critical Stability Constants",
+        notes="Standard Ni2+ charging for His-tag IMAC; 50 mM NiSO4 typical",
+    ),
+    "cobalt_charging": ReagentProfile(
+        name="Cobalt(II) charging (Co-NTA/IDA)",
+        cas="10026-24-1", reagent_identity="Cobalt(II) chloride",
+        installed_ligand="Co2+-loaded chelator",
+        functional_mode="metal_charging", reaction_type="metal_charging",
+        chemistry_class="metal_chelation",
+        target_acs=ACSSiteType.EPOXIDE, product_acs=None,
+        k_forward=0.0, E_a=0.0, stoichiometry=1.0,
+        metal_ion="Co2+", metal_association_constant=1e10,
+        ph_optimum=7.0, ph_min=5.0, ph_max=8.0,
+        temperature_default=298.15, time_default=1800.0,
+        profile_role="native", m3_support_level="mapped_estimated",
+        confidence_tier="semi_quantitative",
+        calibration_source="Estimated; Co2+ has higher specificity than Ni2+",
+        notes="Higher specificity, lower capacity than Ni2+",
+    ),
+    "copper_charging": ReagentProfile(
+        name="Copper(II) charging (Cu-IDA)",
+        cas="7758-99-8", reagent_identity="Copper(II) sulfate",
+        installed_ligand="Cu2+-loaded chelator",
+        functional_mode="metal_charging", reaction_type="metal_charging",
+        chemistry_class="metal_chelation",
+        target_acs=ACSSiteType.EPOXIDE, product_acs=None,
+        k_forward=0.0, E_a=0.0, stoichiometry=1.0,
+        metal_ion="Cu2+", metal_association_constant=1e13,
+        ph_optimum=7.0, ph_min=4.0, ph_max=8.0,
+        temperature_default=298.15, time_default=1800.0,
+        profile_role="native", m3_support_level="mapped_estimated",
+        confidence_tier="semi_quantitative",
+        calibration_source="log K(IDA-Cu)=10.6; strongest divalent binding",
+        notes="Highest affinity but lowest specificity; more non-specific binding",
+    ),
+    "zinc_charging": ReagentProfile(
+        name="Zinc(II) charging (Zn-NTA/IDA)",
+        cas="7446-20-0", reagent_identity="Zinc(II) sulfate",
+        installed_ligand="Zn2+-loaded chelator",
+        functional_mode="metal_charging", reaction_type="metal_charging",
+        chemistry_class="metal_chelation",
+        target_acs=ACSSiteType.EPOXIDE, product_acs=None,
+        k_forward=0.0, E_a=0.0, stoichiometry=1.0,
+        metal_ion="Zn2+", metal_association_constant=1e10,
+        ph_optimum=7.0, ph_min=5.0, ph_max=8.0,
+        temperature_default=298.15, time_default=1800.0,
+        profile_role="native", m3_support_level="mapped_estimated",
+        confidence_tier="semi_quantitative",
+        calibration_source="Estimated; Zn2+ used for some phosphopeptide IMAC",
+    ),
+    "edta_stripping": ReagentProfile(
+        name="EDTA metal stripping",
+        cas="60-00-4", reagent_identity="EDTA disodium salt",
+        installed_ligand="Metal-free chelator",
+        functional_mode="metal_charging", reaction_type="metal_stripping",
+        chemistry_class="metal_chelation",
+        target_acs=ACSSiteType.EPOXIDE, product_acs=None,
+        k_forward=0.0, E_a=0.0, stoichiometry=1.0,
+        ph_optimum=7.5, ph_min=6.0, ph_max=9.0,
+        temperature_default=298.15, time_default=1800.0,
+        profile_role="native", m3_support_level="not_mapped",
+        confidence_tier="semi_quantitative",
+        calibration_source="Standard EDTA stripping; 50 mM strips >99% Ni/Co/Cu",
+        notes="Strips loaded metal for regeneration or metal switching",
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v5.9.2 — Protein Pretreatment (2 profiles)
+    # ═══════════════════════════════════════════════════════════════════
+
+    "tcep_reduction": ReagentProfile(
+        name="TCEP disulfide reduction",
+        cas="51805-45-9", reagent_identity="TCEP-HCl",
+        installed_ligand="Reduced protein (free -SH)",
+        functional_mode="protein_pretreatment", reaction_type="protein_pretreatment",
+        chemistry_class="reduction",
+        target_acs=ACSSiteType.MALEIMIDE, product_acs=None,
+        k_forward=0.01, E_a=20000.0, stoichiometry=1.0,
+        ph_optimum=7.0, ph_min=6.0, ph_max=8.0,
+        temperature_default=298.15, time_default=1800.0,
+        reduction_efficiency=0.95,
+        activity_retention=0.95,
+        profile_role="native", m3_support_level="not_mapped",
+        confidence_tier="semi_quantitative",
+        calibration_source="Hermanson Bioconjugate Techniques; TCEP is maleimide-compatible",
+        notes="Preferred over DTT; does not interfere with maleimide coupling",
+    ),
+    "dtt_reduction": ReagentProfile(
+        name="DTT disulfide reduction",
+        cas="3483-12-3", reagent_identity="Dithiothreitol",
+        installed_ligand="Reduced protein (free -SH)",
+        functional_mode="protein_pretreatment", reaction_type="protein_pretreatment",
+        chemistry_class="reduction",
+        target_acs=ACSSiteType.MALEIMIDE, product_acs=None,
+        k_forward=0.005, E_a=20000.0, stoichiometry=1.0,
+        ph_optimum=7.5, ph_min=6.5, ph_max=8.5,
+        temperature_default=298.15, time_default=1800.0,
+        reduction_efficiency=0.90,
+        activity_retention=0.90,
+        buffer_incompatibilities="maleimide,free_thiols_in_coupling_buffer",
+        profile_role="native", m3_support_level="not_mapped",
+        confidence_tier="semi_quantitative",
+        calibration_source="Standard DTT reduction; must remove excess before maleimide",
+        hazard_class="irritant",
+        notes="Must remove DTT before maleimide coupling (desalt or dialysis)",
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v5.9.3 — EDC/NHS Chemistry (2 profiles)
+    # ═══════════════════════════════════════════════════════════════════
+
+    "aha_carboxyl_spacer_arm": ReagentProfile(
+        name="AHA spacer arm (EPOXIDE -> CARBOXYL_DISTAL)",
+        cas="60-32-2",
+        reagent_identity="6-Aminohexanoic acid",
+        installed_ligand="AHA spacer (distal -COOH)",
+        functional_mode="spacer",
+        reaction_type="spacer_arm",
+        chemistry_class="epoxide_amine_spacer",
+        target_acs=ACSSiteType.EPOXIDE,
+        product_acs=ACSSiteType.CARBOXYL_DISTAL,
+        k_forward=3e-5,
+        E_a=45000.0,
+        stoichiometry=1.0,
+        ph_optimum=10.5,
+        ph_min=9.0, ph_max=12.0,
+        temperature_default=298.15,
+        time_default=14400.0,
+        spacer_length_angstrom=10.0,
+        distal_group_yield=0.85,
+        profile_role="spacer_intermediate",
+        m3_support_level="not_mapped",
+        confidence_tier="semi_quantitative",
+        calibration_source="NHS-Sepharose HP standard; AHA provides -COOH distal",
+        notes="Creates carboxyl terminus for EDC/NHS activation pathway",
+    ),
+    "edc_nhs_activation": ReagentProfile(
+        name="EDC/NHS carboxyl activation",
+        cas="25952-53-8",
+        reagent_identity="EDC (1-Ethyl-3-(3-dimethylaminopropyl)carbodiimide) + NHS",
+        installed_ligand="NHS ester (amine-reactive)",
+        functional_mode="activator",
+        reaction_type="activation",
+        chemistry_class="edc_nhs",
+        target_acs=ACSSiteType.CARBOXYL_DISTAL,
+        product_acs=ACSSiteType.NHS_ESTER,
+        k_forward=0.1,
+        E_a=30000.0,
+        stoichiometry=1.0,
+        hydrolysis_rate=1e-4,
+        ph_optimum=5.5,
+        ph_min=4.5, ph_max=6.5,
+        temperature_default=298.15,
+        time_default=900.0,
+        buffer_incompatibilities="Tris,glycine,primary_amine_buffers",
+        profile_role="activated",
+        m3_support_level="not_mapped",
+        confidence_tier="ranking_only",
+        calibration_source="Pseudo-single-step EDC/NHS; ranking_only (F5)",
+        notes="Two-step mechanism simplified to single activation. NHS ester half-life ~2h at pH 7.5",
+    ),
+
+    # ═══════════════════════════════════════════════════════════════════
+    # v5.9.4 — Washing (1 profile)
+    # ═══════════════════════════════════════════════════════════════════
+
+    "wash_buffer": ReagentProfile(
+        name="Wash buffer (advisory residual removal)",
+        cas="N/A",
+        reagent_identity="Phosphate buffer pH 7.4",
+        installed_ligand="N/A",
+        functional_mode="washing",
+        reaction_type="washing",
+        chemistry_class="diffusion_out",
+        target_acs=ACSSiteType.EPOXIDE, product_acs=None,
+        k_forward=0.0, E_a=0.0, stoichiometry=1.0,
+        ph_optimum=7.4,
+        temperature_default=298.15,
+        time_default=3600.0,
+        regulatory_limit_ppm=1.0,
+        profile_role="native",
+        m3_support_level="not_mapped",
+        confidence_tier="semi_quantitative",
+        calibration_source="Advisory diffusion-out screening model",
+        notes="Advisory only; does not claim GMP pass/fail without validated residual assays",
     ),
 }

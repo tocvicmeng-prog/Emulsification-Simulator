@@ -81,6 +81,9 @@ class ModificationStepType(Enum):
     PROTEIN_COUPLING = "protein_coupling"
     QUENCHING = "quenching"
     SPACER_ARM = "spacer_arm"  # v5.8: consumes activated site, creates intermediate ACS
+    METAL_CHARGING = "metal_charging"      # v5.9.1: loads metal onto IMAC chelator
+    PROTEIN_PRETREATMENT = "protein_pretreatment"  # v5.9.2: reduces protein disulfides
+    WASHING = "washing"                    # v5.9.4: removes residual reagents
 
 
 # ─── Data classes ──────────────────────────────────────────────────────
@@ -171,6 +174,9 @@ def solve_modification_step(
         ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
         ModificationStepType.QUENCHING: {"blocking"},
         ModificationStepType.SPACER_ARM: {"spacer_arm", "heterobifunctional"},
+        ModificationStepType.METAL_CHARGING: {"metal_charging", "metal_stripping"},
+        ModificationStepType.PROTEIN_PRETREATMENT: {"protein_pretreatment"},
+        ModificationStepType.WASHING: {"washing"},
     }
     allowed = _STEP_ALLOWED_RTYPES.get(step.step_type, set())
     if allowed and reagent_profile.reaction_type not in allowed:
@@ -249,11 +255,22 @@ def solve_modification_step(
             step, acs_state, target_profile,
             reagent_profile, surface_model, V_bead,
         )
+    elif step.step_type == ModificationStepType.METAL_CHARGING:
+        result = _solve_metal_charging_step(
+            step, acs_state, target_profile, reagent_profile,
+        )
+    elif step.step_type == ModificationStepType.PROTEIN_PRETREATMENT:
+        result = _solve_protein_pretreatment_step(
+            step, reagent_profile,
+        )
+    elif step.step_type == ModificationStepType.WASHING:
+        result = _solve_washing_step(
+            step, acs_state, surface_model, V_bead,
+        )
     else:
         raise KeyError(
             f"Step type {step.step_type.value} not implemented. "
-            f"Supported: SECONDARY_CROSSLINKING, ACTIVATION, LIGAND_COUPLING, "
-            f"PROTEIN_COUPLING, QUENCHING, SPACER_ARM."
+            f"Supported: all 9 ModificationStepType values."
         )
 
     # --- Snapshot after ---
@@ -785,6 +802,138 @@ def _solve_spacer_arm_step(
     return ModificationResult(
         step=step, acs_before={}, acs_after={},
         conversion=conversion, delta_G_DN=0.0, notes=notes,
+    )
+
+
+# ─── Workflow 7: Metal Charging (v5.9.1) ──────────────���─────────────
+
+def _solve_metal_charging_step(
+    step: ModificationStep,
+    acs_state: dict[ACSSiteType, ACSProfile],
+    target_profile: ACSProfile,
+    reagent_profile: ReagentProfile,
+) -> ModificationResult:
+    """Load or strip metal ions on IMAC chelator sites.
+
+    Langmuir equilibrium: fraction = K * C / (1 + K * C)
+    Does NOT consume ACS sites. Updates metal_loaded_fraction on target profile.
+    For stripping (EDTA): sets metal_loaded_fraction to ~0.
+    """
+    K_assoc = getattr(reagent_profile, 'metal_association_constant', 1e10)
+    C_metal = step.reagent_concentration  # [mol/m3]
+
+    if reagent_profile.reaction_type == "metal_stripping":
+        # EDTA strips metal: fraction -> ~0
+        # ASSUMPTION: 50 mM EDTA at pH 7 strips >99% of Ni/Co/Cu
+        stripping_eff = 0.99
+        old_frac = target_profile.metal_loaded_fraction
+        target_profile.metal_loaded_fraction = old_frac * (1.0 - stripping_eff)
+        step.conversion = stripping_eff
+        notes = f"Metal stripping: {old_frac:.3f} -> {target_profile.metal_loaded_fraction:.4f}"
+    else:
+        # Langmuir equilibrium loading
+        if K_assoc > 0 and C_metal > 0:
+            frac = K_assoc * C_metal / (1.0 + K_assoc * C_metal)
+        else:
+            frac = 0.0
+        target_profile.metal_loaded_fraction = min(frac, 1.0)
+        step.conversion = frac
+        notes = (
+            f"Metal charging '{step.reagent_key}': "
+            f"K={K_assoc:.1e}, C={C_metal:.1f} mol/m3, "
+            f"fraction={frac:.4f}"
+        )
+
+    logger.info(notes)
+    return ModificationResult(
+        step=step, acs_before={}, acs_after={},
+        conversion=step.conversion, delta_G_DN=0.0, notes=notes,
+    )
+
+
+# ─── Workflow 8: Protein Pretreatment (v5.9.2) ──────────────────────
+
+def _solve_protein_pretreatment_step(
+    step: ModificationStep,
+    reagent_profile: ReagentProfile,
+) -> ModificationResult:
+    """Reduce protein disulfides to expose free thiols for maleimide coupling.
+
+    Does NOT modify ACS state. Returns a ModificationResult with pretreatment
+    info in notes. The orchestrator stores the result for downstream coupling.
+
+    Model: free_thiol_fraction = efficiency * (1 - exp(-k * t))
+    """
+    k_red = reagent_profile.k_forward  # reduction rate [1/s]
+    t = step.time
+    efficiency = getattr(reagent_profile, 'activity_retention', 0.95)
+    # ASSUMPTION: activity_retention on pretreatment profile = reduction efficiency
+
+    if k_red > 0 and t > 0:
+        frac = efficiency * (1.0 - math.exp(-k_red * t))
+    else:
+        frac = 0.0
+
+    step.conversion = frac
+
+    # Check buffer incompatibilities
+    _incompat = getattr(reagent_profile, 'buffer_incompatibilities', '')
+    _warns = []
+    if _incompat and "maleimide" in _incompat:
+        _warns.append(f"WARNING: {step.reagent_key} is incompatible with maleimide. "
+                      "Remove excess reductant before maleimide-thiol coupling.")
+
+    notes = (
+        f"Protein pretreatment '{step.reagent_key}': "
+        f"free_thiol_fraction={frac:.3f}, efficiency={efficiency:.2f}"
+    )
+    if _warns:
+        notes += " | " + "; ".join(_warns)
+
+    logger.info(notes)
+    return ModificationResult(
+        step=step, acs_before={}, acs_after={},
+        conversion=frac, delta_G_DN=0.0, notes=notes,
+    )
+
+
+# ─── Workflow 9: Washing (v5.9.4) ───────────────────────────────────
+
+def _solve_washing_step(
+    step: ModificationStep,
+    acs_state: dict[ACSSiteType, ACSProfile],
+    surface_model: AccessibleSurfaceModel,
+    V_bead: float,
+) -> ModificationResult:
+    """Advisory washing model — simple diffusion-out from pore volume.
+
+    C_residual = C_initial * exp(-D_eff * t / (R^2 / pi^2))
+    Does NOT consume ACS sites. Reports residual concentration for screening.
+    """
+    R = surface_model.bead_radius
+    D_eff = 1e-10  # ASSUMPTION: default diffusivity in gel [m2/s]
+    t_wash = step.time
+    C_initial = step.reagent_concentration  # [mol/m3] of wash buffer (proxy for volume)
+
+    if R > 0 and t_wash > 0:
+        # Characteristic diffusion time: R^2 / (pi^2 * D_eff)
+        tau = R ** 2 / (math.pi ** 2 * D_eff)
+        fraction_removed = 1.0 - math.exp(-t_wash / tau)
+    else:
+        fraction_removed = 0.0
+
+    step.conversion = fraction_removed
+
+    notes = (
+        f"Washing: fraction_removed={fraction_removed:.4f}, "
+        f"tau_diff={tau:.0f}s, t_wash={t_wash:.0f}s. "
+        f"Advisory screening_only."
+    )
+    logger.info(notes)
+
+    return ModificationResult(
+        step=step, acs_before={}, acs_after={},
+        conversion=fraction_removed, delta_G_DN=0.0, notes=notes,
     )
 
 

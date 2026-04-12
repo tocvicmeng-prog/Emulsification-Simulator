@@ -31,6 +31,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ─── ProteinPretreatmentState (v5.9.2) ───────────────────────────────
+
+@dataclass
+class ProteinPretreatmentState:
+    """State of protein after disulfide reduction pretreatment."""
+    protein_key: str = ""
+    free_thiol_fraction: float = 0.0
+    activity_after_reduction: float = 1.0
+    reductant_used: str = ""
+    excess_reductant_removed: bool = False
+    time_since_reduction_s: float = 0.0
+    warnings: list[str] = field(default_factory=list)
+
+
 # ─── FunctionalMicrosphere ────────────────────────────────────────────
 
 @dataclass
@@ -55,6 +69,10 @@ class FunctionalMicrosphere:
     modification_history: list[ModificationResult] = field(default_factory=list)
     G_DN_updated: float = 0.0
     E_star_updated: float = 0.0
+    # v5.9.2: Protein pretreatment state (set by PROTEIN_PRETREATMENT steps)
+    pretreatment_state: ProteinPretreatmentState = field(default_factory=ProteinPretreatmentState)
+    # v5.9.4: Residual reagent concentrations after washing
+    residual_concentrations: dict = field(default_factory=dict)
 
     def validate(self) -> list[str]:
         """Validate ACS conservation across all profiles.
@@ -469,6 +487,9 @@ _STEP_ALLOWED_REACTION_TYPES: dict[ModificationStepType, set[str]] = {
     ModificationStepType.PROTEIN_COUPLING: {"protein_coupling"},
     ModificationStepType.QUENCHING: {"blocking"},
     ModificationStepType.SPACER_ARM: {"spacer_arm", "heterobifunctional"},
+    ModificationStepType.METAL_CHARGING: {"metal_charging", "metal_stripping"},
+    ModificationStepType.PROTEIN_PRETREATMENT: {"protein_pretreatment"},
+    ModificationStepType.WASHING: {"washing"},
 }
 
 
