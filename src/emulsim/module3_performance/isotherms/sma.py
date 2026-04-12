@@ -63,6 +63,16 @@ class SMAIsotherm:
         """Number of protein components (excludes salt)."""
         return len(self.z)
 
+    @property
+    def gradient_sensitive(self) -> bool:
+        """SMA equilibrium depends on salt concentration (gradient-sensitive)."""
+        return True
+
+    @property
+    def gradient_field(self) -> str:
+        """ProcessState field that modulates this isotherm."""
+        return "salt_concentration"
+
     def _q_salt_from_loading(self, q_proteins: np.ndarray) -> float:
         """Compute q_salt from the ionic capacity constraint.
 

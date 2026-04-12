@@ -379,6 +379,8 @@ def _build_gradient_lrm_rhs(
     gradient: GradientProgram,
     total_time: float,
     feed_duration: float,
+    equilibrium_adapter=None,
+    gradient_field: str = "salt_concentration",
 ):
     """Build the ODE RHS for multi-component gradient LRM.
 
@@ -387,9 +389,15 @@ def _build_gradient_lrm_rhs(
         y[n_comp*n_z: 2*n_comp*n_z]        = Cp   (pore, n_comp x n_z)
         y[2*n_comp*n_z: 3*n_comp*n_z]      = q    (bound, n_comp x n_z)
 
+    v6.0 H6: When equilibrium_adapter is provided, it is updated with the
+    gradient value at each time step to enable time-varying equilibrium.
+
     Args:
         feed_duration: Duration of protein loading phase [s].  After this time
             the inlet protein concentration is set to zero (elution/wash phase).
+        equilibrium_adapter: Optional EquilibriumAdapter wrapping a gradient-sensitive
+            isotherm. When provided, used instead of isotherm for equilibrium_loading().
+        gradient_field: ProcessState field to update from gradient value.
     """
     nc = n_comp
     nz = n_z
@@ -397,6 +405,9 @@ def _build_gradient_lrm_rhs(
 
     # Precompute mass transfer coefficients
     mt_coeff = (3.0 / R_p) * k_f  # shape (n_comp,)
+
+    # v6.0 H6: Determine equilibrium dispatch mode
+    _use_adapter = equilibrium_adapter is not None
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
         # Reshape state blocks: each (nc, nz)
@@ -408,11 +419,8 @@ def _build_gradient_lrm_rhs(
         np.maximum(Cp, 0.0, out=Cp)
         np.maximum(q,  0.0, out=q)
 
-        # Gradient value at current time (e.g., salt for elution).
-        # For SMA/IMAC isotherms this would be passed into equilibrium_loading.
-        # For competitive Langmuir (gradient_sensitive=False) it does not
-        # modify K_L but is correctly used below for feed phase switching.
-        _ = gradient.value_at_time(t)  # reserved for SMA / pH-dependent isotherms
+        # Gradient value at current time (salt, pH, imidazole, sugar, etc.)
+        grad_val = gradient.value_at_time(t)
 
         # Feed phase switching: protein is present only during the load phase.
         # After feed_duration the inlet switches to protein-free buffer so that
@@ -424,7 +432,13 @@ def _build_gradient_lrm_rhs(
             C_in = np.zeros(nc)    # elution/wash phase: no protein
 
         # Isotherm: q_eq for all cells, shape (nc, nz)
-        q_eq = isotherm.equilibrium_loading(Cp)  # (nc, nz)
+        # v6.0 H6: When adapter is present, update process_state with gradient
+        # and use adapter for equilibrium dispatch (SMA, HIC, IMAC, lectin, pH).
+        if _use_adapter:
+            equilibrium_adapter._state[gradient_field] = grad_val
+            q_eq = equilibrium_adapter.equilibrium_loading(Cp)
+        else:
+            q_eq = isotherm.equilibrium_loading(Cp)  # (nc, nz)
 
         dCdt  = np.zeros((nc, nz))
         dCpdt = np.zeros((nc, nz))
@@ -475,6 +489,8 @@ def run_gradient_elution(
     rho: float = 1000.0,
     rtol: float = 1e-5,
     atol: float = 1e-8,
+    process_state=None,
+    gradient_field: str | None = None,
 ) -> GradientElutionResult:
     """Simulate multi-component gradient elution chromatography.
 
@@ -505,6 +521,14 @@ def run_gradient_elution(
         rho: Fluid density [kg/m^3].
         rtol: ODE solver relative tolerance.
         atol: ODE solver absolute tolerance.
+        process_state: Optional ProcessState or dict with initial conditions
+            for gradient-sensitive isotherms (SMA, HIC, IMAC, ProteinA, lectin).
+            When provided with a gradient-sensitive isotherm, an EquilibriumAdapter
+            is created and updated at each time step.
+        gradient_field: ProcessState field to update from gradient value.
+            Auto-detected from isotherm.gradient_field if not specified.
+            Examples: "salt_concentration" (IEX/HIC), "imidazole" (IMAC),
+            "ph" (Protein A), "sugar_competitor" (lectin).
 
     Returns:
         GradientElutionResult with outlet profiles, peak table, metrics, and
@@ -537,10 +561,28 @@ def run_gradient_elution(
             feed_duration = total_time / 3.0
 
     # Detect whether the isotherm equilibrium is sensitive to the gradient
-    # (e.g. SMA uses salt, IMAC uses pH).  Competitive Langmuir is not.
+    # (e.g. SMA uses salt, IMAC uses imidazole, HIC uses salt, ProteinA uses pH).
+    # Competitive Langmuir is not gradient-sensitive.
     gradient_affects_binding: bool = bool(
         getattr(isotherm, "gradient_sensitive", False)
     )
+
+    # v6.0 H6: Build EquilibriumAdapter when isotherm is gradient-sensitive
+    _adapter = None
+    _grad_field = gradient_field
+    if gradient_affects_binding:
+        from .isotherms.adapter import EquilibriumAdapter
+        _adapter = EquilibriumAdapter(isotherm, process_state)
+        # Auto-detect gradient_field from isotherm if not explicitly provided
+        if _grad_field is None:
+            _grad_field = getattr(isotherm, "gradient_field", "salt_concentration")
+        logger.info(
+            "Gradient-aware elution: %s, field=%s",
+            type(isotherm).__name__, _grad_field,
+        )
+    else:
+        if _grad_field is None:
+            _grad_field = "salt_concentration"
 
     if isotherm.n_components != n_comp:
         raise ValueError(
@@ -574,7 +616,7 @@ def run_gradient_elution(
     dz = L / n_z
     z = np.linspace(dz / 2.0, L - dz / 2.0, n_z)
 
-    # ── Build RHS ──
+    # ── Build RHS (v6.0 H6: gradient-aware when adapter available) ──
     rhs = _build_gradient_lrm_rhs(
         n_z=n_z,
         n_comp=n_comp,
@@ -591,6 +633,8 @@ def run_gradient_elution(
         gradient=gradient,
         total_time=total_time,
         feed_duration=feed_duration,
+        equilibrium_adapter=_adapter,
+        gradient_field=_grad_field,
     )
 
     # ── Initial conditions: column empty ──

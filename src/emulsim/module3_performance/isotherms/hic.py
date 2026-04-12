@@ -40,6 +40,16 @@ class HICIsotherm:
     m_salt: float = 0.005   # ASSUMPTION: placeholder; protein and salt dependent
     salt_type: str = "ammonium_sulfate"
 
+    @property
+    def gradient_sensitive(self) -> bool:
+        """HIC equilibrium depends on salt concentration (gradient-sensitive)."""
+        return True
+
+    @property
+    def gradient_field(self) -> str:
+        """ProcessState field that modulates this isotherm."""
+        return "salt_concentration"
+
     def equilibrium_loading(
         self,
         C: float | np.ndarray,

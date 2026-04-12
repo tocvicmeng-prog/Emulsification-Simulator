@@ -46,7 +46,9 @@ class EquilibriumAdapter:
             return self._isotherm.equilibrium_loading(C_arr, salt)
         elif _cls_name == "IMACCompetitionIsotherm":
             imidazole = self._state.get("imidazole", 0.0)
-            return self._isotherm.equilibrium_loading(C, imidazole)
+            # IMAC returns (q_protein, q_imidazole) tuple; LRM only needs q_protein
+            q_protein, _q_imidazole = self._isotherm.equilibrium_loading(C, imidazole)
+            return q_protein
         elif _cls_name == "HICIsotherm":
             salt = self._state.get("salt_concentration", 0.0)
             return self._isotherm.equilibrium_loading(C, salt)
@@ -55,6 +57,15 @@ class EquilibriumAdapter:
             return self._isotherm.equilibrium_loading(C, competitor)
         else:
             return self._isotherm.equilibrium_loading(C)
+
+    def update_process_state(self, field: str, value: float) -> None:
+        """Update a single process_state field (v6.0 H6 gradient support).
+
+        Args:
+            field: ProcessState field name (e.g., "salt_concentration", "imidazole").
+            value: New value for the field.
+        """
+        self._state[field] = value
 
     @property
     def q_max(self):
@@ -208,8 +219,8 @@ def select_isotherm_from_fmc(fmc, process_state=None):
         return LangmuirIsotherm(q_max=q_max, K_L=1000.0)
 
 
-# TODO v6.0-beta H6: Gradient-dependent equilibrium
-# Current gradient code passes a scalar GradientProgram value but does not
-# propagate it into the equilibrium adapter's process_state during LRM time
-# integration. This requires extending solve_lrm() to accept a time-varying
-# ProcessState callback. Planned for v6.0-beta (doc 33 Section 5.1).
+# v6.0 H6: Gradient-dependent equilibrium — IMPLEMENTED
+# solve_lrm() now accepts optional gradient_program + equilibrium_adapter params.
+# When provided, _build_rhs() updates adapter._state[gradient_field] at each
+# time step with gradient_program.value_at_time(t), enabling time-varying
+# equilibrium for SMA, HIC, IMAC, and lectin isotherms during gradient elution.

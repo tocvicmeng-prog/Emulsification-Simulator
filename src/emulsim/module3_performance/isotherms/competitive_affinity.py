@@ -43,6 +43,16 @@ class CompetitiveAffinityIsotherm:
     K_competitor: float = 1e3
     competitor_name: str = "competitor"
 
+    @property
+    def gradient_sensitive(self) -> bool:
+        """Lectin equilibrium depends on competitor (sugar) concentration."""
+        return True
+
+    @property
+    def gradient_field(self) -> str:
+        """ProcessState field that modulates this isotherm."""
+        return "sugar_competitor"
+
     def equilibrium_loading(
         self,
         C_protein: float | np.ndarray,

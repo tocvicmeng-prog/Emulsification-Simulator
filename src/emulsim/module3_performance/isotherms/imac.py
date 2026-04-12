@@ -39,6 +39,16 @@ class IMACCompetitionIsotherm:
     K_protein: float = 1e4     # [m^3/mol]  (high affinity His-tag)
     K_imidazole: float = 10.0  # [m^3/mol]  (weak competitor)
 
+    @property
+    def gradient_sensitive(self) -> bool:
+        """IMAC equilibrium depends on imidazole concentration (gradient-sensitive)."""
+        return True
+
+    @property
+    def gradient_field(self) -> str:
+        """ProcessState field that modulates this isotherm."""
+        return "imidazole"
+
     def equilibrium_loading(
         self,
         C_protein: float | np.ndarray,

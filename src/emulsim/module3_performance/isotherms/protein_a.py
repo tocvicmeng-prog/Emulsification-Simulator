@@ -44,6 +44,16 @@ class ProteinAIsotherm:
     pH_transition: float = 3.5   # pH at half-maximal K_a
     steepness: float = 5.0       # sigmoid steepness [1/pH unit]
 
+    @property
+    def gradient_sensitive(self) -> bool:
+        """Protein A equilibrium depends on pH (gradient-sensitive)."""
+        return True
+
+    @property
+    def gradient_field(self) -> str:
+        """ProcessState field that modulates this isotherm."""
+        return "ph"
+
     def K_a(self, pH: float) -> float:
         """Effective affinity constant at a given pH.
 

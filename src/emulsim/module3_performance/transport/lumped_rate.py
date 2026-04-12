@@ -33,6 +33,13 @@ from scipy.integrate import solve_ivp
 from ..hydrodynamics import ColumnGeometry
 from ..isotherms.langmuir import LangmuirIsotherm
 
+# v6.0: Optional imports for gradient-aware LRM (H6)
+# These are TYPE_CHECKING-only to avoid circular imports; runtime uses duck typing.
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from ..gradient import GradientProgram
+    from ..isotherms.adapter import EquilibriumAdapter
+
 logger = logging.getLogger(__name__)
 
 
@@ -166,13 +173,30 @@ def _build_rhs(
     isotherm: LangmuirIsotherm,
     C_feed: float,
     feed_duration: float,
+    gradient_program=None,
+    equilibrium_adapter=None,
+    gradient_field: str = "salt_concentration",
 ):
     """Build the RHS function for solve_ivp.
 
     State vector layout: y = [C_0..C_{Nz-1}, Cp_0..Cp_{Nz-1}, q_0..q_{Nz-1}]
     Total size: 3 * N_z.
+
+    v6.0 H6: When gradient_program and equilibrium_adapter are provided,
+    the adapter's process_state is updated at each time step with the
+    gradient value, enabling time-varying equilibrium (e.g., salt gradient
+    affecting SMA/HIC/IMAC binding during elution).
+
+    Args:
+        gradient_program: Optional GradientProgram with value_at_time(t).
+        equilibrium_adapter: Optional EquilibriumAdapter carrying process_state.
+            When provided, used instead of isotherm for equilibrium_loading().
+        gradient_field: ProcessState field to update from gradient value.
+            Default "salt_concentration" for IEX/HIC gradients.
     """
     mass_transfer_coeff = (3.0 / R_p) * k_f  # [1/s] * [1/m] -> combined
+    # Determine which equilibrium function to call
+    _use_adapter = gradient_program is not None and equilibrium_adapter is not None
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
         # Unpack state
@@ -207,8 +231,14 @@ def _build_rhs(
         # Outlet: zero-gradient => C[Nz] = C[Nz-1]
         d2Cdz2[-1] = (C[-1] - 2.0 * C[-1] + C[-2]) / dz ** 2  # = (C[-2] - C[-1]) / dz^2
 
-        # ── Isotherm ──
-        q_eq = isotherm.equilibrium_loading(Cp)
+        # ── Isotherm (v6.0 H6: gradient-aware) ──
+        if _use_adapter:
+            # Update the adapter's process_state with current gradient value
+            grad_val = gradient_program.value_at_time(t)
+            equilibrium_adapter._state[gradient_field] = grad_val
+            q_eq = equilibrium_adapter.equilibrium_loading(Cp)
+        else:
+            q_eq = isotherm.equilibrium_loading(Cp)
 
         # ── Kinetics ──
         dqdt = k_ads * (q_eq - q)
@@ -242,6 +272,9 @@ def solve_lrm(
     rho: float = 1000.0,
     rtol: float = 1e-6,
     atol: float = 1e-9,
+    gradient_program: GradientProgram | None = None,
+    equilibrium_adapter: EquilibriumAdapter | None = None,
+    gradient_field: str = "salt_concentration",
 ) -> LRMResult:
     """Solve the Lumped Rate Model for a single-component breakthrough.
 
@@ -259,6 +292,15 @@ def solve_lrm(
         rho: Fluid density [kg/m^3].
         rtol: Relative tolerance for ODE solver.
         atol: Absolute tolerance for ODE solver.
+        gradient_program: Optional GradientProgram for time-varying conditions.
+            When provided with equilibrium_adapter, the adapter's process_state
+            is updated at each time step so equilibrium changes during elution.
+        equilibrium_adapter: Optional EquilibriumAdapter wrapping a multi-parameter
+            isotherm (SMA, HIC, IMAC, etc.). Used instead of isotherm when both
+            gradient_program and equilibrium_adapter are provided.
+        gradient_field: ProcessState field to update from gradient value.
+            Default "salt_concentration" for IEX/HIC. Use "imidazole" for IMAC,
+            "ph" for pH gradients, etc.
 
     Returns:
         LRMResult with breakthrough curves and mass balance.
@@ -293,7 +335,7 @@ def solve_lrm(
         u, k_f, D_ax, n_z, dz,
     )
 
-    # ── Build RHS ──
+    # ── Build RHS (v6.0 H6: gradient-aware when adapter + program provided) ──
     rhs = _build_rhs(
         n_z=n_z,
         dz=dz,
@@ -307,6 +349,9 @@ def solve_lrm(
         isotherm=isotherm,
         C_feed=C_feed,
         feed_duration=feed_duration,
+        gradient_program=gradient_program,
+        equilibrium_adapter=equilibrium_adapter,
+        gradient_field=gradient_field,
     )
 
     # ── Initial conditions: column empty ──
