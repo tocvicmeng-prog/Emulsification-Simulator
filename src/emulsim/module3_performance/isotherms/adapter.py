@@ -50,6 +50,9 @@ class EquilibriumAdapter:
         elif _cls_name == "HICIsotherm":
             salt = self._state.get("salt_concentration", 0.0)
             return self._isotherm.equilibrium_loading(C, salt)
+        elif _cls_name == "CompetitiveAffinityIsotherm":
+            competitor = self._state.get("sugar_competitor", 0.0)
+            return self._isotherm.equilibrium_loading(C, competitor)
         else:
             return self._isotherm.equilibrium_loading(C)
 
@@ -183,10 +186,21 @@ def select_isotherm_from_fmc(fmc, process_state=None):
         return LangmuirIsotherm(q_max=q_max, K_L=K_L)
 
     elif hint.startswith("lectin_"):
-        # Lectin - Langmuir placeholder, requires calibration
-        # TODO v6.0-rc: Replace with CompetitiveAffinityIsotherm when available
-        logger.warning("M3 routing: %s -> Langmuir placeholder (requires_user_calibration)", hint)
-        return LangmuirIsotherm(q_max=q_max, K_L=1e3)
+        # v6.0-rc: CompetitiveAffinityIsotherm for lectin elution
+        K_competitor = state.get("K_competitor", 0.0)
+        if K_competitor > 0:
+            from ..isotherms.competitive_affinity import CompetitiveAffinityIsotherm
+            K_protein = state.get("K_affinity", 1e5)
+            sugar = state.get("sugar_type", "sugar")
+            iso = CompetitiveAffinityIsotherm(
+                q_max=q_max, K_protein=K_protein,
+                K_competitor=K_competitor, competitor_name=sugar,
+            )
+            logger.info("M3 routing: %s -> CompetitiveAffinity (K_comp=%.0e)", hint, K_competitor)
+            return EquilibriumAdapter(iso, state)
+        else:
+            logger.warning("M3 routing: %s -> Langmuir (requires_user_calibration, no K_competitor)", hint)
+            return LangmuirIsotherm(q_max=q_max, K_L=1e3)
 
     else:
         # Default: generic Langmuir
