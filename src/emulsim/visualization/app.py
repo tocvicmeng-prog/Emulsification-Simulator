@@ -848,7 +848,7 @@ if _tab_m2 is not None:
             with st.expander(f"Step {i + 1}", expanded=(i == 0)):
                 step_type = st.selectbox(
                     "Chemistry",
-                    ["Secondary Crosslinking", "Hydroxyl Activation", "Ligand Coupling", "Protein Coupling", "Spacer Arm", "Quenching"],
+                    ["Secondary Crosslinking", "Hydroxyl Activation", "Ligand Coupling", "Protein Coupling", "Spacer Arm", "Metal Charging", "Protein Pretreatment", "Washing", "Quenching"],
                     key=f"m2_type_{i}",
                 )
                 if "Crosslinking" in step_type:
@@ -899,6 +899,23 @@ if _tab_m2 is not None:
                         "SM(PEG)4 (32 A, NHS-Maleimide)": "sm_peg4",
                         "SM(PEG)12 (60 A, NHS-Maleimide)": "sm_peg12",
                         "SM(PEG)24 (95 A, NHS-Maleimide)": "sm_peg24",
+                    }
+                elif step_type == "Metal Charging":
+                    _reagent_options = {
+                        "Nickel (Ni2+ for IMAC)": "nickel_charging",
+                        "Cobalt (Co2+ for IMAC)": "cobalt_charging",
+                        "Copper (Cu2+ for IMAC)": "copper_charging",
+                        "Zinc (Zn2+ for IMAC)": "zinc_charging",
+                        "EDTA Stripping": "edta_stripping",
+                    }
+                elif step_type == "Protein Pretreatment":
+                    _reagent_options = {
+                        "TCEP Reduction (maleimide-compatible)": "tcep_reduction",
+                        "DTT Reduction (requires removal)": "dtt_reduction",
+                    }
+                elif step_type == "Washing":
+                    _reagent_options = {
+                        "Wash Buffer (advisory)": "wash_buffer",
                     }
                 else:  # Quenching
                     _reagent_options = {
@@ -957,6 +974,9 @@ if _tab_m2 is not None:
                     "Ligand Coupling": (ModificationStepType.LIGAND_COUPLING, None),
                     "Protein Coupling": (ModificationStepType.PROTEIN_COUPLING, None),
                     "Spacer Arm": (ModificationStepType.SPACER_ARM, None),
+                    "Metal Charging": (ModificationStepType.METAL_CHARGING, None),
+                    "Protein Pretreatment": (ModificationStepType.PROTEIN_PRETREATMENT, None),
+                    "Washing": (ModificationStepType.WASHING, None),
                     "Quenching": (ModificationStepType.QUENCHING, None),
                 }
                 _step_type_enum, _default_target = _step_type_map[step_type]

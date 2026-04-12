@@ -132,6 +132,8 @@ def run_breakthrough(
     n_z: int = 50,
     D_molecular: float = 7e-11,
     k_ads: float = 100.0,
+    fmc=None,
+    process_state: dict | None = None,
 ) -> BreakthroughResult:
     """Run a single-component breakthrough simulation.
 
@@ -173,8 +175,12 @@ def run_breakthrough(
     for w in flow_warnings:
         logger.warning(w)
 
-    # ── Default isotherm ──
-    if isotherm is None:
+    # ── Isotherm selection (v5.9.5 H3: auto-route from FMC) ──
+    if isotherm is None and fmc is not None:
+        from .isotherms.adapter import select_isotherm_from_fmc
+        isotherm = select_isotherm_from_fmc(fmc, process_state)
+        logger.info("Auto-selected isotherm from FMC: %s", type(isotherm).__name__)
+    elif isotherm is None:
         isotherm = LangmuirIsotherm()
 
     # ── Pressure drop ──
