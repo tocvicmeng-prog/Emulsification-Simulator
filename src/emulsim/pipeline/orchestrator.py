@@ -14,6 +14,7 @@ from ..datatypes import (
     FullResult,
     M1ExportContract,
     MaterialProperties,
+    RunReport,
     SimulationParameters,
 )
 from ..trust import TrustAssessment, assess_trust
@@ -230,6 +231,22 @@ class PipelineOrchestrator:
         with open(run_dir / "summary.json", "w") as f:
             json.dump(summary, f, indent=2)
 
+        # Assemble RunReport (v6.1: model evidence provenance)
+        _manifests = [
+            r.model_manifest
+            for r in (emul_result, gel_result, xlink_result, mech_result)
+            if getattr(r, "model_manifest", None) is not None
+        ]
+        run_report = RunReport(
+            model_graph=_manifests,
+            trust_level=trust.level,
+            trust_warnings=list(trust.warnings),
+            trust_blockers=list(trust.blockers),
+            diagnostics={"timings": timings, "total_time_s": total},
+        )
+        run_report.min_evidence_tier = run_report.compute_min_tier().value
+        full_result.run_report = run_report
+
         return full_result
 
     def run_rpm_sweep(self, rpms: list[float],
@@ -345,7 +362,7 @@ def export_for_module2(result: FullResult,
 
     # ── Uncertainty notes (Node 0.3) ────────────────────────────────────
     notes = []
-    if gel.model_tier == "empirical_calibrated":
+    if gel.model_tier in ("empirical_calibrated", "empirical_uncalibrated"):
         notes.append("Pore size from empirical correlation (+/-30%)")
     if mech.model_used == "phenomenological":
         notes.append("Modulus from phenomenological DN model (ranking only)")

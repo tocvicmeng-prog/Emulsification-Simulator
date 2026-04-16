@@ -27,6 +27,8 @@ from scipy.integrate import solve_ivp
 from ..datatypes import (
     CrosslinkingResult,
     MaterialProperties,
+    ModelEvidenceTier,
+    ModelManifest,
     NetworkTypeMetadata,
     SimulationParameters,
 )
@@ -880,6 +882,23 @@ def solve_crosslinking(params: SimulationParameters,
                         is_true_second_network=True,
                         eta_coupling_recommended=xl.eta_coupling_recommended,
                     )
+                    rd_result.model_manifest = ModelManifest(
+                        model_name=f"L3.Crosslink.{xl.kinetics_model}",
+                        evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+                        assumptions=[f"solver_family=amine_covalent", f"kinetics={xl.kinetics_model}"],
+                        diagnostics={"thiele_modulus": Phi, "p_final": rd_result.p_final},
+                    )
+                    # v6.1: populate diagnostics for RD branch (Codex fix 2)
+                    rd_result.thiele_modulus = float(Phi)
+                    rd_result.regime = "diffusion_limited"
+                    NH2_rd = available_amine_concentration(
+                        params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+                    )
+                    if NH2_rd > 0:
+                        rd_result.stoichiometric_ceiling = min(
+                            2.0 * params.formulation.c_genipin / NH2_rd, 1.0,
+                        )
+                        rd_result.residual_reactive_groups = NH2_rd * (1.0 - rd_result.p_final)
                     return rd_result
             result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
             metadata = NetworkTypeMetadata(
@@ -962,4 +981,44 @@ def solve_crosslinking(params: SimulationParameters,
 
     # Attach per-chemistry network metadata to result
     result.network_metadata = metadata
+
+    # Attach model manifest for evidence provenance (v6.1)
+    if result.model_manifest is None:
+        result.model_manifest = ModelManifest(
+            model_name=f"L3.Crosslink.{xl.kinetics_model}",
+            evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            assumptions=[
+                f"solver_family={metadata.solver_family}",
+                f"kinetics={xl.kinetics_model}",
+                f"crosslinker={crosslinker_key}",
+            ],
+            diagnostics={"p_final": result.p_final},
+        )
+
+    # v6.1: populate solver diagnostics on the result
+    if R_droplet is not None and R_droplet > 0:
+        k_rate = arrhenius_rate_constant(T, xl.k_xlink_0, xl.E_a_xlink)
+        if xl.mechanism in _HYDROXYL_MECHANISMS:
+            reactive = available_hydroxyl_concentration(
+                params.formulation.c_agarose,
+            )
+        else:
+            reactive = available_amine_concentration(
+                params.formulation.c_chitosan, props.DDA, props.M_GlcN,
+            )
+        Phi = compute_thiele_modulus(R_droplet, k_rate, reactive)
+        result.thiele_modulus = float(Phi)
+        if Phi < 0.3:
+            result.regime = "reaction_limited"
+        elif Phi < 1.0:
+            result.regime = "borderline"
+        else:
+            result.regime = "diffusion_limited"
+        # Stoichiometric ceiling
+        c_xl = params.formulation.c_genipin  # crosslinker concentration [mol/m3]
+        if reactive > 0:
+            result.stoichiometric_ceiling = min(2.0 * c_xl / reactive, 1.0)
+        # Residual reactive groups
+        result.residual_reactive_groups = reactive * (1.0 - result.p_final)
+
     return result

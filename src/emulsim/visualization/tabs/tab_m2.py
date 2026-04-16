@@ -138,6 +138,12 @@ def render_tab_m2(tab_container, _smgr) -> None:
                 _cal = getattr(_profile, 'calibration_source', '')[:60]
                 _haz = getattr(_profile, 'hazard_class', '') or 'low'
                 st.caption(f"Confidence: {_conf} | Hazard: {_haz}")
+                st.markdown(
+                    f"[View mechanism & protocol](/reagent_detail"
+                    f"?key={_reagent_key}&source=reagent_profiles"
+                    f"&T={_profile.temperature_default}&t={_profile.time_default}"
+                    f"&c=10.0&pH={_profile.ph_optimum})",
+                )
 
                 # Spacer selectbox for coupling/protein steps
                 if step_type in ("Ligand Coupling", "Protein Coupling"):
@@ -162,6 +168,12 @@ def render_tab_m2(tab_container, _smgr) -> None:
                 _time_h = st.number_input("Time (h)", 0.25, 48.0,
                                            float(_profile.time_default / 3600), key=f"m2_time_{i}_{_wk}")
                 _ph = st.slider("pH", 3.0, 14.0, float(_profile.ph_optimum), step=0.5, key=f"m2_ph_{i}_{_wk}")
+                st.markdown(
+                    f"[View mechanism & protocol (with your parameters)](/reagent_detail"
+                    f"?key={_reagent_key}&source=reagent_profiles"
+                    f"&T={_temp_C + 273.15}&t={_time_h * 3600}"
+                    f"&c={_conc}&pH={_ph})",
+                )
 
                 if step_type == "Protein Coupling":
                     st.caption("Ranking only \u2014 activity retention and steric limits are illustrative defaults.")

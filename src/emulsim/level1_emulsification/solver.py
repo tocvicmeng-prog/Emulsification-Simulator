@@ -17,6 +17,8 @@ from scipy.integrate import solve_ivp
 from ..datatypes import (
     EmulsificationResult,
     MaterialProperties,
+    ModelEvidenceTier,
+    ModelManifest,
     SimulationParameters,
 )
 import logging
@@ -357,6 +359,12 @@ class PBESolver:
         n_d_history = y_combined.T / self.d_widths[np.newaxis, :]
         d_mode = self._compute_d_mode(N_final)
 
+        model_manifest = ModelManifest(
+            model_name="L1.PBE.FixedPivot.AlopaeusCT",
+            evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            assumptions=["Kolmogorov turbulence", "daughter-size beta distribution", "fixed-pivot discretization"],
+            diagnostics={"converged": converged, "n_extensions": n_extensions},
+        )
         return EmulsificationResult(
             d_bins=self.d_pivots.copy(),
             n_d=n_d_output,
@@ -368,6 +376,7 @@ class PBESolver:
             n_d_history=n_d_history,
             t_converged=t_converged,
             n_extensions=n_extensions,
+            model_manifest=model_manifest,
         )
 
     # ── Stirred-vessel solver ────────────────────────────────────────────
@@ -649,6 +658,12 @@ class PBESolver:
         n_d_output = N_final / self.d_widths
         n_d_history = y_combined_sv.T / self.d_widths[np.newaxis, :]
 
+        model_manifest = ModelManifest(
+            model_name="L1.PBE.FixedPivot.AlopaeusCT",
+            evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            assumptions=["Kolmogorov turbulence", "daughter-size beta distribution", "fixed-pivot discretization"],
+            diagnostics={"converged": converged, "n_extensions": n_extensions},
+        )
         return EmulsificationResult(
             d_bins=self.d_pivots.copy(),
             n_d=n_d_output,
@@ -660,6 +675,7 @@ class PBESolver:
             n_d_history=n_d_history,
             t_converged=t_converged,
             n_extensions=n_extensions,
+            model_manifest=model_manifest,
         )
 
     # ── Statistics helpers ────────────────────────────────────────────────

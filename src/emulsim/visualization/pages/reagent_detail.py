@@ -1,0 +1,183 @@
+"""Reagent detail page — reaction mechanism + tailored wet-lab protocol."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import streamlit as st
+
+_root = Path(__file__).resolve().parents[4]
+if str(_root / "src") not in sys.path:
+    sys.path.insert(0, str(_root / "src"))
+
+from emulsim.protocols.mechanism_data import get_mechanism
+from emulsim.protocols.protocol_generator import ProtocolGenerator
+
+st.set_page_config(page_title="Reagent Detail", page_icon="🧪", layout="wide")
+
+# ─── Query params ─────────────────────────────────────────────────────────────
+
+params = st.query_params
+reagent_key = params.get("key", "genipin")
+source = params.get("source", "crosslinkers")
+
+try:
+    T_K_qp = float(params.get("T", 310.15))
+except (TypeError, ValueError):
+    T_K_qp = 310.15
+
+try:
+    t_s_qp = float(params.get("t", 86400.0))
+except (TypeError, ValueError):
+    t_s_qp = 86400.0
+
+try:
+    c_mM_qp = float(params.get("c", 2.0))
+except (TypeError, ValueError):
+    c_mM_qp = 2.0
+
+try:
+    pH_qp = float(params.get("pH", 7.4))
+except (TypeError, ValueError):
+    pH_qp = 7.4
+
+try:
+    mechanism = get_mechanism(reagent_key)
+except Exception as exc:
+    st.error(f"Unknown reagent key '{reagent_key}': {exc}")
+    st.stop()
+
+st.title(f"🧪 {mechanism.display_name}")
+st.markdown("[← Back to Simulator](/)")
+
+with st.sidebar:
+    st.header("Reaction Parameters")
+    T_C = st.slider(
+        "Temperature (°C)", min_value=4, max_value=100,
+        value=int(round(T_K_qp - 273.15)),
+    )
+    time_h = st.number_input(
+        "Time (h)", min_value=0.25, max_value=72.0,
+        value=round(t_s_qp / 3600.0, 2), step=0.25,
+    )
+    conc = st.number_input(
+        "Concentration (mM)", min_value=0.1, max_value=500.0,
+        value=float(c_mM_qp), step=0.1,
+    )
+    ph = st.slider(
+        "pH", min_value=1.0, max_value=14.0,
+        value=float(pH_qp), step=0.5,
+    )
+    bead_vol = st.number_input(
+        "Bead Volume (mL)", min_value=0.1, max_value=10.0,
+        value=1.0, step=0.1,
+    )
+
+T_K = T_C + 273.15
+t_s = time_h * 3600.0
+
+try:
+    doc = ProtocolGenerator().generate(
+        reagent_key, T_K, t_s, conc, ph, bead_vol, source
+    )
+except Exception as exc:
+    st.error(f"Protocol generation failed: {exc}")
+    st.stop()
+
+# ── Section 1: Reaction Mechanism ────────────────────────────────────────────
+st.header("Reaction Mechanism")
+
+if mechanism.overall_equation_latex:
+    st.latex(mechanism.overall_equation_latex)
+
+st.caption(
+    f"Mechanism: {mechanism.mechanism_type} | "
+    f"Reversibility: {mechanism.reversibility}"
+)
+
+for step in mechanism.steps:
+    with st.expander(f"Step {step.step_number}: {step.description}", expanded=True):
+        if step.equation_latex:
+            st.latex(step.equation_latex)
+        col1, col2 = st.columns(2)
+        col1.markdown(f"**Bond formed:** {step.bond_formed}")
+        col2.markdown(f"**Bond broken:** {step.bond_broken}")
+        if step.conditions:
+            st.caption(f"Conditions: {step.conditions}")
+        if step.notes:
+            st.info(step.notes)
+
+if mechanism.byproducts:
+    st.markdown(f"**Byproducts:** {', '.join(mechanism.byproducts)}")
+
+if mechanism.critical_notes:
+    for note in mechanism.critical_notes:
+        st.warning(note)
+
+st.divider()
+
+# ── Section 2: Tailored Protocol ─────────────────────────────────────────────
+st.header("Tailored Wet-Lab Protocol")
+
+for warning in doc.safety_warnings:
+    st.error(warning)
+
+# Conditions summary
+st.subheader("Reaction Conditions")
+cc = st.columns(5)
+cc[0].metric("Temperature", f"{T_C} °C")
+cc[1].metric("Time", f"{time_h} h")
+cc[2].metric("Concentration", f"{conc} mM")
+cc[3].metric("pH", f"{ph}")
+cc[4].metric("Bead Volume", f"{bead_vol} mL")
+
+# Reagent table
+st.subheader("Reagents Required")
+if doc.reagent_table:
+    import pandas as pd
+    df = pd.DataFrame([
+        {
+            "Reagent": r.name,
+            "CAS": r.cas,
+            "Amount": r.amount,
+            "Grade": r.grade,
+            "Role": r.role,
+        }
+        for r in doc.reagent_table
+    ])
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+# Procedure
+st.subheader("Procedure")
+for step in doc.procedure_steps:
+    step_md = (
+        f"**{step.step_number}. {step.action}**  \n"
+        f"*Duration:* {step.duration} | *Temperature:* {step.temperature}"
+    )
+    if step.notes:
+        step_md += f"  \n*Note:* {step.notes}"
+    st.markdown(step_md)
+
+# QC targets
+st.subheader("QC Targets")
+for qc in doc.qc_targets:
+    st.markdown(f"- {qc}")
+
+st.divider()
+
+# ── Section 3: Export ────────────────────────────────────────────────────────
+st.header("Export")
+md_text = doc.to_markdown()
+st.download_button(
+    "📥 Download Protocol (Markdown)",
+    data=md_text,
+    file_name=f"protocol_{reagent_key}.md",
+    mime="text/markdown",
+)
+
+with st.expander("Preview Markdown"):
+    st.code(md_text, language="markdown")
+
+st.divider()
+st.caption("Generated by EmulSim Protocol Generator")

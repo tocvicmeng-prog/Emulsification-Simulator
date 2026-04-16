@@ -17,8 +17,26 @@ from emulsim.datatypes import (
     SimulationParameters, FormulationParameters,
     EmulsificationParameters, MixerGeometry, SolverSettings,
     VesselGeometry, StirrerGeometry, HeatingConfig, KernelConfig,
-    ModelMode,
+    ModelMode, ModelEvidenceTier,
 )
+
+
+def _evidence_badge(result_obj) -> str:
+    """Return a colored evidence tier badge string for UI display."""
+    manifest = getattr(result_obj, "model_manifest", None)
+    if manifest is None:
+        return ""
+    tier = manifest.evidence_tier
+    _COLORS = {
+        ModelEvidenceTier.VALIDATED_QUANTITATIVE: ":green[VALIDATED]",
+        ModelEvidenceTier.CALIBRATED_LOCAL: ":green[CALIBRATED]",
+        ModelEvidenceTier.SEMI_QUANTITATIVE: ":orange[SEMI-QUANTITATIVE]",
+        ModelEvidenceTier.QUALITATIVE_TREND: ":red[QUALITATIVE TREND]",
+        ModelEvidenceTier.UNSUPPORTED: ":red[UNSUPPORTED]",
+    }
+    badge = _COLORS.get(tier, str(tier.value))
+    model_name = manifest.model_name
+    return f"Evidence: {badge} | Model: `{model_name}`"
 from emulsim.properties.database import PropertyDatabase
 from emulsim.pipeline.orchestrator import PipelineOrchestrator
 from emulsim.trust import assess_trust
@@ -192,6 +210,12 @@ def render_tab_m1(
 
             c_genipin_mM = st.slider("Crosslinker Concentration (mM)", 0.5, 500.0, 10.0, step=0.5,
                                       key="m1_c_xl")
+            st.markdown(
+                f"[View mechanism & protocol](/reagent_detail"
+                f"?key={_xl_sel_key}&source=crosslinkers"
+                f"&T={xl.T_crosslink_default}&t={xl.t_crosslink_default}"
+                f"&c={c_genipin_mM}&pH=7.4)",
+            )
 
             _DDA = st.slider("DDA (degree of deacetylation)", 0.50, 0.99, 0.85, step=0.01,
                               key="m1_DDA",
@@ -522,6 +546,9 @@ def render_tab_m1(
                     st.write(f"Converged at t = {_t_conv:.1f} s")
                 if _n_ext > 0:
                     st.write(f"Adaptive extensions: {_n_ext}")
+                _l1_badge = _evidence_badge(e)
+                if _l1_badge:
+                    st.caption(_l1_badge)
                 if is_stirred:
                     st.caption(
                         f"Mode: stirred-vessel | "
@@ -541,6 +568,9 @@ def render_tab_m1(
                     st.write(f"Grid: {g.phi_field.shape[0]}\u00d7{g.phi_field.shape[1]}, "
                              f"spacing = {g.grid_spacing*1e9:.1f} nm, "
                              f"\u03c6 range: [{g.phi_field.min():.4f}, {g.phi_field.max():.4f}]")
+                _l2_badge = _evidence_badge(g)
+                if _l2_badge:
+                    st.caption(_l2_badge)
 
             with sub4:
                 st.subheader("Level 3: Crosslinking Kinetics")
@@ -551,6 +581,12 @@ def render_tab_m1(
                 c2.write(f"**Mesh size \u03be** = {x.xi_final*1e9:.1f} nm")
                 c2.write(f"**M_c** = {x.Mc_final:.0f} g/mol")
                 c3.write(f"**\u03bd_e** = {x.nu_e_final:.2e} /m\u00b3")
+                # v6.1: L3 diagnostics
+                if getattr(x, 'regime', 'unknown') != 'unknown':
+                    st.caption(f"Regime: {x.regime} | Thiele: {x.thiele_modulus:.2f} | Stoich. ceiling: {x.stoichiometric_ceiling:.2f}")
+                _l3_badge = _evidence_badge(x)
+                if _l3_badge:
+                    st.caption(_l3_badge)
 
             with sub5:
                 st.subheader("Level 4: Mechanical Properties")
@@ -570,6 +606,13 @@ def render_tab_m1(
                 with right:
                     st.plotly_chart(plot_kav_curve(m), use_container_width=True)
                 st.plotly_chart(plot_modulus_comparison(m), use_container_width=True)
+                # v6.1: network classification + evidence badge
+                _ntype = getattr(m, 'network_type', 'unknown')
+                if _ntype != 'unknown':
+                    st.caption(f"Network type: {_ntype}")
+                _l4_badge = _evidence_badge(m)
+                if _l4_badge:
+                    st.caption(_l4_badge)
 
                 c1, c2, c3 = st.columns(3)
                 c1.write(f"**G_agarose** = {m.G_agarose:.0f} Pa ({m.G_agarose/1000:.1f} kPa)")

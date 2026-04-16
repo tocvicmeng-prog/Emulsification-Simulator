@@ -1,7 +1,12 @@
-"""Validation utilities for the emulsification simulation."""
+"""Validation utilities for the emulsification simulation.
+
+Includes physical-bounds checks, steady-state checks, mass conservation,
+and v6.1 dimensionless group calculations for domain validation.
+"""
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from typing import Optional
 
 import numpy as np
@@ -314,3 +319,110 @@ def validate_result_mode(result: EmulsificationResult,
         checks['d_mode'] = check_d_mode(result)
 
     return checks
+
+
+# ── Dimensionless Groups (v6.1) ──────────────────────────────────────────
+
+@dataclass
+class DimensionlessGroups:
+    """Dimensionless groups characterizing the emulsification regime.
+
+    Used for domain validation and evidence-tier assignment.
+    """
+    Re: float = 0.0           # Reynolds number: rho_c * N * D^2 / mu_c
+    We: float = 0.0           # Weber number: rho_c * N^2 * D^3 / sigma
+    Ca: float = 0.0           # Capillary number: mu_c * v_tip / sigma
+    viscosity_ratio: float = 0.0   # lambda = mu_d / mu_c
+    eta_K: float = 0.0        # Kolmogorov length [m]: (nu^3 / epsilon)^0.25
+    d32_over_eta_K: float = 0.0    # droplet/Kolmogorov ratio
+    Np: float = 0.0           # Power number (from equipment)
+
+    def as_dict(self) -> dict:
+        """Return all groups as a plain dict for diagnostics/JSON."""
+        return {
+            "Re": self.Re,
+            "We": self.We,
+            "Ca": self.Ca,
+            "viscosity_ratio": self.viscosity_ratio,
+            "eta_K_m": self.eta_K,
+            "d32_over_eta_K": self.d32_over_eta_K,
+            "Np": self.Np,
+        }
+
+
+def compute_dimensionless_groups(
+    rpm: float,
+    D_impeller: float,
+    rho_c: float,
+    mu_c: float,
+    sigma: float,
+    mu_d: float,
+    Np: float,
+    V_tank: float,
+    d32: float = 0.0,
+) -> DimensionlessGroups:
+    """Compute dimensionless groups for an emulsification system.
+
+    Parameters
+    ----------
+    rpm : float
+        Impeller speed [rev/min].
+    D_impeller : float
+        Impeller diameter [m].
+    rho_c : float
+        Continuous phase density [kg/m^3].
+    mu_c : float
+        Continuous phase viscosity [Pa.s].
+    sigma : float
+        Interfacial tension [N/m].
+    mu_d : float
+        Dispersed phase viscosity [Pa.s].
+    Np : float
+        Power number [-].
+    V_tank : float
+        Tank volume [m^3].
+    d32 : float, optional
+        Sauter mean diameter [m] (0 if not yet computed).
+
+    Returns
+    -------
+    DimensionlessGroups
+    """
+    N = rpm / 60.0  # rev/s
+    if N <= 0 or D_impeller <= 0 or rho_c <= 0:
+        return DimensionlessGroups()
+
+    nu_c = mu_c / rho_c if rho_c > 0 else 1e-6  # kinematic viscosity [m^2/s]
+    v_tip = np.pi * D_impeller * N  # tip speed [m/s]
+
+    # Reynolds number
+    Re = rho_c * N * D_impeller**2 / mu_c if mu_c > 0 else 0.0
+
+    # Weber number
+    We = rho_c * N**2 * D_impeller**3 / sigma if sigma > 0 else 0.0
+
+    # Capillary number
+    Ca = mu_c * v_tip / sigma if sigma > 0 else 0.0
+
+    # Viscosity ratio
+    viscosity_ratio = mu_d / mu_c if mu_c > 0 else 0.0
+
+    # Mean energy dissipation rate
+    P = Np * rho_c * N**3 * D_impeller**5  # power [W]
+    epsilon = P / (rho_c * V_tank) if V_tank > 0 and rho_c > 0 else 0.0
+
+    # Kolmogorov length
+    eta_K = (nu_c**3 / epsilon)**0.25 if epsilon > 0 else 0.0
+
+    # d32 / Kolmogorov ratio
+    d32_over_eta_K = d32 / eta_K if eta_K > 0 and d32 > 0 else 0.0
+
+    return DimensionlessGroups(
+        Re=Re,
+        We=We,
+        Ca=Ca,
+        viscosity_ratio=viscosity_ratio,
+        eta_K=eta_K,
+        d32_over_eta_K=d32_over_eta_K,
+        Np=Np,
+    )

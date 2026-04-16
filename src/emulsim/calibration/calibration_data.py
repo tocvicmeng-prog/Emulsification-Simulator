@@ -45,6 +45,11 @@ class CalibrationEntry:
     confidence: str = "measured"  # "measured", "literature", "estimated"
     source_reference: str = ""
     replicates: int = 1
+    # v6.1: cross-module calibration support
+    target_module: str = ""       # "L1", "L2", "L3", "L4", "M2", "M3", "" (legacy FMC)
+    fit_method: str = "manual"    # "manual", "least_squares", "bayesian"
+    valid_domain: dict = field(default_factory=dict)  # parameter ranges where calibration applies
+    posterior_uncertainty: float = 0.0  # standard deviation of fitted parameter
 
     def to_dict(self) -> dict:
         """Serialize to dict for JSON storage."""
@@ -62,6 +67,10 @@ class CalibrationEntry:
             "confidence": self.confidence,
             "source_reference": self.source_reference,
             "replicates": self.replicates,
+            "target_module": self.target_module,
+            "fit_method": self.fit_method,
+            "valid_domain": self.valid_domain,
+            "posterior_uncertainty": self.posterior_uncertainty,
         }
 
     @classmethod
@@ -81,4 +90,8 @@ class CalibrationEntry:
             confidence=d.get("confidence", "measured"),
             source_reference=d.get("source_reference", ""),
             replicates=int(d.get("replicates", 1)),
+            target_module=d.get("target_module", ""),
+            fit_method=d.get("fit_method", "manual"),
+            valid_domain=d.get("valid_domain", {}),
+            posterior_uncertainty=float(d.get("posterior_uncertainty", 0.0)),
         )

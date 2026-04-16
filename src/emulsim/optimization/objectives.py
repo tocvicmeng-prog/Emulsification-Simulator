@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..datatypes import FullResult
+from ..datatypes import FullResult, ModelEvidenceTier
 
 
 # ─── Legacy rotor-stator targets ─────────────────────────────────────────
@@ -73,6 +73,45 @@ def compute_objectives(result: FullResult, mode: str | None = None) -> np.ndarra
     f3 = abs(np.log10(G_DN) - TARGET_LOG_G)
 
     return np.array([f1, f2, f3])
+
+
+# ── v6.1: Trust-aware optimization ───────────────────────────────────────
+
+# Penalty values added to ALL objectives when evidence tier is weak
+_TRUST_PENALTIES = {
+    ModelEvidenceTier.VALIDATED_QUANTITATIVE: -0.05,   # bonus
+    ModelEvidenceTier.CALIBRATED_LOCAL: 0.0,
+    ModelEvidenceTier.SEMI_QUANTITATIVE: 0.1,
+    ModelEvidenceTier.QUALITATIVE_TREND: 1.0,          # effectively excluded from Pareto
+    ModelEvidenceTier.UNSUPPORTED: 10.0,               # hard block
+}
+
+
+def compute_trust_penalty(result: FullResult) -> float:
+    """Return a scalar penalty based on the weakest evidence tier in the run.
+
+    Added to each objective component, so candidates with weaker evidence
+    are deprioritized in the Pareto front.
+    """
+    rr = getattr(result, "run_report", None)
+    if rr is None:
+        return _TRUST_PENALTIES[ModelEvidenceTier.SEMI_QUANTITATIVE]
+
+    min_tier = rr.compute_min_tier()
+    return _TRUST_PENALTIES.get(min_tier, 0.1)
+
+
+def compute_objectives_trust_aware(
+    result: FullResult, mode: str | None = None,
+) -> np.ndarray:
+    """Compute trust-penalized objectives (v6.1).
+
+    Same as compute_objectives but adds trust penalty to each component.
+    Candidates with UNSUPPORTED evidence are effectively blocked.
+    """
+    base = compute_objectives(result, mode=mode)
+    penalty = compute_trust_penalty(result)
+    return base + penalty
 
 
 def check_constraints(result: FullResult, mode: str | None = None) -> tuple[bool, list[str]]:

@@ -155,3 +155,63 @@ class CalibrationStore:
             logger.debug("No calibration entries matched FMC context")
 
         return fmc_out, overrides
+
+    # ── v6.1: Cross-module calibration ───────────────────────────────────
+
+    def query_by_module(self, target_module: str) -> list[CalibrationEntry]:
+        """Return all entries targeting a specific module (L1, L2, L3, etc.)."""
+        return [e for e in self._entries if e.target_module == target_module]
+
+    def apply_to_model_params(
+        self,
+        target_module: str,
+        params_obj: object,
+    ) -> tuple[object, list[str]]:
+        """Apply calibration entries for a specific module to a parameter object.
+
+        For each entry where target_module matches and parameter_name corresponds
+        to an attribute on params_obj, override the attribute with measured_value.
+
+        Parameters
+        ----------
+        target_module : str
+            "L1", "L2", "L3", "L4", "M2", or "M3".
+        params_obj : object
+            Any object with settable attributes matching entry.parameter_name.
+            For L1: KernelConfig (breakage_C1, breakage_C2, etc.)
+            For L2: MaterialProperties (pore coefficients)
+            For L3: MaterialProperties (k_xlink_0, E_a_xlink, f_bridge)
+
+        Returns
+        -------
+        Tuple of (modified_params_copy, list_of_override_descriptions).
+        """
+        import copy as _copy
+        out = _copy.deepcopy(params_obj)
+        overrides: list[str] = []
+
+        module_entries = self.query_by_module(target_module)
+        for entry in module_entries:
+            attr = entry.parameter_name
+            if hasattr(out, attr):
+                old_val = getattr(out, attr)
+                setattr(out, attr, entry.measured_value)
+                desc = (
+                    f"CALIBRATION [{target_module}]: {attr} "
+                    f"{old_val:.4g} -> {entry.measured_value:.4g} "
+                    f"({entry.units}, {entry.confidence}, "
+                    f"fit={entry.fit_method}, ref={entry.source_reference})"
+                )
+                overrides.append(desc)
+                logger.info(desc)
+
+        if overrides:
+            logger.info(
+                "Applied %d calibration overrides to %s params",
+                len(overrides), target_module,
+            )
+        return out, overrides
+
+    def has_calibration_for(self, target_module: str) -> bool:
+        """Return True if any calibration entries target this module."""
+        return any(e.target_module == target_module for e in self._entries)

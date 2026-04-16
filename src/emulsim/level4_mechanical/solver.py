@@ -18,6 +18,8 @@ from ..datatypes import (
     GelationResult,
     MaterialProperties,
     MechanicalResult,
+    ModelEvidenceTier,
+    ModelManifest,
     ModelMode,
     SimulationParameters,
 )
@@ -564,6 +566,25 @@ def solve_mechanical(params: SimulationParameters,
     phi_fiber = max((params.formulation.c_agarose + params.formulation.c_chitosan) / rho_polymer, 0.0)
     Kav_arr = ogston_kav(rh_arr, props.r_fiber, phi_fiber)
 
+    # v6.1: classify network type from crosslinking metadata
+    _net_meta = getattr(crosslinking, "network_metadata", None)
+    if _net_meta is not None:
+        if _net_meta.network_target == "independent":
+            _network_type = "independent_network"
+        elif _net_meta.bond_type == "ionic":
+            _network_type = "ionic_reinforced"
+        elif _net_meta.is_true_second_network and _net_meta.network_target in ("chitosan", "mixed"):
+            _network_type = "true_IPN"
+        else:
+            _network_type = "semi_IPN"
+    else:
+        _network_type = "unknown"
+
+    _l4_manifest = ModelManifest(
+        model_name=f"L4.Mechanical.{model_label}",
+        evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+        assumptions=[f"IPN model: {model_label}", f"network: {_network_type}"],
+    )
     return MechanicalResult(
         G_agarose=float(G_agar),
         G_chitosan=float(G_xlink),
@@ -578,4 +599,6 @@ def solve_mechanical(params: SimulationParameters,
         model_used=model_label,
         G_DN_lower=float(G_DN_lower),
         G_DN_upper=float(G_DN_upper),
+        model_manifest=_l4_manifest,
+        network_type=_network_type,
     )

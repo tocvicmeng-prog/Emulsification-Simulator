@@ -36,6 +36,29 @@ class HeatingStrategy(Enum):
     ISOTHERMAL = "isothermal"           # Constant T_oil (legacy mode)
 
 
+class ModelEvidenceTier(Enum):
+    """Evidence quality tier for a model output.
+
+    Every numeric result should carry an evidence tier indicating how
+    much the prediction can be trusted for decision-making.
+    Ordered from strongest to weakest.
+    """
+    VALIDATED_QUANTITATIVE = "validated_quantitative"
+    """Calibrated against experimental data for this specific system."""
+
+    CALIBRATED_LOCAL = "calibrated_local"
+    """Calibrated against data from an analogous system."""
+
+    SEMI_QUANTITATIVE = "semi_quantitative"
+    """Empirical model, not locally calibrated. Trends reliable, magnitudes approximate."""
+
+    QUALITATIVE_TREND = "qualitative_trend"
+    """Directional predictions only. Numeric values are order-of-magnitude estimates."""
+
+    UNSUPPORTED = "unsupported"
+    """Model not applicable to this chemistry or regime. Output should not be used."""
+
+
 class ModelMode(Enum):
     """Scientific operating mode for the simulation pipeline.
 
@@ -780,6 +803,51 @@ class MaterialProperties:
     r_fiber: float = 1.5e-9            # [m] agarose fiber radius
 
 
+# ─── Model Evidence and Provenance ────────────────────────────────────────
+
+@dataclass
+class ModelManifest:
+    """Provenance record for a single model/solver used in a pipeline level.
+
+    Attached to each result object to make evidence tier, assumptions, and
+    validity domain traceable without reading source code.
+    """
+    model_name: str                         # e.g. "L1.PBE.FixedPivot.AlopaeusCT"
+    evidence_tier: ModelEvidenceTier = ModelEvidenceTier.SEMI_QUANTITATIVE
+    valid_domain: dict = field(default_factory=dict)  # {"Re": (100, 1e6), ...}
+    calibration_ref: str = ""               # "" or CalibrationEntry ID
+    assumptions: list[str] = field(default_factory=list)
+    diagnostics: dict = field(default_factory=dict)   # {"thiele": 0.3, "mass_conservation": 0.999}
+
+
+@dataclass
+class RunReport:
+    """Structured report for a complete pipeline run.
+
+    Collects model manifests from all levels plus trust assessment and
+    solver diagnostics. Suitable for JSON export and lab notebook attachment.
+    """
+    model_graph: list[ModelManifest] = field(default_factory=list)
+    trust_level: str = ""                   # "TRUSTWORTHY" | "CAUTION" | "UNRELIABLE"
+    trust_warnings: list[str] = field(default_factory=list)
+    trust_blockers: list[str] = field(default_factory=list)
+    diagnostics: dict = field(default_factory=dict)   # aggregated diagnostics
+    min_evidence_tier: str = ""             # weakest tier across all levels
+
+    def compute_min_tier(self) -> ModelEvidenceTier:
+        """Return the weakest evidence tier across all models in the graph."""
+        if not self.model_graph:
+            return ModelEvidenceTier.UNSUPPORTED
+        # Tier ordering: validated > calibrated > semi > qualitative > unsupported
+        _ORDER = list(ModelEvidenceTier)
+        worst_idx = 0
+        for m in self.model_graph:
+            idx = _ORDER.index(m.evidence_tier)
+            if idx > worst_idx:
+                worst_idx = idx
+        return _ORDER[worst_idx]
+
+
 # ─── Result Structures ────────────────────────────────────────────────────
 
 @dataclass
@@ -800,6 +868,7 @@ class EmulsificationResult:
     n_d_history: Optional[np.ndarray] = None
     t_converged: Optional[float] = None # [s] time at which d32 convergence was first achieved (None if never)
     n_extensions: int = 0               # [-] number of adaptive extensions performed
+    model_manifest: Optional[ModelManifest] = None  # v6.1: evidence provenance
 
 
 @dataclass
@@ -842,6 +911,7 @@ class GelationResult:
     connectivity: float = 1.0         # [-] 0-1, fraction of pore space connected
     chord_skewness: float = 0.0       # [-] skewness of chord length distribution
     model_tier: str = "unknown"       # "empirical_calibrated" or "mechanistic" — identifies L2 model type
+    model_manifest: Optional[ModelManifest] = None  # v6.1: evidence provenance
 
 
 @dataclass
@@ -869,6 +939,12 @@ class CrosslinkingResult:
     xi_final: float                     # [m]
     G_chitosan_final: float             # [Pa]
     network_metadata: Optional[NetworkTypeMetadata] = None
+    model_manifest: Optional[ModelManifest] = None  # v6.1: evidence provenance
+    # v6.1: solver diagnostics
+    thiele_modulus: float = 0.0         # [-] Phi (0 = not computed)
+    regime: str = "unknown"             # "reaction_limited", "borderline", "diffusion_limited", "unknown"
+    stoichiometric_ceiling: float = 1.0 # [-] max conversion given reagent/reactive-group ratio
+    residual_reactive_groups: float = 0.0  # [mol/m3] unreacted -NH2 or -OH after crosslinking
 
 
 @dataclass
@@ -887,6 +963,8 @@ class MechanicalResult:
     model_used: str = "phenomenological"  # which modulus model produced G_DN
     G_DN_lower: float = 0.0             # [Pa] Single-phase composite reference (HS bounds, not applicable to IPN)
     G_DN_upper: float = 0.0             # [Pa] Single-phase composite reference (HS bounds, not applicable to IPN)
+    model_manifest: Optional[ModelManifest] = None  # v6.1: evidence provenance
+    network_type: str = "unknown"       # v6.1: "true_IPN", "semi_IPN", "independent_network", "ionic_reinforced", "unknown"
 
 
 @dataclass
@@ -898,6 +976,7 @@ class FullResult:
     crosslinking: CrosslinkingResult
     mechanical: MechanicalResult
     gelation_timing: Optional[GelationTimingResult] = None
+    run_report: Optional[RunReport] = None  # v6.1: model evidence + diagnostics
 
     def objective_vector(self) -> np.ndarray:
         """Compute the 3 objective values for optimization.

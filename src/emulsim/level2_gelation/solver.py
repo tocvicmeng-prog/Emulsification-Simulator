@@ -16,7 +16,7 @@ import numpy as np
 from scipy import sparse
 from scipy.sparse.linalg import factorized, spsolve, splu
 
-from ..datatypes import GelationResult, GelationTimingResult, MaterialProperties, SimulationParameters
+from ..datatypes import GelationResult, GelationTimingResult, MaterialProperties, ModelEvidenceTier, ModelManifest, SimulationParameters
 from .spatial import (
     create_radial_grid, build_laplacian_matrix,
     create_2d_grid, build_laplacian_2d, build_mobility_laplacian_2d,
@@ -287,6 +287,11 @@ class CahnHilliardSolver:
 
         T_hist_arr = np.array([T for _, T in T_history]) if T_history else np.array([0.0])
 
+        model_manifest = ModelManifest(
+            model_name="L2.Pore.CahnHilliard2D",
+            evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            assumptions=["Cahn-Hilliard free energy", "mobility arrest", "2D approximation"],
+        )
         return GelationResult(
             r_grid=r,
             phi_field=phi,
@@ -303,6 +308,7 @@ class CahnHilliardSolver:
             connectivity=morph['connectivity'],
             chord_skewness=morph['skewness'],
             model_tier="mechanistic",
+            model_manifest=model_manifest,
         )
 
 
@@ -585,6 +591,11 @@ class CahnHilliard2DSolver:
 
         T_hist_arr = np.array([T for _, T in T_history]) if T_history else np.array([0.0])
 
+        model_manifest = ModelManifest(
+            model_name="L2.Pore.CahnHilliard2D",
+            evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            assumptions=["Cahn-Hilliard free energy", "mobility arrest", "2D approximation"],
+        )
         return GelationResult(
             r_grid=x,  # 1D coordinate array
             phi_field=phi_2d_final,
@@ -603,6 +614,7 @@ class CahnHilliard2DSolver:
             connectivity=morph['connectivity'],
             chord_skewness=morph['skewness'],
             model_tier="mechanistic",
+            model_manifest=model_manifest,
         )
 
 
@@ -743,6 +755,11 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
     # Morphology descriptors: empirical model uses defaults (1D field)
     morph = morphology_descriptors(np.ones(N_r) * phi_dry, 0.0)
 
+    model_manifest = ModelManifest(
+        model_name="L2.Pore.EmpiricalCorrelation",
+        evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+        assumptions=["Power-law pore-concentration scaling", "Pernodet AFM data"],
+    )
     return GelationResult(
         r_grid=r,
         phi_field=np.ones(N_r) * phi_dry,  # uniform (empirical model)
@@ -760,7 +777,8 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
         anisotropy=morph['anisotropy'],
         connectivity=morph['connectivity'],
         chord_skewness=morph['skewness'],
-        model_tier="empirical_calibrated",
+        model_tier="empirical_uncalibrated",  # v6.1: honest label (set to "empirical_calibrated" only with user pore data)
+        model_manifest=model_manifest,
     )
 
 
