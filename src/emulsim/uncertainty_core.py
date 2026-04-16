@@ -188,7 +188,29 @@ class UncertaintyPropagator:
             params_i.run_id = f"mc_{i:03d}"
             prepared.append((i, props_i, params_i, perturb))
 
-        if self.n_jobs == 1:
+        # Audit N7 (v7.0.1): joblib loky process-startup + Numba JIT
+        # cold-compile dominate when n_samples is small. Auto-fallback to
+        # serial when the workload is too small for parallelism to pay off.
+        # Heuristic: at least 4 samples per worker. Caller can override
+        # by passing n_jobs=1 explicitly (no fallback) or n_jobs=-1
+        # (request all cores; only auto-fallbacks if n_samples < 4).
+        effective_n_jobs = self.n_jobs
+        if effective_n_jobs != 1:
+            requested = effective_n_jobs
+            if requested == -1:
+                import os
+                requested = os.cpu_count() or 1
+            min_samples_for_parallel = 4 * abs(requested)
+            if len(prepared) < min_samples_for_parallel:
+                logger.info(
+                    "MC n_jobs=%d but n_samples=%d (<%d); falling back to "
+                    "serial — joblib startup + Numba JIT cold-compile would "
+                    "dominate.", self.n_jobs, len(prepared),
+                    min_samples_for_parallel,
+                )
+                effective_n_jobs = 1
+
+        if effective_n_jobs == 1:
             # Serial path — preserves byte-for-byte legacy behaviour and
             # avoids joblib's process-fork overhead for tiny n_samples.
             outputs = [
@@ -200,7 +222,7 @@ class UncertaintyPropagator:
             # transfer params; PropertyDatabase is rebuilt per worker via
             # solver imports.
             from joblib import Parallel, delayed
-            outputs = Parallel(n_jobs=self.n_jobs, backend="loky")(
+            outputs = Parallel(n_jobs=effective_n_jobs, backend="loky")(
                 delayed(_mc_one_sample)(
                     item, crosslinker_key, uv_intensity, l2_mode,
                 ) for item in prepared

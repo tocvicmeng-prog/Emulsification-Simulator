@@ -105,9 +105,41 @@ python -m emulsim optimize --n-initial 15 --max-iter 100
 python -m emulsim uncertainty --n-samples 20
 ```
 
+## v7.0+ CLI commands
+
+Beyond `run`/`sweep`/`optimize`/`uncertainty`/`info`/`ui`, v7.0.1 adds:
+
+```bash
+# Run L2-L4 across DSD quantiles (batch variability, Node 19)
+python -m emulsim batch --quantiles 0.10,0.50,0.90 configs/default.toml
+
+# Emit a ProcessDossier JSON for reproducibility (Node 16)
+python -m emulsim dossier configs/default.toml --output dossier.json
+
+# Ingest wet-lab AssayRecord JSONs into a CalibrationStore fit JSON (Node 20)
+python -m emulsim ingest L1 --assay-dir data/validation/l1_dsd/assays \
+    --output data/validation/l1_dsd/fits/fit.json
+
+# Default uncertainty now uses the unified engine + parallel MC
+python -m emulsim uncertainty --n-samples 50 --n-jobs 4
+```
+
+The default `uncertainty` engine is now `UnifiedUncertaintyEngine`
+(consistent schema, calibration-store posterior absorption); pass
+`--engine legacy` for v6.x byte-equivalent output.
+
 ## Calibration
 
 See `docs/04_calibration_protocol.md` for a 5-study wet-lab protocol to calibrate the simulation constants against your specific materials.
+
+> **Note on Node 8 (v6.1):** The L2 empirical pore-size formula is
+> independent of `alpha_final`. Node 8 wired `solve_gelation_empirical`
+> to receive the actual Avrami output via `timing=` and reflect it in
+> `model_manifest.diagnostics["alpha_final_from_timing"]`, but
+> the pore-size prediction itself depends only on concentration +
+> cooling rate + bead radius. Users will not see different pore numbers
+> after Node 8 — the change is honest metadata reporting, not a physics
+> update.
 
 Once you have calibration data, supply it via `RunContext` (Node 7):
 

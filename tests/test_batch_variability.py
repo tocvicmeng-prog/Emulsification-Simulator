@@ -79,3 +79,29 @@ def test_invalid_quantiles_rejected(smoke_params, tmp_path):
         run_batch(smoke_params, quantiles=(1.5,), output_dir=tmp_path)
     with pytest.raises(ValueError):
         run_batch(smoke_params, quantiles=(0.0,), output_dir=tmp_path)
+
+
+# ─── Audit N3 / N8 follow-ups (v7.0.1) ────────────────────────────────────
+
+
+def test_n3_representative_diameter_helper(smoke_params, tmp_path):
+    """QuantileRun.representative_diameter_m == 2 * representative_radius_m."""
+    res = run_batch(smoke_params, quantiles=(0.5,), output_dir=tmp_path)
+    qr = res.quantile_runs[0]
+    assert qr.representative_diameter_m == pytest.approx(
+        2.0 * qr.representative_radius_m, rel=1e-12,
+    )
+
+
+def test_n8_duplicate_quantiles_deduped(smoke_params, tmp_path):
+    """run_batch silently sort+dedupes quantiles (audit N8)."""
+    res = run_batch(
+        smoke_params, quantiles=(0.50, 0.25, 0.50, 0.75, 0.25),
+        output_dir=tmp_path,
+    )
+    # 5 inputs collapse to 3 unique sorted quantiles
+    assert res.n_quantiles == 3
+    quantiles_seen = [r.quantile for r in res.quantile_runs]
+    assert quantiles_seen == [0.25, 0.50, 0.75]
+    # Mass fractions sum to 1 even after dedup
+    assert sum(res.quantile_mass_fractions) == pytest.approx(1.0, abs=1e-9)

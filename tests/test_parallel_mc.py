@@ -59,3 +59,25 @@ def test_property_database_is_in_memory_only():
     # No file cache attribute exists -> nothing to lock for forked workers.
     assert not hasattr(db1, "_cache_path")
     assert not hasattr(db1, "_disk_cache")
+
+
+def test_n7_auto_serial_fallback_for_small_n_samples(smoke_params, caplog):
+    """Audit N7 (v7.0.1): n_jobs>1 with tiny n_samples auto-falls back to serial.
+
+    Below the 4*|n_jobs| threshold, joblib startup + Numba JIT cold-compile
+    dominate. The propagator should detect this and run serially while
+    logging the fallback decision.
+    """
+    import logging
+    caplog.set_level(logging.INFO, logger="emulsim.uncertainty_core")
+    # 2 samples requested, n_jobs=2 -> threshold is 4*2 = 8 -> fallback fires
+    res = UncertaintyPropagator(n_samples=2, seed=42, n_jobs=2).run(smoke_params)
+    assert res.n_samples == 2
+    # The fallback log line must appear
+    fallback_msgs = [r for r in caplog.records
+                     if "falling back to" in r.message
+                     and "serial" in r.message]
+    assert len(fallback_msgs) == 1, (
+        "n_jobs=2 with n_samples=2 should auto-fallback to serial; "
+        f"got log records: {[r.message for r in caplog.records]}"
+    )

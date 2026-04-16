@@ -44,6 +44,18 @@ def main():
                         help="Number of MC samples (default: 20)")
     unc_p.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility (default: 42)")
+    unc_p.add_argument(
+        "--n-jobs", type=int, default=1,
+        help="Parallel MC workers (Node 15). 1 = serial; -1 = all cores. "
+             "Note: process startup + Numba JIT cold-compile dominate when "
+             "n_samples is small; use serial for n_samples < 8.",
+    )
+    unc_p.add_argument(
+        "--engine", choices=["legacy", "unified"], default="unified",
+        help="MC engine. 'unified' (default, Node 18) uses "
+             "UnifiedUncertaintyEngine and emits the schema-uniform result; "
+             "'legacy' uses uncertainty_core.UncertaintyPropagator directly.",
+    )
 
     # info command
     sub.add_parser("info", help="Show default parameters and material properties")
@@ -51,6 +63,51 @@ def main():
     # ui command
     ui_p = sub.add_parser("ui", help="Launch the Streamlit web interface")
     ui_p.add_argument("--port", type=int, default=8501)
+
+    # batch command (Node 24, audit N4): surface pipeline.batch_variability.run_batch
+    batch_p = sub.add_parser(
+        "batch",
+        help="Run a DSD-quantile-resolved batch (L2-L4 across L1 size quantiles)",
+    )
+    batch_p.add_argument("config", nargs="?", default=None,
+                          help="Path to TOML config file (default: configs/default.toml)")
+    batch_p.add_argument(
+        "--quantiles", default="0.10,0.25,0.50,0.75,0.90",
+        help="Comma-separated quantiles in (0,1). Default: 0.10,0.25,0.50,0.75,0.90",
+    )
+    batch_p.add_argument("--output", "-o", default="output/batch",
+                          help="Output directory for per-quantile FullResult dumps")
+    batch_p.add_argument("--quiet", "-q", action="store_true")
+
+    # dossier command (Node 24, audit N4): emit ProcessDossier JSON
+    dossier_p = sub.add_parser(
+        "dossier",
+        help="Run the pipeline and write a ProcessDossier JSON artifact for reproducibility",
+    )
+    dossier_p.add_argument("config", nargs="?", default=None)
+    dossier_p.add_argument("--output", "-o", default="output/dossier.json",
+                            help="Path to write the dossier JSON")
+    dossier_p.add_argument("--notes", default="",
+                            help="Free-form notes attached to the dossier")
+    dossier_p.add_argument("--quiet", "-q", action="store_true")
+
+    # ingest command (Node 24, audit N4): AssayRecord -> CalibrationStore JSON
+    ing_p = sub.add_parser(
+        "ingest",
+        help="Ingest wet-lab AssayRecord JSONs into a CalibrationStore-compatible fit JSON",
+    )
+    ing_p.add_argument(
+        "module", choices=["L1"],
+        help="Validation level to fit (only 'L1' wired in v7.0; L2/L3/L4/M2 stubs land in v7.1)",
+    )
+    ing_p.add_argument(
+        "--assay-dir", default="data/validation/l1_dsd/assays",
+        help="Directory containing AssayRecord JSON files",
+    )
+    ing_p.add_argument(
+        "--output", "-o", default="data/validation/l1_dsd/fits/fit.json",
+        help="Path to write the CalibrationStore-compatible JSON",
+    )
 
     args = parser.parse_args()
 
@@ -78,6 +135,12 @@ def main():
         _cmd_info(args)
     elif args.command == "ui":
         _cmd_ui(args)
+    elif args.command == "batch":
+        _cmd_batch(args)
+    elif args.command == "dossier":
+        _cmd_dossier(args)
+    elif args.command == "ingest":
+        _cmd_ingest(args)
 
 
 def _load_params(config_path):
@@ -158,14 +221,42 @@ def _cmd_optimize(args):
 
 
 def _cmd_uncertainty(args):
-    from .uncertainty_core import UncertaintyPropagator
+    """MC uncertainty propagation.
 
+    Node 25 (v7.0.1, audit N5): defaults to the UnifiedUncertaintyEngine
+    (Node 18) so calibration-store posteriors are surfaced and the result
+    schema is consistent with the rest of the v7.0+ stack. The legacy
+    engine is still available via --engine legacy for byte-equivalence
+    with v6.x output.
+    """
     params = _load_params(args.config)
-    propagator = UncertaintyPropagator(n_samples=args.n_samples, seed=args.seed)
 
-    print(f"Running Monte Carlo uncertainty propagation ({args.n_samples} samples)...")
-    result = propagator.run(params)
+    if args.engine == "legacy":
+        from .uncertainty_core import UncertaintyPropagator
+        propagator = UncertaintyPropagator(
+            n_samples=args.n_samples,
+            seed=args.seed,
+            n_jobs=args.n_jobs,
+        )
+        print(f"Running legacy MC ({args.n_samples} samples, "
+              f"n_jobs={args.n_jobs})...")
+        result = propagator.run(params)
+        print()
+        print(result.summary())
+        print()
+        return
 
+    # Default: unified engine (audit N5)
+    from .uncertainty_unified import UnifiedUncertaintyEngine
+    engine = UnifiedUncertaintyEngine()
+    print(f"Running unified MC ({args.n_samples} samples, "
+          f"n_jobs={args.n_jobs}, engine=unified)...")
+    result = engine.run_m1l4(
+        params,
+        n_samples=args.n_samples,
+        seed=args.seed,
+        n_jobs=args.n_jobs,
+    )
     print()
     print(result.summary())
     print()
@@ -212,6 +303,154 @@ def _cmd_ui(args):
         "--server.port", str(args.port),
         "--server.headless", "true",
     ])
+
+
+# ─── Node 24 (v7.0.1, audit N4): batch / dossier / ingest CLI surfacing ────
+
+
+def _parse_quantiles_arg(s: str) -> tuple[float, ...]:
+    """Parse the --quantiles "0.10,0.25,0.50" string into a sorted tuple.
+
+    Argparse error messages here mean the user typoed; raise a clear
+    ValueError that argparse converts into a top-level exit message.
+    """
+    try:
+        vals = [float(x) for x in s.split(",") if x.strip()]
+    except ValueError as exc:
+        raise ValueError(
+            f"Could not parse --quantiles {s!r}: expected comma-separated "
+            "floats in (0,1), e.g. '0.10,0.50,0.90'"
+        ) from exc
+    if not vals:
+        raise ValueError("--quantiles must include at least one value.")
+    if not all(0.0 < v < 1.0 for v in vals):
+        raise ValueError(
+            f"--quantiles must all lie in (0,1); got {vals!r}"
+        )
+    return tuple(vals)
+
+
+def _cmd_batch(args):
+    """Surface ``pipeline.batch_variability.run_batch`` on the CLI (audit N4)."""
+    from .pipeline.batch_variability import run_batch
+
+    quantiles = _parse_quantiles_arg(args.quantiles)
+    params = _load_params(args.config)
+
+    result = run_batch(
+        params,
+        quantiles=quantiles,
+        output_dir=Path(args.output),
+    )
+
+    print()
+    print("=== Batch Variability Results ===")
+    print(f"  Quantiles:           {quantiles}")
+    print(f"  Mass-weighted mean d32:  {result.mean_d32_m * 1e6:.2f} um")
+    print(f"  Mass-weighted mean pore: {result.mean_pore_m * 1e9:.1f} nm")
+    print(f"  Pore p5 / p50 / p95:     "
+          f"{result.pore_p5_m*1e9:.1f} / "
+          f"{result.pore_p50_m*1e9:.1f} / "
+          f"{result.pore_p95_m*1e9:.1f} nm")
+    print(f"  Mass-weighted mean G_DN: {result.mean_G_DN_Pa:.0f} Pa")
+    print(f"  G_DN p5 / p50 / p95:     "
+          f"{result.G_DN_p5_Pa:.0f} / "
+          f"{result.G_DN_p50_Pa:.0f} / "
+          f"{result.G_DN_p95_Pa:.0f} Pa")
+    print()
+    print("Per-quantile representative bead radii [um]:")
+    for q, r, w in zip(quantiles, result.quantile_radii_m,
+                        result.quantile_mass_fractions):
+        print(f"  q={q:.3f}  R={r*1e6:.2f} um  mass_fraction={w:.3f}")
+    print()
+
+
+def _cmd_dossier(args):
+    """Run the pipeline and write a ProcessDossier JSON (audit N4)."""
+    from .pipeline.orchestrator import PipelineOrchestrator
+    from .process_dossier import ProcessDossier
+
+    params = _load_params(args.config)
+    out_path = Path(args.output)
+    run_dir = out_path.parent / "_dossier_runs"
+
+    orch = PipelineOrchestrator(output_dir=run_dir)
+    full_result = orch.run_single(params)
+
+    dossier = ProcessDossier.from_run(
+        full_result,
+        notes=args.notes,
+    )
+    written = dossier.export_json(out_path)
+
+    print()
+    print(f"=== Process Dossier ===")
+    print(f"  run_id:                {dossier.run_id}")
+    print(f"  timestamp_utc:         {dossier.timestamp_utc}")
+    print(f"  evidence_tier:         {full_result.run_report.min_evidence_tier}")
+    print(f"  trust_level:           {full_result.run_report.trust_level}")
+    print(f"  models recorded:       {len(full_result.run_report.model_graph)}")
+    print(f"  calibrations applied:  "
+          f"{full_result.run_report.diagnostics.get('calibration_count', 0)}")
+    print(f"  dossier written to:    {written}")
+    print()
+
+
+def _cmd_ingest(args):
+    """Wet-lab AssayRecord ingest -> CalibrationStore JSON (audit N4)."""
+    from .calibration.fitters import (
+        fit_l1_dsd_to_calibration_entries,
+        load_assay_records,
+        write_calibration_json,
+    )
+
+    if args.module != "L1":
+        # Argparse already constrains choices, but be explicit for v7.1.
+        print(f"Module {args.module} ingestion is not yet wired (v7.1).",
+              file=sys.stderr)
+        sys.exit(2)
+
+    assay_dir = Path(args.assay_dir)
+    if not assay_dir.exists():
+        print(f"ERROR: --assay-dir {assay_dir} does not exist.", file=sys.stderr)
+        print("Place AssayRecord JSONs there or pass --assay-dir.",
+              file=sys.stderr)
+        sys.exit(3)
+
+    records = load_assay_records(assay_dir)
+    if not records:
+        print(f"WARNING: no AssayRecord JSONs found in {assay_dir}.")
+        print("Nothing to fit; skipping write.")
+        return
+
+    entries = fit_l1_dsd_to_calibration_entries(records)
+    if not entries:
+        print(f"WARNING: fitter produced 0 CalibrationEntries from "
+              f"{len(records)} records (no DROPLET_SIZE_DISTRIBUTION assays?).")
+        return
+
+    out_path = Path(args.output)
+    fit_metadata = {
+        "module": args.module,
+        "assay_dir": str(assay_dir),
+        "n_records_in": len(records),
+        "n_entries_out": len(entries),
+        "fitter": "stub_mean (v7.0)",
+    }
+    written = write_calibration_json(entries, out_path, fit_metadata=fit_metadata)
+    print()
+    print(f"=== AssayRecord Ingest ===")
+    print(f"  module:               {args.module}")
+    print(f"  records read:         {len(records)}")
+    print(f"  calibration entries:  {len(entries)}")
+    print(f"  fit JSON written to:  {written}")
+    print(f"  metadata sidecar:     {written.with_suffix('.meta.json')}")
+    print()
+    print("Load with:")
+    print(f"  store = CalibrationStore(); store.load_json({str(written)!r})")
+    print(f"  ctx = RunContext(calibration_store=store)")
+    print(f"  PipelineOrchestrator().run_single(params, run_context=ctx)")
+    print()
 
 
 if __name__ == "__main__":

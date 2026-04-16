@@ -1,5 +1,91 @@
 # Changelog
 
+## v7.0.1 (2026-04-17) — Audit remediation patch
+
+Closes 8 of 10 findings from the post-Nodes-1-20 full-system audit. P0
+ship-blockers fixed; v7.0 features now reachable from the CLI.
+
+### P0 fixes (release blockers)
+- **N1 (HIGH)** — `pipeline/orchestrator.py` no longer mutates the caller's
+  `params.emulsification.kernels` in place when applying L1 calibration.
+  Callers that reuse a `SimulationParameters` instance across multiple
+  `run_single` calls (e.g. `batch_variability.run_batch`, parameter
+  sweeps, optimisation campaigns) no longer see calibrated kernels leak
+  between iterations. Regression test in `test_run_context.py`.
+- **N2 (HIGH)** — `UnifiedUncertaintyEngine.run_m1l4` no longer claims to
+  have sampled `CALIBRATION_POSTERIOR` when it has only absorbed the
+  posterior into the spec. The new
+  `UnifiedUncertaintyResult.kinds_declared_but_not_sampled` field
+  records the v7.0 limitation honestly.
+
+### P1 fixes (CLI surface — closes audit N4 + N5)
+- **`python -m emulsim batch`** — surface
+  `pipeline.batch_variability.run_batch` on the CLI. Pass `--quantiles`
+  and `--output`; prints mass-weighted mean / per-quantile percentile
+  table.
+- **`python -m emulsim dossier`** — run the pipeline and emit a
+  `ProcessDossier` JSON artifact for reproducibility. Records inputs,
+  result summary, manifests, calibrations, environment.
+- **`python -m emulsim ingest L1`** — ingest a directory of
+  `AssayRecord` JSON files, run the L1 fitter, write a
+  `CalibrationStore`-loadable fit JSON. v7.1 will add L2/L3/L4/M2.
+- **`python -m emulsim uncertainty`** now defaults to the
+  `UnifiedUncertaintyEngine` (Node 18) and exposes `--n-jobs` for
+  Node 15's parallel MC. Pass `--engine legacy` for v6.x byte-equivalent
+  output.
+- **N3 follow-up** — `QuantileRun.representative_diameter_m` property
+  added so downstream consumers don't accidentally read
+  `full_result.emulsification.d50` (which is shared by reference across
+  all per-quantile runs and reflects the BASE L1 DSD).
+
+### P2 polish
+- **N7** — `UncertaintyPropagator.run` auto-falls-back to serial when
+  `n_samples < 4 × |n_jobs|`. Joblib startup + Numba JIT cold-compile
+  dominate below this threshold.
+- **N8** — `run_batch` silently sort+dedupes the `quantiles` argument.
+  Duplicate or unsorted input no longer produces ill-defined mass
+  fractions.
+
+### P3 documentation
+- **N6** — `INSTALL.md` documents the Numba JIT cache location and the
+  `NUMBA_CACHE_DIR` environment-variable workaround for read-only
+  Python installs (corporate, conda `--no-write-pkgs`,
+  `pip install --user` on network shares).
+- **N9** — Documenting that Node 8's L2 timing wiring was a metadata
+  fix only; the empirical pore-size formula remains independent of
+  `alpha_final`. The `model_manifest.diagnostics.alpha_final_from_timing`
+  field now reflects the actual Avrami output instead of a hardcoded
+  0.999, but pore predictions at typical conditions are unchanged.
+
+### Tests
+- 25 new tests across the patch (Nodes 22-29). 0 regressions.
+
+---
+
+## v7.0 (2026-04-17) — Engineering portion (Nodes 14-20)
+
+Closes engineering items from the consensus v7.0 plan (doc 34 §9). F1
+closure (kernel re-fit) remains gated on Study A wet-lab data.
+
+### New modules
+- `process_dossier.py` — `ProcessDossier` aggregator + JSON export
+- `assay_record.py` — `AssayRecord` public data model with 12 `AssayKind` values
+- `uncertainty_unified.py` — `UnifiedUncertaintyEngine` single entrypoint
+- `pipeline/batch_variability.py` — `run_batch` over DSD quantiles
+- `calibration/fitters.py` — stub L1 DSD fitter
+
+### Performance
+- Numba JIT for `breakage_rate_alopaeus`, `breakage_rate_coulaloglou`,
+  `coalescence_rate_ct` matrix builder (5-10× on coalescence; matches
+  NumPy to 1e-12 rtol).
+- joblib parallel MC via `UncertaintyPropagator(n_jobs=-1)`.
+
+### Calibration data scaffold
+- `data/validation/{l1_dsd,l2_pore,l3_kinetics,l4_mechanics,m2_capacity}/`
+  directory tree with JSON-Schema for L1 DSD assays.
+
+---
+
 ## v6.0 (2026-04-12) — Calibration-Enabled Process Simulation
 
 Transitions EmulSim from semi-quantitative chemistry simulator to calibration-enabled process simulation platform. All uncalibrated outputs remain semi-quantitative; calibrated outputs reflect user-supplied measurements.

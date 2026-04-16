@@ -230,3 +230,39 @@ class TestUnifiedEngine:
         assert len(post_sources) == 1
         assert post_sources[0].name.endswith("coalescence_C5")
         assert post_sources[0].std == pytest.approx(5e12)
+
+    def test_n2_no_posterior_overclaim(self, smoke_params):
+        """Audit N2 (v7.0.1): posterior NOT in kinds_sampled when not actually sampled.
+
+        The v7.0 engine absorbs CalibrationStore posteriors into the spec
+        but does not yet propagate them through the legacy MC engine. The
+        result's ``kinds_sampled`` must therefore NOT advertise
+        CALIBRATION_POSTERIOR; it must record the declared-but-not-sampled
+        condition in ``kinds_declared_but_not_sampled`` instead so
+        downstream UI/optimizer code does not over-attribute the interval.
+        """
+        from emulsim.calibration.calibration_data import CalibrationEntry
+        from emulsim.calibration.calibration_store import CalibrationStore
+        from emulsim.uncertainty_unified import (
+            UnifiedUncertaintyEngine, UncertaintyKind,
+        )
+
+        store = CalibrationStore()
+        store.add(CalibrationEntry(
+            profile_key="x", parameter_name="coalescence_C5",
+            measured_value=2.28e13, units="-", confidence="high",
+            source_reference="ref", target_module="L1",
+            posterior_uncertainty=5e12,
+        ))
+        engine = UnifiedUncertaintyEngine(calibration_store=store)
+        result = engine.run_m1l4(smoke_params, n_samples=3, seed=42)
+
+        # The legacy engine sampled MATERIAL_PROPERTY perturbations only.
+        assert UncertaintyKind.MATERIAL_PROPERTY in result.kinds_sampled
+        # The posterior was absorbed into the spec but NOT actually sampled.
+        # That fact must be honestly recorded — kinds_sampled must NOT lie.
+        assert UncertaintyKind.CALIBRATION_POSTERIOR not in result.kinds_sampled
+        assert (UncertaintyKind.CALIBRATION_POSTERIOR
+                in result.kinds_declared_but_not_sampled)
+        # The summary string also surfaces the limitation
+        assert "NOT sampled" in result.summary()

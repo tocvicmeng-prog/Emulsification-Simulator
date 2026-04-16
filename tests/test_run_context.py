@@ -122,3 +122,57 @@ def test_unrelated_module_does_not_trigger_l1_branch(smoke_params, tmp_path):
     # No L1/L2/L3/L4 calibration was applied during the M1 pipeline run.
     assert cal.emulsification.d32 == baseline.emulsification.d32
     assert cal.run_report.diagnostics.get("calibration_count", 0) == 0
+
+
+def test_caller_params_not_mutated_by_l1_calibration(smoke_params, tmp_path):
+    """Audit N1 (v7.0.1): run_single must not mutate caller's SimulationParameters.
+
+    Reproduces the bug N1 found in the post-Nodes-1-20 audit: the orchestrator
+    was writing back into ``params.emulsification.kernels`` after applying L1
+    calibration. Callers that reuse the same ``params`` instance across
+    multiple ``run_single`` calls (e.g. ``batch_variability.run_batch``,
+    parameter sweeps, optimisation campaigns) would silently see calibrated
+    kernels carry over into the SECOND call.
+
+    Acceptance: after a ``run_single`` with an L1-targeted CalibrationStore,
+    the caller's ``params.emulsification.kernels`` must be byte-identical to
+    its pre-call state.
+    """
+    import copy
+    # Snapshot the caller's params state — kernels may be None or a pre-set
+    # KernelConfig; both cases must survive run_single unchanged.
+    caller_kernels_before = copy.deepcopy(smoke_params.emulsification.kernels)
+    caller_C1_before = (
+        smoke_params.emulsification.kernels.breakage_C1
+        if smoke_params.emulsification.kernels is not None else None
+    )
+
+    store = CalibrationStore()
+    store.add(CalibrationEntry(
+        profile_key="rotor_stator_legacy",
+        parameter_name="breakage_C1",
+        measured_value=99.0,  # absurd value: any leak is unmissable
+        units="-",
+        confidence="medium",
+        source_reference="N1 regression test",
+        target_module="L1",
+    ))
+    ctx = RunContext(calibration_store=store)
+    orch = PipelineOrchestrator(output_dir=tmp_path)
+    result = orch.run_single(smoke_params, run_context=ctx)
+
+    # Calibration WAS applied to the run...
+    assert result.run_report.diagnostics.get("calibration_count", 0) == 1, (
+        "Calibration entry did not fire — test is no longer probing N1."
+    )
+
+    # ...but the caller's params must be untouched.
+    caller_C1_after = (
+        smoke_params.emulsification.kernels.breakage_C1
+        if smoke_params.emulsification.kernels is not None else None
+    )
+    assert caller_C1_after == caller_C1_before, (
+        f"N1 regression: caller's params.emulsification.kernels.breakage_C1 "
+        f"was mutated from {caller_C1_before!r} to {caller_C1_after!r} by "
+        f"run_single. Must be a deep copy."
+    )

@@ -146,6 +146,13 @@ class UnifiedUncertaintyResult:
     can answer: "what class of uncertainty dominates the d32 interval?"
     even when only one input kind was sampled (the answer is then
     "{that kind}", which is itself useful for trust-banner messaging).
+
+    Audit N2 (v7.0.1): ``kinds_sampled`` records ONLY the kinds that
+    actually contributed to the percentile interval. Kinds declared in
+    the spec but not sampled by the underlying engine (e.g. calibration
+    posteriors that v7.0 absorbs but does not yet propagate through the
+    legacy MC engines) live in ``kinds_declared_but_not_sampled`` instead
+    so consumers do not over-attribute uncertainty contribution.
     """
     outputs: list[OutputUncertainty] = field(default_factory=list)
     kinds_sampled: set[UncertaintyKind] = field(default_factory=set)
@@ -154,6 +161,11 @@ class UnifiedUncertaintyResult:
     source_label: str = ""
     """Where this Result came from — e.g. "uncertainty_core.M1L4" or
     "uncertainty_propagation.M2"."""
+
+    # Audit N2 (v7.0.1): kinds the spec listed but the engine did NOT
+    # actually sample. Documents the v7.0 limitation without overclaiming
+    # in `kinds_sampled`. Empty in v7.1+ when all kinds are sampled.
+    kinds_declared_but_not_sampled: set[UncertaintyKind] = field(default_factory=set)
 
     def get(self, name: str) -> Optional[OutputUncertainty]:
         for o in self.outputs:
@@ -167,6 +179,12 @@ class UnifiedUncertaintyResult:
             f"Unified UQ — source={self.source_label}, "
             f"n={self.n_samples} ({self.n_failed} failed), kinds=[{kinds_str}]",
         ]
+        if self.kinds_declared_but_not_sampled:
+            unsamp = ", ".join(sorted(k.value for k in self.kinds_declared_but_not_sampled))
+            lines.append(
+                f"  (declared but NOT sampled by engine: [{unsamp}] — "
+                "interval is a lower bound on total uncertainty)"
+            )
         for o in self.outputs:
             lines.append(
                 f"  {o.name:18s} = {o.p50:.4g} {o.units}  "
@@ -316,17 +334,19 @@ class UnifiedUncertaintyEngine:
         unified = from_m1l4_result(
             legacy, source_label="UnifiedUncertaintyEngine.M1L4",
         )
-        # If posterior sources are present, tag them — the legacy engine
-        # does NOT yet sample posteriors, so this is an honest declaration
-        # that the interval EXCLUDES posterior contribution. v7.1 work
-        # will close this gap by injecting posterior samples into the
-        # legacy engine's perturbation dict.
-        if any(s.kind == UncertaintyKind.CALIBRATION_POSTERIOR
-               for s in self.spec.sources):
-            unified.kinds_sampled.add(UncertaintyKind.CALIBRATION_POSTERIOR)
-            for o in unified.outputs:
-                # Mark ci_width as a lower bound until posteriors are wired.
-                pass  # tracking via kinds_sampled is enough for v7.0
+        # Audit N2 (v7.0.1): the legacy engine samples MaterialProperty
+        # perturbations only. CalibrationPosterior sources declared on the
+        # spec are NOT propagated through the legacy MC, so we record them
+        # as "declared but not sampled" rather than tagging them as
+        # contributing to the interval. v7.1 will close the gap by
+        # injecting posterior samples into the legacy engine's
+        # perturbation dict; until then, downstream consumers can detect
+        # the lower-bound condition via this field.
+        for src in self.spec.sources:
+            if src.kind == UncertaintyKind.CALIBRATION_POSTERIOR:
+                unified.kinds_declared_but_not_sampled.add(
+                    UncertaintyKind.CALIBRATION_POSTERIOR
+                )
         return unified
 
     def run_m2_q_max(

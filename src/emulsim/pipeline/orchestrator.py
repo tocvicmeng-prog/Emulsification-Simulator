@@ -140,17 +140,27 @@ class PipelineOrchestrator:
             # props.breakage_C3 — but the dispatch wires KernelConfig as the
             # primary source.
             if store.has_calibration_for("L1"):
-                kernels = (
+                # Audit N1 (v7.0.1): use a deep copy so the caller's
+                # SimulationParameters instance is not silently mutated.
+                # This matters for callers that reuse `params` across
+                # multiple run_single() calls (e.g. batch_variability.run_batch,
+                # parameter sweeps, optimisation campaigns) — without the copy
+                # the SECOND call would see calibrated kernels left over
+                # from the FIRST.
+                source_kernels = (
                     params.emulsification.kernels
                     or KernelConfig.for_rotor_stator_legacy()
                 )
-                kernels, overrides_log = store.apply_to_model_params("L1", kernels)
+                kernels_copy = copy.deepcopy(source_kernels)
+                kernels_copy, overrides_log = store.apply_to_model_params(
+                    "L1", kernels_copy,
+                )
                 applied_calibrations.extend(overrides_log)
-                # Mutate the params copy that this run will use. We do not
-                # deepcopy params here because run_single is single-threaded
-                # and the caller already owns the SimulationParameters
-                # instance for THIS run.
-                params.emulsification.kernels = kernels
+                # Build a new EmulsificationParameters carrying the calibrated
+                # kernels so we don't write back into the caller's params.
+                params = copy.copy(params)
+                params.emulsification = copy.copy(params.emulsification)
+                params.emulsification.kernels = kernels_copy
 
             if applied_calibrations:
                 logger.info(

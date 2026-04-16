@@ -48,11 +48,34 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class QuantileRun:
-    """One representative-bead simulation result inside a batch."""
+    """One representative-bead simulation result inside a batch.
+
+    Audit N3 (v7.0.1, foot-gun callout): ``full_result.emulsification`` is
+    SHARED BY REFERENCE with the base L1 run for performance reasons —
+    every quantile sees the same DSD because L1 is run only once. So
+    ``full_result.emulsification.d50`` does NOT match the
+    ``representative_radius_m`` used to drive L2/L3/L4 in this quantile.
+
+    Downstream consumers (M2 ingest, plotting, exports) MUST use
+    ``representative_radius_m`` (or its diameter equivalent
+    ``representative_diameter_m``) when they need the bead size that
+    actually fed L2/L3/L4 for this quantile.
+    """
     quantile: float           # e.g. 0.10 for d10
     representative_radius_m: float
     mass_fraction: float      # contribution of this bin to batch mass
     full_result: FullResult
+
+    @property
+    def representative_diameter_m(self) -> float:
+        """Diameter equivalent of ``representative_radius_m`` (audit N3 helper).
+
+        Use this instead of ``full_result.emulsification.d50`` for any
+        downstream code that needs THIS quantile's bead size — the
+        full_result.emulsification fields reflect the BASE L1 DSD, not
+        the per-quantile representative.
+        """
+        return 2.0 * self.representative_radius_m
 
 
 @dataclass
@@ -149,6 +172,10 @@ def run_batch(
         raise ValueError("At least one quantile must be requested.")
     if not all(0.0 < q < 1.0 for q in quantiles):
         raise ValueError("All quantiles must be in (0, 1).")
+    # Audit N8 (v7.0.1): mass-fraction edges only make sense for sorted,
+    # unique quantiles. Silently sort+dedupe rather than producing
+    # negative or zero mass fractions for duplicate or unsorted input.
+    quantiles = tuple(sorted(set(quantiles)))
 
     orch = PipelineOrchestrator(db=db, output_dir=output_dir)
     # First call gives us the DSD; we use its representative radii for
