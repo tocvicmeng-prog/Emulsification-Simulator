@@ -16,6 +16,7 @@ from scipy.integrate import solve_ivp
 
 from ..datatypes import (
     EmulsificationResult,
+    KernelConfig,
     MaterialProperties,
     ModelEvidenceTier,
     ModelManifest,
@@ -39,6 +40,7 @@ from .kernels import (
     coalescence_rate_dispatch,
 )
 from .thermal import temperature_profile
+from .validation import compute_dimensionless_groups
 
 logger = logging.getLogger(__name__)
 
@@ -247,22 +249,45 @@ class PBESolver:
         # Coalescence uses mu_oil (continuous phase) for film drainage, which
         # does not require shear correction for Newtonian oils.
 
+        # F1 fix (2026-04-17): route through breakage_rate_dispatch /
+        # coalescence_rate_dispatch so the legacy `solve()` path honours
+        # KernelConfig (breakage C1/C2/C3, coalescence C4/C5,
+        # phi_d_correction, coalescence_exponent). Previously these direct
+        # calls used hardcoded function defaults, causing
+        # KernelConfig.for_rotor_stator_legacy() to silently no-op for
+        # legacy mode and producing the documented nonphysical RPM->d32
+        # trend. props.breakage_C3 still wins when explicitly overridden so
+        # uncertainty_core.py perturbations and reagent-library overrides
+        # remain effective.
+        kernels = params.emulsification.kernels or KernelConfig.for_rotor_stator_legacy()
+        if props.breakage_C3 != 0.0:
+            # Material-property override takes precedence (e.g., MC perturbation).
+            kernels = KernelConfig(
+                breakage_model=kernels.breakage_model,
+                coalescence_model=kernels.coalescence_model,
+                breakage_C1=kernels.breakage_C1,
+                breakage_C2=kernels.breakage_C2,
+                breakage_C3=props.breakage_C3,
+                coalescence_C4=kernels.coalescence_C4,
+                coalescence_C5=kernels.coalescence_C5,
+                phi_d_correction=kernels.phi_d_correction,
+                coalescence_exponent=kernels.coalescence_exponent,
+            )
+
         # Breakage rates (use zero-shear mu_d for viscous resistance Vi)
         # epsilon_max is used: breakage occurs in the high-shear rotor-stator gap
         nu_c = props.mu_oil / props.rho_oil
-        g = breakage_rate_alopaeus(
+        g = breakage_rate_dispatch(
             self.d_pivots, epsilon_max, props.sigma, props.rho_oil,
-            props.mu_d, C3=props.breakage_C3, nu_c=nu_c,
+            props.mu_d, kernels, nu_c=nu_c,
         )
         birth_matrix, death_rate = self._build_breakage_matrix(g)
 
         # Coalescence rate matrix (vectorised construction)
         # epsilon_avg is used: coalescence occurs in the bulk flow
-        di_grid, dj_grid = np.meshgrid(self.d_pivots, self.d_pivots, indexing='ij')
-        Q = coalescence_rate_ct(
-            di_grid, dj_grid,
-            epsilon_avg, props.sigma, props.rho_oil,
-            props.mu_oil, phi_d=phi_d,
+        Q = coalescence_rate_dispatch(
+            self.d_pivots, epsilon_avg, props.sigma, props.rho_oil,
+            kernels, phi_d=phi_d, mu_c=props.mu_oil,
         )
 
         # Initial distribution
@@ -359,11 +384,34 @@ class PBESolver:
         n_d_history = y_combined.T / self.d_widths[np.newaxis, :]
         d_mode = self._compute_d_mode(N_final)
 
+        dimensionless_groups = compute_dimensionless_groups(
+            rpm=rpm,
+            D_impeller=mixer.rotor_diameter,
+            rho_c=props.rho_oil,
+            mu_c=props.mu_oil,
+            sigma=props.sigma,
+            mu_d=props.mu_d,
+            Np=mixer.power_number,
+            V_tank=mixer.tank_volume,
+            d32=d32,
+        )
+
         model_manifest = ModelManifest(
             model_name="L1.PBE.FixedPivot.AlopaeusCT",
             evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            valid_domain={
+                "Re": (100.0, 1.0e6),
+                "We": (1.0, 1.0e5),
+                "viscosity_ratio": (0.01, 200.0),
+            },
             assumptions=["Kolmogorov turbulence", "daughter-size beta distribution", "fixed-pivot discretization"],
-            diagnostics={"converged": converged, "n_extensions": n_extensions},
+            diagnostics={
+                "converged": converged,
+                "n_extensions": n_extensions,
+                "dimensionless_groups": dimensionless_groups.as_dict(),
+                "epsilon_avg": float(epsilon_avg),
+                "epsilon_max": float(epsilon_max),
+            },
         )
         return EmulsificationResult(
             d_bins=self.d_pivots.copy(),
@@ -637,7 +685,8 @@ class PBESolver:
         T_final_actual = float(np.interp(t_emul, t_eval, T_profile))
         mu_final = _mu_oil_at_T(T_final_actual)
         nu_c_final = mu_final / props.rho_oil
-        eps_final = _epsilon_avg_at_T(T_final_actual) * stirrer.dissipation_ratio
+        eps_avg_final = _epsilon_avg_at_T(T_final_actual)
+        eps_final = eps_avg_final * stirrer.dissipation_ratio
         if eps_final > 0:
             from .energy import kolmogorov_length_scale
             eta_K = kolmogorov_length_scale(eps_final, nu_c_final)
@@ -658,11 +707,39 @@ class PBESolver:
         n_d_output = N_final / self.d_widths
         n_d_history = y_combined_sv.T / self.d_widths[np.newaxis, :]
 
+        Re_final = impeller_reynolds_number(
+            rpm, stirrer.impeller_diameter, rho_emul, mu_final,
+        )
+        Np_final = power_number_corrected(stirrer, Re_final)
+        dimensionless_groups = compute_dimensionless_groups(
+            rpm=rpm,
+            D_impeller=stirrer.impeller_diameter,
+            rho_c=props.rho_oil,
+            mu_c=mu_final,
+            sigma=_sigma_at_T(T_final_actual),
+            mu_d=_mu_d_at_T(T_final_actual),
+            Np=Np_final,
+            V_tank=tank_vol,
+            d32=d32,
+        )
+
         model_manifest = ModelManifest(
             model_name="L1.PBE.FixedPivot.AlopaeusCT",
             evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+            valid_domain={
+                "Re": (100.0, 1.0e6),
+                "We": (1.0, 1.0e5),
+                "viscosity_ratio": (0.01, 200.0),
+            },
             assumptions=["Kolmogorov turbulence", "daughter-size beta distribution", "fixed-pivot discretization"],
-            diagnostics={"converged": converged, "n_extensions": n_extensions},
+            diagnostics={
+                "converged": converged,
+                "n_extensions": n_extensions,
+                "dimensionless_groups": dimensionless_groups.as_dict(),
+                "epsilon_avg": float(eps_avg_final),
+                "epsilon_max": float(eps_final),
+                "final_T_K": T_final_actual,
+            },
         )
         return EmulsificationResult(
             d_bins=self.d_pivots.copy(),

@@ -152,3 +152,43 @@ class TestReactionDiffusionPDE:
             assert result.G_chitosan_final >= 0.0
             assert result.xi_final > 0.0
             assert Phi > 0.0
+
+
+# ─── Node 9 (v6.1, F9): EDC/NHS chemistry applicability gate ──────────────
+
+
+class TestNode9EDCNHSApplicability:
+    """Verifies that EDC/NHS dispatch downgrades the L3 manifest tier.
+
+    Acceptance for Node 9 (F9):
+      - Genipin (matched chemistry, native amines available) -> SEMI_QUANTITATIVE
+        and ``approximate_fallback`` False.
+      - EDC/NHS (michaelis_menten kinetics_model, no dedicated solver, no M2
+        carboxyl context) -> QUALITATIVE_TREND and ``approximate_fallback`` True;
+        manifest assumptions explain the fallback so the user/UI/optimizer
+        can react.
+    """
+
+    def test_genipin_is_semi_quantitative(self):
+        from emulsim.datatypes import ModelEvidenceTier
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solve_crosslinking(params, props, crosslinker_key="genipin")
+        assert result.model_manifest is not None
+        assert result.model_manifest.evidence_tier == ModelEvidenceTier.SEMI_QUANTITATIVE
+        assert result.model_manifest.diagnostics.get("approximate_fallback") is False
+
+    def test_edc_nhs_downgraded_to_qualitative(self):
+        from emulsim.datatypes import ModelEvidenceTier
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solve_crosslinking(params, props, crosslinker_key="edc_nhs")
+        assert result.model_manifest is not None
+        # F9 fix: EDC/NHS without COOH context -> QUALITATIVE_TREND
+        assert result.model_manifest.evidence_tier == ModelEvidenceTier.QUALITATIVE_TREND
+        assert result.model_manifest.diagnostics.get("approximate_fallback") is True
+        # Assumption text must explain the limitation so the trust banner /
+        # optimizer Pareto label can carry the warning forward.
+        joined_assumptions = " ".join(result.model_manifest.assumptions)
+        assert "carboxyl" in joined_assumptions.lower()
+        assert "fallback" in joined_assumptions.lower()

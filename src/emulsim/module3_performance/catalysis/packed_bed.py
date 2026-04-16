@@ -24,10 +24,12 @@ Time integration: scipy.integrate.solve_ivp with BDF method.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from ...datatypes import ModelEvidenceTier, ModelManifest
 from .kinetics import (
     effectiveness_factor,
     generalized_thiele_modulus,
@@ -78,6 +80,11 @@ class CatalyticResult:
     productivity: float
     activity_history: np.ndarray
     mass_balance_error: float
+    # v6.1 (Node 5): evidence provenance — populated by solve_packed_bed.
+    # Catalytic kinetics rely on user-supplied V_max/K_m and a Thiele-modulus
+    # diagnostic; tier defaults to SEMI_QUANTITATIVE and is gated by mass
+    # balance and Thiele regime checks.
+    model_manifest: Optional[ModelManifest] = None
 
 
 # ---------------------------------------------------------------------------
@@ -275,6 +282,14 @@ def solve_packed_bed(
     else:
         mass_balance_error = 0.0
 
+    manifest = _build_catalytic_manifest(
+        thiele=float(phi_gen),
+        eta=float(eta_feed),
+        conversion=conversion,
+        mass_balance_error=mass_balance_error,
+        k_deact=k_deact,
+    )
+
     return CatalyticResult(
         time=sol.t,
         z=z,
@@ -286,4 +301,104 @@ def solve_packed_bed(
         productivity=productivity,
         activity_history=activity,
         mass_balance_error=mass_balance_error,
+        model_manifest=manifest,
+    )
+
+
+# ─── Node 5: catalytic-result manifest ────────────────────────────────────
+
+
+# Catalytic mass-balance gates mirror the chromatography gates in the M3
+# orchestrator: <=2% ok, 2-5% caution, >5% capped at QUALITATIVE_TREND.
+_CAT_MB_CAUTION = 0.02
+_CAT_MB_BLOCKER = 0.05
+
+# Thiele-modulus regime cuts: phi <= 0.3 reaction-limited, > 1.0 strongly
+# diffusion-limited (effectiveness factor << 1, predictions become sensitive
+# to D_eff which the user usually cannot calibrate locally).
+_THIELE_REACTION_LIMIT = 0.3
+_THIELE_DIFFUSION_LIMIT = 1.0
+
+
+def _build_catalytic_manifest(
+    thiele: float,
+    eta: float,
+    conversion: float,
+    mass_balance_error: float,
+    k_deact: float,
+) -> ModelManifest:
+    """Build the CatalyticResult ModelManifest.
+
+    Tier policy:
+      * Default SEMI_QUANTITATIVE — V_max and K_m are user-supplied kinetics
+        with no global calibration framework wired in v6.1.
+      * Cap at QUALITATIVE_TREND when:
+          - mass_balance_error > 5% (solver lost mass, rates not defendable);
+          - phi > 1.0 AND eta < 0.5 (strongly diffusion-limited;
+            effectiveness factor sensitive to D_eff which is rarely measured).
+      * If conversion is essentially zero AND no deactivation was modelled,
+        the run produced no chemistry — flag as UNSUPPORTED for downstream.
+    """
+    tier = ModelEvidenceTier.SEMI_QUANTITATIVE
+    diagnostics: dict = {
+        "thiele_modulus": float(thiele),
+        "effectiveness_factor": float(eta),
+        "conversion": float(conversion),
+        "mass_balance_error": float(mass_balance_error),
+        "deactivation_active": float(k_deact) > 0.0,
+    }
+    assumptions: list[str] = [
+        "Michaelis-Menten kinetics with user-supplied V_max and K_m "
+        "(no calibration framework wired in v6.1).",
+    ]
+
+    # Regime classification.
+    if thiele <= _THIELE_REACTION_LIMIT:
+        diagnostics["regime"] = "reaction_limited"
+    elif thiele <= _THIELE_DIFFUSION_LIMIT:
+        diagnostics["regime"] = "borderline"
+    else:
+        diagnostics["regime"] = "diffusion_limited"
+
+    # Mass-balance gate.
+    if mass_balance_error > _CAT_MB_BLOCKER:
+        diagnostics["mass_balance_status"] = "blocker"
+        tier = ModelEvidenceTier.QUALITATIVE_TREND
+        assumptions.append(
+            f"Mass balance error {mass_balance_error:.1%} exceeds {_CAT_MB_BLOCKER:.0%}; "
+            "conversion and productivity are not decision-grade."
+        )
+    elif mass_balance_error > _CAT_MB_CAUTION:
+        diagnostics["mass_balance_status"] = "caution"
+    else:
+        diagnostics["mass_balance_status"] = "ok"
+
+    # Diffusion-limited regime gate.
+    if thiele > _THIELE_DIFFUSION_LIMIT and eta < 0.5:
+        # Tier is already SEMI; only weaken if not already capped.
+        _ORDER = list(ModelEvidenceTier)
+        capped = max(
+            _ORDER.index(tier),
+            _ORDER.index(ModelEvidenceTier.QUALITATIVE_TREND),
+        )
+        tier = _ORDER[capped]
+        assumptions.append(
+            f"Strongly diffusion-limited (Thiele={thiele:.2f}, eta={eta:.2f}); "
+            "predictions are sensitive to D_eff which is typically uncalibrated."
+        )
+
+    # No-chemistry sentinel: if the solver produced essentially zero conversion
+    # and no kinetic activity was simulated (no deactivation either), the run
+    # carries no useful chemistry signal.
+    if conversion <= 1e-6 and k_deact <= 0.0:
+        tier = ModelEvidenceTier.UNSUPPORTED
+        assumptions.append("No measurable conversion; treat as UNSUPPORTED.")
+
+    return ModelManifest(
+        model_name="M3.catalysis.packed_bed.MM",
+        evidence_tier=tier,
+        valid_domain={},
+        calibration_ref="",
+        assumptions=assumptions,
+        diagnostics=diagnostics,
     )

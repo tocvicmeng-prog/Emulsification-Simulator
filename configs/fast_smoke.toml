@@ -1,0 +1,48 @@
+[simulation]
+run_id = "fast_smoke"
+notes = "Fast smoke-test configuration for CLI and pipeline checks."
+
+[emulsification]
+rpm = 10000
+t_emulsification = 10.0
+
+[emulsification.mixer]
+rotor_diameter = 0.025
+stator_diameter = 0.026
+gap_width = 0.0005
+tank_volume = 0.0005
+power_number = 1.5
+dissipation_ratio = 50.0
+
+[formulation]
+c_agarose = 42.0
+c_chitosan = 18.0
+c_span80 = 20.0
+c_genipin = 2.0
+T_oil = 363.15
+cooling_rate = 0.167
+T_crosslink = 310.15
+t_crosslink = 86400.0
+phi_d = 0.05
+
+[solver.level1]
+n_bins = 10
+d_min = 1e-6
+d_max = 200e-6
+rtol = 1e-5
+atol = 1e-7
+t_max = 10.0
+conv_tol = 0.05
+max_extensions = 0
+
+[solver.level2]
+n_r = 100
+n_grid = 32
+dt_initial = 1e-4
+dt_max = 1.0
+arrest_exponent = 2.5
+
+[solver.level3]
+method = "Radau"
+rtol = 1e-6
+atol = 1e-8

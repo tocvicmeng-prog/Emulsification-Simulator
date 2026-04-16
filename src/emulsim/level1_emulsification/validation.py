@@ -340,13 +340,13 @@ class DimensionlessGroups:
     def as_dict(self) -> dict:
         """Return all groups as a plain dict for diagnostics/JSON."""
         return {
-            "Re": self.Re,
-            "We": self.We,
-            "Ca": self.Ca,
-            "viscosity_ratio": self.viscosity_ratio,
-            "eta_K_m": self.eta_K,
-            "d32_over_eta_K": self.d32_over_eta_K,
-            "Np": self.Np,
+            "Re": float(self.Re),
+            "We": float(self.We),
+            "Ca": float(self.Ca),
+            "viscosity_ratio": float(self.viscosity_ratio),
+            "eta_K_m": float(self.eta_K),
+            "d32_over_eta_K": float(self.d32_over_eta_K),
+            "Np": float(self.Np),
         }
 
 

@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+from ..datatypes import ModelEvidenceTier, ModelManifest
 from .acs import ACSSiteType, ACSProfile
 from .reactions import (
     solve_second_order_consumption,
@@ -134,6 +135,12 @@ class ModificationResult:
     conversion: float = 0.0
     delta_G_DN: float = 0.0
     notes: str = ""
+    # v6.1 (Node 4): evidence provenance — populated by solve_modification_step.
+    # Tier defaults to SEMI_QUANTITATIVE for M2 chemistry (rate constants and
+    # accessibility coefficients are literature/profile-derived, not locally
+    # calibrated). Downgrade to QUALITATIVE_TREND when the reagent profile is
+    # ranking-only or when conservation violations are detected.
+    model_manifest: Optional[ModelManifest] = None
 
 
 # ─── Core solver ────────────────────────────────────────────────────────
@@ -278,13 +285,103 @@ def solve_modification_step(
     result.acs_after = _snapshot_acs(acs_state)
 
     # --- Validate conservation after step ---
+    conservation_violations: list[str] = []
     for profile in acs_state.values():
         violations = profile.validate()
         if violations:
+            conservation_violations.extend(violations)
             result.notes += f" Conservation violations: {'; '.join(violations)}"
             logger.warning("ACS conservation violation: %s", violations)
 
+    # --- Attach model manifest (Node 4: M2 evidence wiring) ---
+    result.model_manifest = _build_step_manifest(
+        step=step,
+        reagent_profile=reagent_profile,
+        result=result,
+        conservation_violations=conservation_violations,
+    )
+
     return result
+
+
+def _build_step_manifest(
+    step: ModificationStep,
+    reagent_profile: ReagentProfile,
+    result: ModificationResult,
+    conservation_violations: list[str],
+) -> ModelManifest:
+    """Construct the per-step ModelManifest.
+
+    Tier policy (Node 4):
+      - UNSUPPORTED: solver dispatched but produced no chemistry (skipped).
+      - QUALITATIVE_TREND: ranking-only reagent (affinity/biotin/heparin) OR
+        any conservation violation detected after the step.
+      - SEMI_QUANTITATIVE: literature/profile-derived rate constants without
+        local calibration. This is the M2 default in v6.1; future calibration
+        through CalibrationStore (Sprint 3 of consensus plan) can upgrade
+        this to CALIBRATED_LOCAL or VALIDATED_QUANTITATIVE.
+
+    Diagnostics carry the achieved conversion, delta_G_DN, and any conservation
+    violations so RunReport.compute_min_tier() can roll the M2 evidence into a
+    pipeline-wide tier without re-reading the reagent profile.
+    """
+    # Default to SEMI_QUANTITATIVE — the v6.1 default for M2 chemistry.
+    tier = ModelEvidenceTier.SEMI_QUANTITATIVE
+
+    # Ranking-only reagent classes cap evidence at QUALITATIVE_TREND. The
+    # functional_mode strings come from reagent_profiles.py and indicate
+    # binding modes whose q_max is intrinsically not quantitatively predictable
+    # from ligand density alone (e.g., affinity stoichiometry depends on the
+    # target protein, biotin/heparin involve cooperative binding effects).
+    _ranking_modes = {"affinity_ligand", "biotin_affinity", "heparin_affinity"}
+    if getattr(reagent_profile, "functional_mode", "") in _ranking_modes:
+        tier = ModelEvidenceTier.QUALITATIVE_TREND
+
+    # Conservation violations override everything: a step that broke ACS
+    # bookkeeping cannot back a quantitative claim regardless of reagent class.
+    if conservation_violations:
+        tier = ModelEvidenceTier.QUALITATIVE_TREND
+
+    # No chemistry happened — surface had nothing to react with.
+    if result.conversion <= 0.0 and "skipped" in result.notes.lower():
+        tier = ModelEvidenceTier.UNSUPPORTED
+
+    diagnostics: dict = {
+        "conversion": float(result.conversion),
+        "delta_G_DN_Pa": float(result.delta_G_DN),
+        "conservation_ok": len(conservation_violations) == 0,
+    }
+    if conservation_violations:
+        diagnostics["conservation_violations"] = list(conservation_violations)
+
+    assumptions: list[str] = []
+    if getattr(reagent_profile, "k_ref", None) is not None:
+        assumptions.append(
+            f"Rate constant k_ref={reagent_profile.k_ref:g} from reagent profile "
+            f"(literature value, not locally calibrated)."
+        )
+    if getattr(reagent_profile, "activity_retention", None) is not None:
+        assumptions.append(
+            f"activity_retention={reagent_profile.activity_retention:.2f} default "
+            "(per-protein value not calibrated)."
+        )
+
+    valid_domain: dict = {}
+    # Reagent profiles carry pH/T validity ranges in some cases; surface them
+    # here if present so trust gates can warn when the step runs outside them.
+    for attr, key in (("pH_range", "pH"), ("T_range_K", "T_K")):
+        rng = getattr(reagent_profile, attr, None)
+        if rng is not None:
+            valid_domain[key] = tuple(rng) if isinstance(rng, (list, tuple)) else rng
+
+    return ModelManifest(
+        model_name=f"M2.{step.step_type.value}.{step.reagent_key}",
+        evidence_tier=tier,
+        valid_domain=valid_domain,
+        calibration_ref="",
+        assumptions=assumptions,
+        diagnostics=diagnostics,
+    )
 
 
 # ─── Workflow 1: Amine secondary crosslinking ─────────────────────────

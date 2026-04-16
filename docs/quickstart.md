@@ -15,12 +15,32 @@ pip install -e .
 # Show default parameters
 python -m emulsim info
 
-# Run with defaults (Genipin + Span-80, 10000 RPM)
+# Fast smoke (~1 s) — useful for verifying the install and CI gates
+python -m emulsim run configs/fast_smoke.toml --quiet
+
+# Full default research run (~4 min, dominated by L2 phase-field)
 python -m emulsim run
 
 # Run with custom RPM
 python -m emulsim run --rpm 15000
 ```
+
+### Expected baseline output
+
+`fast_smoke.toml` should reliably produce (within rounding):
+
+```
+=== Simulation Results ===
+  L1 Emulsification:  d32 = 22.08 um   span = 1.04
+  L2 Gelation:        pore = 180.9 nm  porosity = 0.871
+  L3 Crosslinking:    p = 0.040        G_chit = 2062 Pa
+  L4 Mechanical:      G_DN = 70766 Pa  E* = 257332 Pa
+```
+
+These are uncalibrated semi-quantitative outputs (see Calibration below).
+The `tests/test_smoke.py` gate (`pytest -m smoke`) verifies these stay
+inside generous sanity bounds across releases. If you see materially
+different values, the model defaults have drifted.
 
 ### Option 2: Web UI
 ```bash
@@ -88,3 +108,49 @@ python -m emulsim uncertainty --n-samples 20
 ## Calibration
 
 See `docs/04_calibration_protocol.md` for a 5-study wet-lab protocol to calibrate the simulation constants against your specific materials.
+
+Once you have calibration data, supply it via `RunContext` (Node 7):
+
+```python
+from emulsim.calibration.calibration_store import CalibrationStore
+from emulsim.datatypes import RunContext
+from emulsim.pipeline.orchestrator import PipelineOrchestrator
+
+store = CalibrationStore()
+store.load_json("my_calibration.json")
+ctx = RunContext(calibration_store=store)
+result = PipelineOrchestrator().run_single(params, run_context=ctx)
+# result.run_report.diagnostics["calibrations_applied"] lists every override.
+```
+
+Calibration entries with `target_module="L1"` rewrite `KernelConfig` constants
+(breakage_C1/C2/C3, coalescence_C4/C5); `"L2"`, `"L3"`, `"L4"` rewrite
+`MaterialProperties` fields. Apply order is documented in
+`pipeline/orchestrator.py`.
+
+## Runtime expectations
+
+| Config | Approximate runtime | When to use |
+|---|---|---|
+| `configs/fast_smoke.toml` | ~0.2 s | CI smoke gate, first install verification |
+| `configs/default.toml` | ~4 minutes (n_grid=128 phase field) | Production research run |
+| `configs/stirred_vessel.toml` | varies | Stirred-vessel mode comparison |
+
+Set `[solver.level2].n_grid` lower (e.g. 32) to make the default config
+finish in under a minute at the cost of pore-morphology resolution.
+
+## Evidence tiers (v6.1)
+
+Every `FullResult` now carries a `RunReport` with the weakest evidence
+tier across L1-L4 + M2 + M3:
+
+- `VALIDATED_QUANTITATIVE` — calibrated against your specific system
+- `CALIBRATED_LOCAL` — calibrated against an analogous system
+- `SEMI_QUANTITATIVE` — empirical model, not locally calibrated (default)
+- `QUALITATIVE_TREND` — directional only (e.g. EDC/NHS approximate fallback)
+- `UNSUPPORTED` — model not applicable to this chemistry/regime
+
+The Bayesian optimizer (`python -m emulsim optimize`) excludes
+`QUALITATIVE_TREND` and `UNSUPPORTED` candidates from the Pareto front by
+default; each surviving Pareto point is labelled with its weakest tier in
+`output/optimization/optimization_results.json`.

@@ -25,6 +25,10 @@ from .modification_steps import (
 from .reagent_profiles import REAGENT_PROFILES, ReagentProfile
 from .surface_area import AccessibleSurfaceModel
 
+from typing import Optional
+
+from ..datatypes import ModelEvidenceTier, ModelManifest
+
 if TYPE_CHECKING:
     from emulsim.datatypes import M1ExportContract
 
@@ -73,6 +77,10 @@ class FunctionalMicrosphere:
     pretreatment_state: ProteinPretreatmentState = field(default_factory=ProteinPretreatmentState)
     # v5.9.4: Residual reagent concentrations after washing
     residual_concentrations: dict = field(default_factory=dict)
+    # v6.1 (Node 4): composite manifest summarising all step manifests; the
+    # weakest tier across the modification history wins, mirroring how
+    # RunReport.compute_min_tier() rolls up M1 levels.
+    model_manifest: Optional[ModelManifest] = None
 
     def validate(self) -> list[str]:
         """Validate ACS conservation across all profiles.
@@ -142,6 +150,83 @@ class FunctionalMediaContract:
     # ── Trust ──
     confidence_tier: str = "semi_quantitative"
     warnings: list[str] = field(default_factory=list)
+    # v6.1 (Node 4): structured evidence record. confidence_tier above is kept
+    # as the legacy string field that downstream UI/tests already read; the
+    # manifest carries the typed enum, valid_domain, and diagnostics used by
+    # RunReport and the trust-aware optimizer (consensus plan Sprint 5).
+    model_manifest: Optional[ModelManifest] = None
+
+    def validate_units(self) -> list[str]:
+        """Node 10 (F11): boundary-level unit/range sanity checks for M2->M3.
+
+        Same intent as M1ExportContract.validate_units: catch silent unit
+        mismatches at the contract boundary. Returns a list of violations
+        (empty = pass).
+        """
+        violations: list[str] = []
+
+        # Geometry inherited from M1.
+        if self.bead_d50 != 0.0 and not (1e-7 <= self.bead_d50 <= 1e-2):
+            violations.append(
+                f"bead_d50={self.bead_d50:g} m outside [1e-7, 1e-2]; wrong unit?"
+            )
+        if not (0.0 <= self.porosity <= 1.0):
+            violations.append(
+                f"porosity={self.porosity:g} outside [0, 1]."
+            )
+        if self.pore_size_mean != 0.0 and not (1e-9 <= self.pore_size_mean <= 1e-5):
+            violations.append(
+                f"pore_size_mean={self.pore_size_mean:g} m outside [1e-9, 1e-5]."
+            )
+
+        # Ligand densities are mol/m^2. Realistic values 1e-7 to 1e-3 mol/m^2.
+        for name, val in (
+            ("functional_ligand_density", self.functional_ligand_density),
+            ("total_coupled_density", self.total_coupled_density),
+            ("charge_density", self.charge_density),
+            ("active_protein_density", self.active_protein_density),
+        ):
+            if val < 0.0:
+                violations.append(f"{name}={val:g} mol/m^2 must be non-negative.")
+            elif val > 1.0:
+                violations.append(
+                    f"{name}={val:g} mol/m^2 exceeds 1; mol/m^2 vs mol/m^3 confusion?"
+                )
+
+        # estimated_q_max is mol/m^3 of bed. Realistic capacities are
+        # 0-2000 mol/m^3 for IEX, 0-100 for affinity. Block obviously wrong.
+        if self.estimated_q_max < 0.0:
+            violations.append(
+                f"estimated_q_max={self.estimated_q_max:g} mol/m^3 must be non-negative."
+            )
+        if self.estimated_q_max > 1e5:
+            violations.append(
+                f"estimated_q_max={self.estimated_q_max:g} mol/m^3 exceeds 1e5; "
+                "wrong unit?"
+            )
+        if self.q_max_lower > self.q_max_upper and self.q_max_upper > 0.0:
+            violations.append(
+                f"q_max_lower={self.q_max_lower:g} > q_max_upper={self.q_max_upper:g}; "
+                "uncertainty bounds inverted."
+            )
+
+        # Mechanical inherited from M1 (Pa).
+        if self.G_DN_updated != 0.0 and not (1.0 <= self.G_DN_updated <= 1e9):
+            violations.append(
+                f"G_DN_updated={self.G_DN_updated:g} Pa outside [1, 1e9]."
+            )
+        if self.E_star_updated != 0.0 and not (1.0 <= self.E_star_updated <= 1e10):
+            violations.append(
+                f"E_star_updated={self.E_star_updated:g} Pa outside [1, 1e10]."
+            )
+
+        if not (0.0 <= self.activity_retention_uncertainty <= 1.0):
+            violations.append(
+                f"activity_retention_uncertainty={self.activity_retention_uncertainty:g} "
+                "outside [0, 1]."
+            )
+
+        return violations
 
 
 def build_functional_media_contract(
@@ -329,7 +414,19 @@ def build_functional_media_contract(
     elif _binding_hint == "metal_chelation":
         _proc_req = "imidazole"
 
-    return FunctionalMediaContract(
+    # Build FMC manifest by combining the microsphere composite with the
+    # FMC-level mapping evidence (e.g., ranking_only ligand types, m3_support).
+    fmc_manifest = _build_fmc_manifest(
+        microsphere_manifest=microsphere.model_manifest,
+        confidence_tier_str=_conf_tier,
+        ligand_type=ligand_type,
+        m3_support_level=_m3_support,
+        q_max_est=q_max_est,
+        q_max_notes=q_max_notes,
+        warnings=warnings,
+    )
+
+    fmc = FunctionalMediaContract(
         bead_d50=contract.bead_d50,
         porosity=contract.porosity,
         pore_size_mean=contract.pore_size_mean,
@@ -359,6 +456,79 @@ def build_functional_media_contract(
         process_state_requirements=_proc_req,
         confidence_tier=_conf_tier,
         warnings=warnings,
+        model_manifest=fmc_manifest,
+    )
+
+    # Node 10 (F11): boundary unit/range check at the M2->M3 contract.
+    _unit_violations = fmc.validate_units()
+    if _unit_violations:
+        logger.warning(
+            "FunctionalMediaContract failed %d unit/range check(s):\n  %s",
+            len(_unit_violations),
+            "\n  ".join(_unit_violations),
+        )
+        fmc.warnings.extend(
+            f"FMC unit check: {v}" for v in _unit_violations
+        )
+
+    return fmc
+
+
+def _build_fmc_manifest(
+    microsphere_manifest: Optional[ModelManifest],
+    confidence_tier_str: str,
+    ligand_type: str,
+    m3_support_level: str,
+    q_max_est: float,
+    q_max_notes: str,
+    warnings: list[str],
+) -> ModelManifest:
+    """Build the FMC manifest combining microsphere evidence with FMC mapping.
+
+    The FMC tier is the weaker of the upstream microsphere tier and the FMC's
+    own q_max-mapping confidence. This is the M2->M3 evidence handoff:
+    M3 should never claim better evidence than the FMC's worst input.
+
+    Tier mapping for the legacy `confidence_tier` string:
+      ranking_only          -> QUALITATIVE_TREND
+      semi_quantitative     -> SEMI_QUANTITATIVE
+      mapped_estimated      -> SEMI_QUANTITATIVE (q_max from accessibility model,
+                              not from a measured isotherm)
+      requires_user_calibration -> SEMI_QUANTITATIVE with diagnostic flag
+    """
+    _STR_TO_TIER = {
+        "ranking_only": ModelEvidenceTier.QUALITATIVE_TREND,
+        "semi_quantitative": ModelEvidenceTier.SEMI_QUANTITATIVE,
+        "mapped_estimated": ModelEvidenceTier.SEMI_QUANTITATIVE,
+        "requires_user_calibration": ModelEvidenceTier.SEMI_QUANTITATIVE,
+        "not_mapped": ModelEvidenceTier.UNSUPPORTED,
+        "validated": ModelEvidenceTier.VALIDATED_QUANTITATIVE,
+    }
+    fmc_own_tier = _STR_TO_TIER.get(confidence_tier_str, ModelEvidenceTier.SEMI_QUANTITATIVE)
+
+    # If no upstream manifest, we can only attest to FMC-level evidence.
+    if microsphere_manifest is None:
+        composite_tier = fmc_own_tier
+    else:
+        # Weakest wins (largest index in the tier list = weakest)
+        _ORDER = list(ModelEvidenceTier)
+        composite_idx = max(
+            _ORDER.index(microsphere_manifest.evidence_tier),
+            _ORDER.index(fmc_own_tier),
+        )
+        composite_tier = _ORDER[composite_idx]
+
+    return ModelManifest(
+        model_name=f"M2.FMC.{ligand_type or 'none'}",
+        evidence_tier=composite_tier,
+        diagnostics={
+            "fmc_confidence_tier": confidence_tier_str,
+            "m3_support_level": m3_support_level,
+            "estimated_q_max": float(q_max_est),
+            "ligand_type": ligand_type,
+            "n_warnings": len(warnings),
+        },
+        assumptions=[q_max_notes] if q_max_notes else [],
     )
 
 
@@ -456,6 +626,9 @@ class ModificationOrchestrator:
             G_DN_base, G_DN_updated, total_delta_G,
         )
 
+        # Composite manifest for the microsphere — weakest step tier wins.
+        composite_manifest = _build_microsphere_manifest(history)
+
         return FunctionalMicrosphere(
             m1_contract=contract,
             surface_model=surface_model,
@@ -463,7 +636,63 @@ class ModificationOrchestrator:
             modification_history=history,
             G_DN_updated=G_DN_updated,
             E_star_updated=E_star_updated,
+            model_manifest=composite_manifest,
         )
+
+
+def _build_microsphere_manifest(
+    history: list[ModificationResult],
+) -> ModelManifest:
+    """Aggregate per-step manifests into a single FunctionalMicrosphere manifest.
+
+    Tier rule: the weakest tier across the history wins (UNSUPPORTED >
+    QUALITATIVE_TREND > SEMI_QUANTITATIVE > CALIBRATED_LOCAL >
+    VALIDATED_QUANTITATIVE). Diagnostics aggregate per-step counts so a
+    consumer can tell whether any step was a fallback.
+
+    Empty history returns an UNSUPPORTED manifest — the orchestrator was
+    invoked with no chemistry, so no functional surface evidence exists.
+    """
+    if not history:
+        return ModelManifest(
+            model_name="M2.composite",
+            evidence_tier=ModelEvidenceTier.UNSUPPORTED,
+            diagnostics={"n_steps": 0},
+            assumptions=["No modification steps executed."],
+        )
+
+    _ORDER = list(ModelEvidenceTier)  # validated ... unsupported, in order
+    worst_idx = 0
+    step_summaries: list[dict] = []
+    assumptions: list[str] = []
+    for i, mr in enumerate(history):
+        m = mr.model_manifest
+        if m is None:
+            # Defensive: a step without a manifest is treated as the worst tier
+            # so the composite cannot be silently upgraded by missing data.
+            worst_idx = max(worst_idx, _ORDER.index(ModelEvidenceTier.UNSUPPORTED))
+            step_summaries.append({"step": i + 1, "missing_manifest": True})
+            continue
+        worst_idx = max(worst_idx, _ORDER.index(m.evidence_tier))
+        step_summaries.append({
+            "step": i + 1,
+            "name": m.model_name,
+            "tier": m.evidence_tier.value,
+            "conversion": m.diagnostics.get("conversion"),
+        })
+        assumptions.extend(m.assumptions)
+
+    return ModelManifest(
+        model_name="M2.composite",
+        evidence_tier=_ORDER[worst_idx],
+        diagnostics={
+            "n_steps": len(history),
+            "steps": step_summaries,
+            "weakest_tier": _ORDER[worst_idx].value,
+        },
+        # De-dupe assumptions while preserving order
+        assumptions=list(dict.fromkeys(assumptions)),
+    )
 
 
 # ─── Backend Workflow Validation (audit F8) ──────────────────────────

@@ -57,13 +57,20 @@ python -m emulsim ui
 
 ### Example Output
 
+The fast smoke config (`configs/fast_smoke.toml`, ~0.2 s) reliably produces:
+
 ```
 === Simulation Results ===
-  L1 Emulsification:  d32 = 42.15 um   span = 1.23
-  L2 Gelation:        pore = 78.3 nm    porosity = 0.412
-  L3 Crosslinking:    p = 0.247         G_chit = 1850 Pa
-  L4 Mechanical:      G_DN = 8420 Pa    E* = 25100 Pa
+  L1 Emulsification:  d32 = 22.08 um   span = 1.04
+  L2 Gelation:        pore = 180.9 nm  porosity = 0.871
+  L3 Crosslinking:    p = 0.040        G_chit = 2062 Pa
+  L4 Mechanical:      G_DN = 70766 Pa  E* = 257332 Pa
 ```
+
+These are uncalibrated **semi-quantitative** outputs — the platform now ships
+a `RunReport` with each result that carries the weakest model evidence tier
+(see `docs/quickstart.md` for tier definitions and the new
+`RunContext`/`CalibrationStore` calibration-injection workflow).
 
 ### RPM Sweep
 

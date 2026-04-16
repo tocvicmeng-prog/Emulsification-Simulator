@@ -11,11 +11,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from ..datatypes import ModelEvidenceTier, ModelManifest
 from .hydrodynamics import ColumnGeometry
 from .isotherms.langmuir import LangmuirIsotherm
 from .isotherms.competitive_langmuir import CompetitiveLangmuirIsotherm
@@ -54,6 +55,10 @@ class BreakthroughResult:
     dbc_50pct: float
     pressure_drop: float
     mass_balance_error: float
+    # v6.1 (Node 5): evidence provenance — populated by run_breakthrough.
+    # Inherits the weakest tier from the upstream FMC manifest, then applies
+    # M3-specific gates (mass-balance > 5% downgrades to QUALITATIVE_TREND).
+    model_manifest: Optional[ModelManifest] = None
 
 
 def _compute_dbc(
@@ -218,6 +223,19 @@ def run_breakthrough(
         lrm_result.time, lrm_result.C_outlet, C_feed, flow_rate, V_col, 0.50
     )
 
+    manifest = _build_m3_chrom_manifest(
+        model_basename="M3.breakthrough.LRM",
+        isotherm=isotherm,
+        fmc=fmc,
+        worst_mass_balance_error=lrm_result.mass_balance_error,
+        diagnostics_extra={
+            "dbc_5pct": float(dbc_5),
+            "dbc_10pct": float(dbc_10),
+            "dbc_50pct": float(dbc_50),
+            "pressure_drop_Pa": float(pressure_drop),
+        },
+    )
+
     return BreakthroughResult(
         time=lrm_result.time,
         uv_signal=uv_signal,
@@ -227,6 +245,96 @@ def run_breakthrough(
         dbc_50pct=dbc_50,
         pressure_drop=pressure_drop,
         mass_balance_error=lrm_result.mass_balance_error,
+        model_manifest=manifest,
+    )
+
+
+# ─── Node 5: M3 manifest builder (shared by breakthrough + gradient) ────────
+
+
+# Mass-balance gates (consensus plan §5):
+#   <= 2%  -> no downgrade
+#   2-5%  -> caution flag in diagnostics
+#   > 5%  -> tier capped at QUALITATIVE_TREND (output not decision-grade)
+_M3_MB_CAUTION = 0.02
+_M3_MB_BLOCKER = 0.05
+
+
+def _build_m3_chrom_manifest(
+    model_basename: str,
+    isotherm,
+    fmc,
+    worst_mass_balance_error: float,
+    diagnostics_extra: dict | None = None,
+) -> ModelManifest:
+    """Build a chromatography-result ModelManifest.
+
+    Tier inheritance:
+      * Start from the upstream FMC manifest tier when available (M3 cannot
+        be stronger than its inputs). Fall back to SEMI_QUANTITATIVE when
+        the caller passed no FMC (CLI breakthrough with default isotherm).
+      * Apply the mass-balance gate: a balance error worse than 5% caps the
+        tier at QUALITATIVE_TREND because DBC/yield/purity numbers cannot be
+        defended quantitatively when the solver has lost or fabricated mass.
+
+    Diagnostics carry the mass balance, isotherm class, and any extras
+    supplied by the caller (DBC values, peak resolution, etc.) so RunReport
+    consumers can roll the M3 evidence into a pipeline-wide tier.
+    """
+    _ORDER = list(ModelEvidenceTier)
+
+    # Inherit upstream tier from FMC manifest, else default to SEMI.
+    fmc_manifest = getattr(fmc, "model_manifest", None) if fmc is not None else None
+    if fmc_manifest is not None:
+        tier = fmc_manifest.evidence_tier
+        upstream_assumptions = list(fmc_manifest.assumptions)
+        upstream_calref = fmc_manifest.calibration_ref
+    else:
+        tier = ModelEvidenceTier.SEMI_QUANTITATIVE
+        upstream_assumptions = []
+        upstream_calref = ""
+
+    # Mass-balance gate.
+    mb_status = "ok"
+    if worst_mass_balance_error > _M3_MB_BLOCKER:
+        mb_status = "blocker"
+        # Cap tier at QUALITATIVE_TREND: take the weaker of (current tier,
+        # QUALITATIVE_TREND) using the canonical ordering where larger
+        # _ORDER index == weaker tier.
+        capped_idx = max(
+            _ORDER.index(tier),
+            _ORDER.index(ModelEvidenceTier.QUALITATIVE_TREND),
+        )
+        tier = _ORDER[capped_idx]
+    elif worst_mass_balance_error > _M3_MB_CAUTION:
+        mb_status = "caution"
+
+    diagnostics: dict = {
+        "isotherm_class": type(isotherm).__name__ if isotherm is not None else "None",
+        "mass_balance_error": float(worst_mass_balance_error),
+        "mass_balance_status": mb_status,
+        "fmc_provided": fmc is not None,
+    }
+    if diagnostics_extra:
+        diagnostics.update(diagnostics_extra)
+
+    assumptions = upstream_assumptions + [
+        "M3 inherits the weakest tier from the upstream FunctionalMediaContract; "
+        "isotherm parameters are calibrated only when the FMC manifest is calibrated.",
+    ]
+    if mb_status == "blocker":
+        assumptions.append(
+            f"Mass balance error {worst_mass_balance_error:.1%} exceeds {_M3_MB_BLOCKER:.0%}; "
+            "DBC, yield, and purity outputs are not decision-grade."
+        )
+
+    return ModelManifest(
+        model_name=model_basename,
+        evidence_tier=tier,
+        valid_domain={},
+        calibration_ref=upstream_calref,
+        assumptions=assumptions,
+        diagnostics=diagnostics,
     )
 
 
@@ -281,6 +389,9 @@ class GradientElutionResult:
     pressure_drop: float
     mass_balance_errors: np.ndarray     # shape (n_comp,)
     gradient_affects_binding: bool = False  # True only for SMA/IMAC isotherms
+    # v6.1 (Node 5): evidence provenance — populated by run_gradient_elution.
+    # The mass-balance gate uses the worst per-component error.
+    model_manifest: Optional[ModelManifest] = None
 
 
 def _find_peak(
@@ -753,6 +864,24 @@ def run_gradient_elution(
         overall_yield * 100,
     )
 
+    # Manifest: gradient elution has no FMC argument in this signature, so the
+    # caller upstream (UI/CLI) is responsible for providing one if available.
+    # We still build a manifest so the result is uniformly evidence-tagged;
+    # mass-balance gate uses the worst per-component error.
+    worst_mb = float(np.max(mass_balance_errors)) if len(mass_balance_errors) > 0 else 0.0
+    manifest = _build_m3_chrom_manifest(
+        model_basename="M3.gradient_elution.LRM",
+        isotherm=isotherm,
+        fmc=None,  # Not currently passed to gradient API; caller supplies if known.
+        worst_mass_balance_error=worst_mb,
+        diagnostics_extra={
+            "n_components": int(n_comp),
+            "overall_yield": float(overall_yield),
+            "gradient_affects_binding": bool(gradient_affects_binding),
+            "n_peaks": int(len(peaks)),
+        },
+    )
+
     return GradientElutionResult(
         time=time,
         C_outlet=C_outlet,
@@ -764,4 +893,5 @@ def run_gradient_elution(
         pressure_drop=column.pressure_drop(flow_rate, mu),
         mass_balance_errors=mass_balance_errors,
         gradient_affects_binding=gradient_affects_binding,
+        model_manifest=manifest,
     )

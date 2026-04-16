@@ -339,3 +339,67 @@ class TestCahnHilliard2DSolver:
         result = solve_gelation(params, props, R_droplet=3.0e-6, use_2d=False)
         assert result.phi_field.ndim == 1
         assert result.L_domain == 0.0
+
+
+# ─── Node 8 (v6.1, F8): L2 alpha_final wired from gelation timing ─────────
+
+
+class TestNode8AlphaFromTiming:
+    """Verifies that solve_gelation_empirical uses timing.alpha_final.
+
+    Acceptance for Node 8 (F8):
+      - When ``timing`` is None, alpha_final remains the legacy 0.999
+        (backward compat for direct callers/tests).
+      - When ``timing`` is provided, alpha_final tracks timing.alpha_final.
+      - L2 manifest diagnostics include the timing source fields.
+      - End-to-end pipeline run carries the timing-derived alpha into
+        the L2 manifest (orchestrator wiring works).
+    """
+
+    def test_legacy_no_timing_keeps_hardcoded(self):
+        from emulsim.level2_gelation.solver import solve_gelation_empirical
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solve_gelation_empirical(params, props, R_droplet=10e-6)
+        assert abs(result.alpha_final - 0.999) < 1e-6
+        diag = result.model_manifest.diagnostics
+        assert diag.get("alpha_final_source") == "hardcoded_legacy_fallback"
+
+    def test_timing_drives_alpha_and_diagnostics(self):
+        from emulsim.datatypes import GelationTimingResult
+        from emulsim.level2_gelation.solver import solve_gelation_empirical
+        params = SimulationParameters()
+        props = MaterialProperties()
+
+        timing = GelationTimingResult(
+            T_history=np.array([363.0, 333.0]),
+            t_gel_onset=42.0,
+            alpha_final=0.85,
+            mobility_arrest_factor=0.05,
+            cooling_rate_effective=0.20,
+        )
+        result = solve_gelation_empirical(
+            params, props, R_droplet=10e-6, timing=timing,
+        )
+        assert result.alpha_final == pytest.approx(0.85, abs=1e-6)
+        diag = result.model_manifest.diagnostics
+        assert diag["alpha_final_from_timing"] == pytest.approx(0.85, abs=1e-6)
+        assert diag["t_gel_onset_s"] == pytest.approx(42.0, abs=1e-6)
+        assert diag["cooling_rate_effective_K_per_s"] == pytest.approx(0.20, abs=1e-6)
+        assert "alpha_final_source" not in diag
+
+    def test_orchestrator_passes_timing(self, tmp_path):
+        from emulsim.config import load_config
+        from emulsim.pipeline.orchestrator import PipelineOrchestrator
+        from pathlib import Path
+        repo_root = Path(__file__).resolve().parents[1]
+        cfg = repo_root / "configs" / "fast_smoke.toml"
+        if not cfg.exists():
+            pytest.skip("fast_smoke.toml missing")
+        params = load_config(cfg)
+        result = PipelineOrchestrator(output_dir=tmp_path).run_single(params)
+        l2_diag = result.gelation.model_manifest.diagnostics
+        assert "alpha_final_from_timing" in l2_diag
+        assert l2_diag["alpha_final_from_timing"] == pytest.approx(
+            result.gelation_timing.alpha_final, abs=1e-9,
+        )

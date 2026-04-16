@@ -31,3 +31,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+markers = [
+    "smoke: minimum-viable end-to-end pipeline run via configs/fast_smoke.toml; must finish under 30s",
+    "slow: tests that take >5s individually (CH 2D solver, Hypothesis property tests, full optimisation)",
+]

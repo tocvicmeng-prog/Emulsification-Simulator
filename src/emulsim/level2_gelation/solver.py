@@ -677,7 +677,8 @@ def solve_gelation_timing(
 
 
 def solve_gelation_empirical(params: SimulationParameters, props: MaterialProperties,
-                             R_droplet: float = 1.0e-6) -> GelationResult:
+                             R_droplet: float = 1.0e-6,
+                             timing: 'GelationTimingResult | None' = None) -> GelationResult:
     """Empirical pore-size model for agarose gels based on literature correlations.
 
     Uses the well-established relationships:
@@ -687,6 +688,12 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
 
     This is the default L2 model. For mechanistic phase-field simulation,
     use solve_gelation(..., mode='ch_2d') instead.
+
+    Node 8 (F8): When ``timing`` is provided, ``alpha_final`` is taken from
+    ``timing.alpha_final`` (the Avrami output) instead of being hardcoded
+    to 0.999. The hardcode was a v6.0 placeholder that decoupled the
+    pore-size and gelation-completion outputs even though both are L2
+    products. Backward-compat: ``timing=None`` reproduces the v6.0 behaviour.
     """
     c_agar = params.formulation.c_agarose  # kg/m³
     c_chit = params.formulation.c_chitosan
@@ -747,18 +754,41 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
     N_r = 100
     r = np.linspace(R_droplet * 0.005, R_droplet * 0.995, N_r)
 
-    # For the empirical model, gelation is assumed complete — the emulsion
-    # cools well below T_gel during microsphere formation.
+    # Node 8 (F8): use the actual Avrami completion fraction from the
+    # gelation timing solver when available. Falls back to 0.999 only when
+    # the orchestrator did not pass a timing result (old callers, tests).
     T_gel = props.T_gel
-    alpha_final = 0.999
+    if timing is not None:
+        alpha_final = float(timing.alpha_final)
+        timing_diagnostics: dict = {
+            "t_gel_onset_s": float(timing.t_gel_onset),
+            "alpha_final_from_timing": alpha_final,
+            "cooling_rate_effective_K_per_s": float(timing.cooling_rate_effective),
+            "mobility_arrest_factor": float(timing.mobility_arrest_factor),
+        }
+    else:
+        # Legacy fallback: assume complete gelation (placeholder pre-Node 8).
+        alpha_final = 0.999
+        timing_diagnostics = {
+            "alpha_final_source": "hardcoded_legacy_fallback",
+        }
 
     # Morphology descriptors: empirical model uses defaults (1D field)
     morph = morphology_descriptors(np.ones(N_r) * phi_dry, 0.0)
 
+    _assumptions = [
+        "Power-law pore-concentration scaling", "Pernodet AFM data",
+    ]
+    if timing is None:
+        _assumptions.append(
+            "alpha_final hardcoded to 0.999 (no timing result passed); "
+            "callers should pass GelationTimingResult for evidence-grade output."
+        )
     model_manifest = ModelManifest(
         model_name="L2.Pore.EmpiricalCorrelation",
         evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
-        assumptions=["Power-law pore-concentration scaling", "Pernodet AFM data"],
+        assumptions=_assumptions,
+        diagnostics=timing_diagnostics,
     )
     return GelationResult(
         r_grid=r,
@@ -784,7 +814,8 @@ def solve_gelation_empirical(params: SimulationParameters, props: MaterialProper
 
 def solve_gelation(params: SimulationParameters, props: MaterialProperties,
                    R_droplet: float = 1.0e-6,
-                   mode: str = 'empirical') -> GelationResult:
+                   mode: str = 'empirical',
+                   timing: 'GelationTimingResult | None' = None) -> GelationResult:
     """Level 2 gelation simulation.
 
     Parameters
@@ -799,9 +830,14 @@ def solve_gelation(params: SimulationParameters, props: MaterialProperties,
         'ch_2d' — 2D Cahn-Hilliard phase-field simulation.
             Mechanistic but requires careful parameter calibration.
         'ch_1d' — 1D radial Cahn-Hilliard (legacy).
+    timing : GelationTimingResult, optional
+        Output of solve_gelation_timing for the same R_droplet. When provided
+        in 'empirical' mode, alpha_final is taken from timing instead of
+        the legacy hardcoded 0.999. Mechanistic modes ignore this argument
+        because they compute their own alpha trajectory from the phase-field.
     """
     if mode == 'empirical':
-        return solve_gelation_empirical(params, props, R_droplet)
+        return solve_gelation_empirical(params, props, R_droplet, timing=timing)
     elif mode == 'ch_2d':
         solver = CahnHilliard2DSolver(
             N_grid=params.solver.l2_n_grid,

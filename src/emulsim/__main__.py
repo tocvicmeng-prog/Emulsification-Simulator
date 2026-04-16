@@ -158,7 +158,7 @@ def _cmd_optimize(args):
 
 
 def _cmd_uncertainty(args):
-    from .uncertainty import UncertaintyPropagator
+    from .uncertainty_core import UncertaintyPropagator
 
     params = _load_params(args.config)
     propagator = UncertaintyPropagator(n_samples=args.n_samples, seed=args.seed)

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -347,7 +347,17 @@ class KernelConfig:
 
     @classmethod
     def for_rotor_stator_legacy(cls) -> KernelConfig:
-        """Factory: original rotor-stator calibration (Alopaeus breakage)."""
+        """Factory: original rotor-stator calibration (Alopaeus breakage).
+
+        F1 fix (2026-04-17): phi_d_correction and coalescence_exponent=2 are
+        now enabled to match the for_rotor_stator_small preset. With them
+        disabled (the prior default), high-RPM runs at viscous-dispersed-phase
+        conditions exhibited a nonphysical d32 increase with RPM because
+        coalescence damping `exp(-C5*mu_c*rho*eps/sigma^2 * d_h^4)` collapses
+        for small d_h and the bare CT collision frequency dominates. The
+        crowding correction `1/(1+phi_d)^2` adds the missing damping at small
+        scales without changing the well-behaved behaviour at low RPM.
+        """
         return cls(
             breakage_model=BreakageModel.ALOPAEUS,
             breakage_C1=0.986,
@@ -355,8 +365,8 @@ class KernelConfig:
             breakage_C3=0.0,                # disabled for aqueous dispersed phases (Vi cap handles high-mu_d)
             coalescence_C4=2.17e-4,
             coalescence_C5=2.28e13,
-            phi_d_correction=False,
-            coalescence_exponent=1,
+            phi_d_correction=True,
+            coalescence_exponent=2,
         )
 
     @classmethod
@@ -848,6 +858,28 @@ class RunReport:
         return _ORDER[worst_idx]
 
 
+# ─── Cross-cutting Run Context (Node 7, v6.1) ─────────────────────────────
+
+
+@dataclass
+class RunContext:
+    """Cross-cutting inputs to a pipeline run.
+
+    Carries optional services that the orchestrator should consult before
+    invoking the per-level solvers. Designed to be backward-compatible:
+    ``run_context=None`` reproduces the v6.0 behaviour exactly.
+
+    v6.1 scope (Node 7): only ``calibration_store`` is wired. Future
+    additions (random_seed routing, output_policy, uncertainty_spec) follow
+    the same opt-in pattern — pass them in to enable; omit to keep current
+    behaviour. The richer ``ParameterProvider`` with full provenance
+    tracking (ResolvedParameter source/uncertainty) is deferred to v7.0.
+    """
+    calibration_store: Optional[Any] = None
+    run_id: str = ""
+    notes: str = ""
+
+
 # ─── Result Structures ────────────────────────────────────────────────────
 
 @dataclass
@@ -1031,6 +1063,97 @@ class M1ExportContract:
     trust_warnings: list[str] = field(default_factory=list)
     uncertainty_notes: str = ""     # Human-readable uncertainty description
 
+    def validate_units(self) -> list[str]:
+        """Node 10 (F11): boundary-level unit/range sanity checks.
+
+        Returns a list of violation messages (empty = pass). Catches the
+        common silent-failure modes of someone shoving a value in the wrong
+        unit through the M1->M2 contract: e.g. a bead_radius in microns
+        instead of meters, a pH in mol/m^3, a concentration in g/L.
+
+        These are *order-of-magnitude* guards, not scientific calibration —
+        a reasonable polysaccharide microsphere lives entirely inside every
+        bound checked here. Failing one of these means the value is
+        physically impossible for our system, not just unusual.
+        """
+        violations: list[str] = []
+
+        # Geometry: SI metres. A µm number passed as m would land at 1e-6;
+        # a cm value would land at 1e-2.
+        if not (1e-7 <= self.bead_radius <= 5e-3):
+            violations.append(
+                f"bead_radius={self.bead_radius:g} m outside [1e-7, 5e-3]; "
+                "wrong unit (µm vs m)?"
+            )
+        if not (1e-7 <= self.bead_d50 <= 1e-2):
+            violations.append(
+                f"bead_d50={self.bead_d50:g} m outside [1e-7, 1e-2]; wrong unit?"
+            )
+        if not (1e-9 <= self.pore_size_mean <= 1e-5):
+            violations.append(
+                f"pore_size_mean={self.pore_size_mean:g} m outside [1e-9, 1e-5]; "
+                "did you pass nm as m?"
+            )
+        if self.pore_size_std < 0:
+            violations.append(
+                f"pore_size_std={self.pore_size_std:g} must be non-negative."
+            )
+        if not (0.0 <= self.porosity <= 1.0):
+            violations.append(
+                f"porosity={self.porosity:g} outside [0, 1]; must be a fraction."
+            )
+        if not (1e-10 <= self.mesh_size_xi <= 1e-5):
+            violations.append(
+                f"mesh_size_xi={self.mesh_size_xi:g} m outside [1e-10, 1e-5]."
+            )
+        if not (0.0 <= self.p_final <= 1.0):
+            violations.append(
+                f"p_final={self.p_final:g} outside [0, 1]; conversion fraction."
+            )
+
+        # Concentrations: mol/m^3. Native chitosan amine sits ~50-150 mol/m^3
+        # for a 1-3% w/v solution. Pushing 1e5 means kg/m^3 was passed
+        # as mol/m^3.
+        if not (0.0 <= self.nh2_bulk_concentration <= 1e4):
+            violations.append(
+                f"nh2_bulk_concentration={self.nh2_bulk_concentration:g} mol/m^3 "
+                "outside [0, 1e4]; wrong unit (mM vs mol/m^3)?"
+            )
+        if not (0.0 <= self.oh_bulk_concentration <= 1e5):
+            violations.append(
+                f"oh_bulk_concentration={self.oh_bulk_concentration:g} mol/m^3 "
+                "outside [0, 1e5]."
+            )
+
+        # Mechanical: Pa. Gel modulus 1e3-1e6 Pa. 1 GPa would be a steel
+        # bead; 1e-3 Pa would be water.
+        if not (1.0 <= self.G_DN <= 1e9):
+            violations.append(
+                f"G_DN={self.G_DN:g} Pa outside [1, 1e9]; wrong unit (kPa vs Pa)?"
+            )
+        if not (1.0 <= self.E_star <= 1e10):
+            violations.append(
+                f"E_star={self.E_star:g} Pa outside [1, 1e10]."
+            )
+
+        # Formulation: kg/m^3 (i.e. g/L). 0-200 kg/m^3 covers every
+        # processable polysaccharide gel. A value passed in % w/v would
+        # land in [0, 20] which we cannot distinguish; only flag obvious
+        # nonsense (negative, >300 kg/m^3 = 30% which is unprocessable).
+        for name, val in (("c_agarose", self.c_agarose),
+                          ("c_chitosan", self.c_chitosan)):
+            if not (0.0 <= val <= 300.0):
+                violations.append(
+                    f"{name}={val:g} kg/m^3 outside [0, 300]."
+                )
+
+        if not (0.0 <= self.DDA <= 1.0):
+            violations.append(
+                f"DDA={self.DDA:g} outside [0, 1]; degree of deacetylation."
+            )
+
+        return violations
+
 
 @dataclass
 class OptimizationState:
@@ -1044,3 +1167,7 @@ class OptimizationState:
     hypervolume_history: list = field(default_factory=list)
     converged: bool = False
     gp_state: Optional[dict] = None
+    # Node 6 (v6.1): per-Pareto-candidate weakest evidence tier (string form,
+    # JSON-friendly). Empty when no run_report was attached. Length matches
+    # pareto_X.shape[0].
+    pareto_evidence_tiers: list[str] = field(default_factory=list)

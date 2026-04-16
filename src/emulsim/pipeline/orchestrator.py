@@ -12,8 +12,10 @@ from typing import Optional
 
 from ..datatypes import (
     FullResult,
+    KernelConfig,
     M1ExportContract,
     MaterialProperties,
+    RunContext,
     RunReport,
     SimulationParameters,
 )
@@ -45,7 +47,8 @@ class PipelineOrchestrator:
                    l2_mode: str = 'empirical',
                    props_overrides: dict | None = None,
                    crosslinker_key: str = 'genipin',
-                   uv_intensity: float = 0.0) -> FullResult:
+                   uv_intensity: float = 0.0,
+                   run_context: RunContext | None = None) -> FullResult:
         """Execute the full pipeline for a single parameter set.
 
         Parameters
@@ -57,6 +60,12 @@ class PipelineOrchestrator:
             after it is built from the PropertyDatabase.  Used by the UI
             to inject reagent-library parameters (e.g. crosslinker kinetics,
             pre-computed IFT).
+        run_context : RunContext, optional
+            Cross-cutting run inputs (Node 7, v6.1). When provided with a
+            populated ``calibration_store``, the orchestrator applies
+            calibration overrides to the L1 KernelConfig and to
+            MaterialProperties for L2-L4 BEFORE solving. ``None`` reproduces
+            the v6.0 behaviour (no calibration injection).
         """
         errors = params.validate()
         if errors:
@@ -108,6 +117,47 @@ class PipelineOrchestrator:
             for k, v in props_overrides.items():
                 setattr(props, k, v)
 
+        # Node 7 (v6.1): apply calibration overrides from RunContext.
+        # Order matters: caller props_overrides win for explicitly-set fields,
+        # then calibration entries layer on top for any matching attribute.
+        # The reasoning: explicit user/UI overrides represent a deliberate
+        # choice for THIS run, while calibration entries represent the
+        # current best evidence for the underlying constant.
+        applied_calibrations: list[str] = []
+        if run_context is not None and run_context.calibration_store is not None:
+            store = run_context.calibration_store
+            # Material properties pick up L2/L3/L4 calibrations (rate constants,
+            # pore coefficients, IPN coupling). Each call rewrites only matching
+            # attributes and returns a deep copy + override log.
+            for module in ("L2", "L3", "L4"):
+                if store.has_calibration_for(module):
+                    props, overrides_log = store.apply_to_model_params(module, props)
+                    applied_calibrations.extend(overrides_log)
+
+            # L1 calibration targets KernelConfig. Build a working copy on
+            # params.emulsification.kernels so the legacy `solve()` dispatch
+            # (Node 3) honours it. Done after props because L1 may also read
+            # props.breakage_C3 — but the dispatch wires KernelConfig as the
+            # primary source.
+            if store.has_calibration_for("L1"):
+                kernels = (
+                    params.emulsification.kernels
+                    or KernelConfig.for_rotor_stator_legacy()
+                )
+                kernels, overrides_log = store.apply_to_model_params("L1", kernels)
+                applied_calibrations.extend(overrides_log)
+                # Mutate the params copy that this run will use. We do not
+                # deepcopy params here because run_single is single-threaded
+                # and the caller already owns the SimulationParameters
+                # instance for THIS run.
+                params.emulsification.kernels = kernels
+
+            if applied_calibrations:
+                logger.info(
+                    "Applied %d calibration override(s) from RunContext.",
+                    len(applied_calibrations),
+                )
+
         # ── Level 1: Emulsification ──────────────────────────────────────
         logger.info("L1: Emulsification (RPM=%.0f)", params.emulsification.rpm)
         t0 = time.perf_counter()
@@ -136,9 +186,14 @@ class PipelineOrchestrator:
                      timing_result.cooling_rate_effective)
 
         # ── Level 2b: Gelation & Pore Formation ─────────────────────────
+        # Node 8 (F8): pass the L2a timing result so the empirical pore model
+        # can use the actual Avrami alpha_final instead of the hardcoded 0.999.
+        # Mechanistic modes (ch_2d, ch_ternary) ignore the argument.
         logger.info("L2b: Gelation (R=%.2f µm, d50-based)", R_droplet * 1e6)
         t0 = time.perf_counter()
-        gel_result = solve_gelation(params, props, R_droplet=R_droplet, mode=l2_mode)
+        gel_result = solve_gelation(
+            params, props, R_droplet=R_droplet, mode=l2_mode, timing=timing_result,
+        )
         timings["L2"] = time.perf_counter() - t0
         logger.info("L2 done: pore=%.1f nm, porosity=%.2f (%.1fs)",
                      gel_result.pore_size_mean * 1e9, gel_result.porosity, timings["L2"])
@@ -237,12 +292,20 @@ class PipelineOrchestrator:
             for r in (emul_result, gel_result, xlink_result, mech_result)
             if getattr(r, "model_manifest", None) is not None
         ]
+        _diagnostics: dict = {"timings": timings, "total_time_s": total}
+        if applied_calibrations:
+            # Node 7: surface calibration provenance for downstream consumers
+            # (UI badges, JSON export, optimizer Pareto labelling). Stored as
+            # a list of human-readable override descriptions matching what
+            # CalibrationStore.apply_to_model_params logs.
+            _diagnostics["calibrations_applied"] = list(applied_calibrations)
+            _diagnostics["calibration_count"] = len(applied_calibrations)
         run_report = RunReport(
             model_graph=_manifests,
             trust_level=trust.level,
             trust_warnings=list(trust.warnings),
             trust_blockers=list(trust.blockers),
-            diagnostics={"timings": timings, "total_time_s": total},
+            diagnostics=_diagnostics,
         )
         run_report.min_evidence_tier = run_report.compute_min_tier().value
         full_result.run_report = run_report
@@ -370,7 +433,7 @@ def export_for_module2(result: FullResult,
         notes.append("Low crosslinking conversion -- residual ACS estimate uncertain")
     uncertainty_notes = "; ".join(notes) if notes else "No special uncertainty flags"
 
-    return M1ExportContract(
+    contract = M1ExportContract(
         # Geometry
         bead_radius=emul.d50 / 2.0,
         bead_d32=emul.d32,
@@ -400,3 +463,23 @@ def export_for_module2(result: FullResult,
         trust_warnings=list(trust.warnings),
         uncertainty_notes=uncertainty_notes,
     )
+
+    # Node 10 (F11): boundary unit/range check. Don't crash the pipeline on
+    # violations — log as warnings so the user gets a clear diagnostic
+    # without losing the run output. The orchestrator's trust gate already
+    # downgrades suspicious results; this catches the more specific
+    # "you sent this in the wrong unit" failure mode.
+    _unit_violations = contract.validate_units()
+    if _unit_violations:
+        logger.warning(
+            "M1ExportContract failed %d unit/range check(s):\n  %s",
+            len(_unit_violations),
+            "\n  ".join(_unit_violations),
+        )
+        # Surface in the contract's trust_warnings so downstream consumers
+        # (M2 orchestrator, UI badges) see them too.
+        contract.trust_warnings.extend(
+            f"M1ExportContract unit check: {v}" for v in _unit_violations
+        )
+
+    return contract

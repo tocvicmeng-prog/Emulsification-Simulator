@@ -5,7 +5,7 @@ Returns ValidationResult objects containing:
   - blockers: List of blocking error messages that prevent meaningful results.
   - warnings: List of advisory messages that degrade confidence but allow running.
 
-26 rules total: 9 M1 + 11 M2 + 6 M3.
+23 rules total: 9 M1 + 8 M2 + 6 M3.
 """
 
 from __future__ import annotations
@@ -51,6 +51,7 @@ class ValidationResult:
 _M2_SUPPORTED_STEP_TYPES = {
     "secondary_crosslinking", "activation",
     "ligand_coupling", "protein_coupling", "quenching",
+    "spacer_arm", "metal_charging", "protein_pretreatment", "washing",
 }
 
 # Temperature above which standard agarose gel re-melts [Celsius].
@@ -168,7 +169,7 @@ def validate_m1_inputs(
     return result
 
 
-# ─── M2 Validators (11 rules) ─────────────────────────────────────────────────
+# ─── M2 Validators (8 rules) ──────────────────────────────────────────────────
 
 def validate_m2_inputs(
     steps: list,
@@ -177,19 +178,19 @@ def validate_m2_inputs(
 ) -> ValidationResult:
     """Validate M2 (functionalization) inputs.
 
-    11 rules:
+    8 rules:
 
     R1.  m1_trust_level == 'UNRELIABLE' -> BLOCKER (cascade gate)
     R2.  steps is empty                 -> BLOCKER (no workflow defined)
-    R3.  Any step_type not in SUPPORTED -> BLOCKER (unimplemented chemistry)
-    R4.  LIGAND_COUPLING detected        -> BLOCKER with explicit 'Planned' message
-    R5.  PROTEIN_COUPLING detected       -> BLOCKER with explicit 'Planned' message
-    R6.  QUENCHING detected              -> BLOCKER with explicit 'Planned' message
-    R7.  acs_state is None               -> BLOCKER (no surface sites to modify)
-    R8.  Total accessible sites <= 0     -> BLOCKER (nothing to react)
-    R9.  More than 6 steps               -> WARNING (combinatorial complexity)
-    R10. Duplicate step types in sequence -> WARNING (may indicate copy-paste error)
-    R11. acs_state.validate() returns violations -> WARNING (conservation violated)
+    R3.  Any step_type not in SUPPORTED -> BLOCKER (unknown chemistry)
+    R4.  acs_state is None               -> BLOCKER (no surface sites to modify)
+    R5.  Total accessible sites <= 0     -> BLOCKER (nothing to react)
+    R6.  More than 6 steps               -> WARNING (combinatorial complexity)
+    R7.  Duplicate step types in sequence -> WARNING (may indicate copy-paste error)
+    R8.  acs_state.validate() returns violations -> WARNING (conservation violated)
+
+    Supported backend step types include coupling, spacer-arm, metal,
+    pretreatment, and washing steps.
 
     Args:
         steps:          List of modification step objects (must have .step_type attribute
@@ -210,7 +211,7 @@ def validate_m2_inputs(
             "are corrected. Fix M1 blockers before proceeding."
         )
 
-    # R7: ACS state availability
+    # R4: ACS state availability
     if acs_state is None:
         result.add_blocker(
             "No ACS surface-site inventory available from M1. "
@@ -233,7 +234,7 @@ def validate_m2_inputs(
             val = str(s)
         step_type_values.append(val)
 
-    # R3–R6: Check each step type is supported
+    # R3: Check each step type is supported
     seen_types = []
     for val in step_type_values:
         if val not in _M2_SUPPORTED_STEP_TYPES:
@@ -243,14 +244,14 @@ def validate_m2_inputs(
             )
         seen_types.append(val)
 
-    # R9: Too many steps
+    # R6: Too many steps
     if len(steps) > 6:
         result.add_warning(
             f"{len(steps)} modification steps defined — this is a large workflow. "
             "Verify step ordering and that no steps are duplicated."
         )
 
-    # R10: Duplicate step types
+    # R7: Duplicate step types
     seen = set()
     duplicates = set()
     for val in seen_types:
@@ -263,9 +264,9 @@ def validate_m2_inputs(
             "Verify this is intentional (e.g., sequential crosslinking passes)."
         )
 
-    # R8 + R11: ACS state quality (only if acs_state is provided)
+    # R5 + R8: ACS state quality (only if acs_state is provided)
     if acs_state is not None:
-        # R8: accessible sites
+        # R5: accessible sites
         accessible = getattr(acs_state, "accessible", None)
         if accessible is not None and accessible <= 0.0:
             result.add_blocker(
@@ -273,7 +274,7 @@ def validate_m2_inputs(
                 "No surface sites available for modification."
             )
 
-        # R11: conservation check
+        # R8: conservation check
         if hasattr(acs_state, "validate"):
             violations = acs_state.validate()
             if violations:
@@ -376,8 +377,9 @@ def validate_m3_chromatography(
     if gradient_enabled and isotherm_type in ("competitive_langmuir",):
         result.add_warning(
             "Gradient elution with competitive Langmuir isotherm is in diagnostic mode. "
-            "Gradient salt concentration does not yet affect binding affinity (BF-2 not deployed). "
-            "Results show elution order only — quantitative yields are not reliable."
+            "Use gradient-sensitive SMA, HIC, IMAC, Protein A, or lectin adapters when "
+            "mobile-phase composition should change binding affinity. "
+            "Plain competitive Langmuir results show elution order only."
         )
 
     # R6: Gradient + linear isotherm — gradient has no mechanistic effect

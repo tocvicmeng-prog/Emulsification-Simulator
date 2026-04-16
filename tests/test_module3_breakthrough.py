@@ -480,3 +480,162 @@ class TestBreakthroughResult:
         )
         expected_dP = col.pressure_drop(Q)
         assert result.pressure_drop == pytest.approx(expected_dP, rel=1e-10)
+
+
+# ─── Node 5 (v6.1): M3 ModelManifest evidence wiring ──────────────────────
+
+
+class TestM3ModelManifest:
+    """Verifies that ModelManifest fields are populated end-to-end through M3.
+
+    Acceptance for Node 5:
+      - run_breakthrough attaches a manifest to BreakthroughResult.
+      - When an FMC with a downgraded tier is supplied, the breakthrough
+        manifest cannot be stronger than the FMC tier (evidence inheritance).
+      - run_gradient_elution attaches a manifest with mass-balance gating.
+      - solve_packed_bed (catalysis) attaches a manifest with regime
+        classification (reaction_limited / borderline / diffusion_limited).
+    """
+
+    def test_breakthrough_has_manifest_default_semi(self, default_column):
+        """No FMC, default isotherm -> SEMI_QUANTITATIVE manifest."""
+        from emulsim.datatypes import ModelEvidenceTier, ModelManifest
+
+        result = run_breakthrough(
+            column=default_column,
+            C_feed=1.0,
+            flow_rate=1e-8,
+            feed_duration=200.0,
+            total_time=400.0,
+            n_z=20,
+        )
+        assert result.model_manifest is not None
+        assert isinstance(result.model_manifest, ModelManifest)
+        assert result.model_manifest.evidence_tier == ModelEvidenceTier.SEMI_QUANTITATIVE
+        assert result.model_manifest.model_name == "M3.breakthrough.LRM"
+        diag = result.model_manifest.diagnostics
+        assert diag["fmc_provided"] is False
+        # Diagnostics include the isotherm class so RunReport consumers can
+        # tell which equilibrium model fed the breakthrough numbers.
+        assert "Langmuir" in diag["isotherm_class"]
+        assert diag["mass_balance_status"] in {"ok", "caution", "blocker"}
+
+    def test_breakthrough_inherits_fmc_qualitative_tier(self, default_column):
+        """FMC tagged QUALITATIVE_TREND -> breakthrough cannot be stronger."""
+        from emulsim.datatypes import ModelEvidenceTier, ModelManifest
+        from emulsim.module2_functionalization.orchestrator import (
+            FunctionalMediaContract,
+        )
+
+        # Hand-build a minimal FMC carrying a ranking-only manifest. The
+        # breakthrough call inherits from FMC.model_manifest.evidence_tier;
+        # other FMC fields are ignored by the chrom code path here because
+        # the caller passed isotherm explicitly via the LangmuirIsotherm
+        # default + fmc-driven adapter (we leave isotherm=None and rely on
+        # FMC routing falling back to default Langmuir).
+        ranking_manifest = ModelManifest(
+            model_name="M2.FMC.affinity",
+            evidence_tier=ModelEvidenceTier.QUALITATIVE_TREND,
+            assumptions=["Ranking-only ligand class."],
+            diagnostics={"fmc_confidence_tier": "ranking_only"},
+        )
+        fmc = FunctionalMediaContract(
+            bead_d50=default_column.particle_diameter,
+            porosity=default_column.particle_porosity,
+            estimated_q_max=100.0,
+            confidence_tier="ranking_only",
+            model_manifest=ranking_manifest,
+        )
+
+        result = run_breakthrough(
+            column=default_column,
+            C_feed=1.0,
+            flow_rate=1e-8,
+            feed_duration=200.0,
+            total_time=400.0,
+            n_z=20,
+            fmc=fmc,
+        )
+
+        assert result.model_manifest is not None
+        # Tier must not be stronger (lower index in _ORDER) than the upstream FMC.
+        _ORDER = list(ModelEvidenceTier)
+        upstream_idx = _ORDER.index(ModelEvidenceTier.QUALITATIVE_TREND)
+        result_idx = _ORDER.index(result.model_manifest.evidence_tier)
+        assert result_idx >= upstream_idx, (
+            f"M3 tier {result.model_manifest.evidence_tier} stronger than FMC tier "
+            f"QUALITATIVE_TREND — evidence inheritance broken."
+        )
+        assert result.model_manifest.diagnostics["fmc_provided"] is True
+
+    def test_gradient_has_manifest(self, default_column):
+        """Gradient elution attaches a manifest with per-component mass balance."""
+        from emulsim.datatypes import ModelEvidenceTier
+        from emulsim.module3_performance.gradient import GradientProgram
+        from emulsim.module3_performance.isotherms.competitive_langmuir import (
+            CompetitiveLangmuirIsotherm,
+        )
+        from emulsim.module3_performance.orchestrator import run_gradient_elution
+
+        iso = CompetitiveLangmuirIsotherm(
+            q_max=np.array([100.0, 100.0]),
+            K_L=np.array([1e3, 5e2]),
+        )
+        # Simple linear salt gradient that completes within the run window.
+        grad = GradientProgram(
+            segments=[(0.0, 0.0), (100.0, 0.0), (300.0, 500.0), (400.0, 500.0)]
+        )
+
+        result = run_gradient_elution(
+            column=default_column,
+            C_feed=np.array([1.0, 1.0]),
+            gradient=grad,
+            flow_rate=1e-8,
+            total_time=400.0,
+            feed_duration=80.0,
+            isotherm=iso,
+            n_z=15,
+        )
+
+        assert result.model_manifest is not None
+        assert result.model_manifest.model_name == "M3.gradient_elution.LRM"
+        diag = result.model_manifest.diagnostics
+        assert diag["n_components"] == 2
+        # tier valid against the enum
+        assert isinstance(result.model_manifest.evidence_tier, ModelEvidenceTier)
+
+    def test_catalytic_manifest_classifies_regime(self):
+        """Packed-bed enzyme reactor attaches a manifest with regime label."""
+        from emulsim.datatypes import ModelEvidenceTier, ModelManifest
+        from emulsim.module3_performance.catalysis.packed_bed import (
+            solve_packed_bed,
+        )
+
+        # Reaction-limited regime: small particles + fast diffusion -> phi << 1.
+        result = solve_packed_bed(
+            bed_length=0.10,
+            bed_diameter=0.01,
+            particle_diameter=50e-6,
+            bed_porosity=0.38,
+            particle_porosity=0.5,
+            V_max=10.0,
+            K_m=1.0,
+            S_feed=10.0,
+            flow_rate=1e-8,
+            D_eff=1e-9,
+            total_time=600.0,
+            n_z=20,
+        )
+
+        assert result.model_manifest is not None
+        assert isinstance(result.model_manifest, ModelManifest)
+        assert result.model_manifest.model_name == "M3.catalysis.packed_bed.MM"
+        diag = result.model_manifest.diagnostics
+        assert diag["regime"] in {"reaction_limited", "borderline", "diffusion_limited"}
+        assert diag["mass_balance_status"] in {"ok", "caution", "blocker"}
+        # Default tier is SEMI unless gates fire
+        assert result.model_manifest.evidence_tier in {
+            ModelEvidenceTier.SEMI_QUANTITATIVE,
+            ModelEvidenceTier.QUALITATIVE_TREND,
+            ModelEvidenceTier.UNSUPPORTED,
+        }

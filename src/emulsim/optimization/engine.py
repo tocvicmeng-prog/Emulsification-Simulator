@@ -43,7 +43,7 @@ from .objectives import (
     PARAM_NAMES,
     LOG_SCALE_INDICES,
     LOG_SCALE_INDICES_SV,
-    compute_objectives,
+    compute_objectives_trust_aware,
     check_constraints,
     get_param_bounds,
 )
@@ -156,10 +156,14 @@ class OptimizationEngine:
         self.bounds = _get_search_bounds(mode, stirrer_type)
         self._mode = mode
 
-        # Storage
+        # Storage. result_indices maps each X_observed slot to its position in
+        # `self.results` (or None when evaluation failed and no result was
+        # produced). Needed for Pareto -> result lookup so we can read
+        # run_report.min_evidence_tier per Pareto candidate (Node 6).
         self.X_observed: list[np.ndarray] = []
         self.Y_observed: list[np.ndarray] = []
         self.results: list[FullResult] = []
+        self.result_indices: list[int | None] = []
         self.hv_history: list[float] = []
 
     def _evaluate(self, x_physical: np.ndarray) -> tuple[np.ndarray, FullResult]:
@@ -167,7 +171,7 @@ class OptimizationEngine:
         params = _x_to_params(x_physical, self.template_params)
         params.run_id = f"opt_{len(self.X_observed):04d}"
         result = self.orchestrator.run_single(params)
-        objectives = compute_objectives(result)
+        objectives = compute_objectives_trust_aware(result)
 
         # Check feasibility constraints and penalise infeasible points
         feasible, violations = check_constraints(result)
@@ -234,7 +238,10 @@ class OptimizationEngine:
             self.X_observed.append(x_ss)
             self.Y_observed.append(objectives)
             if result is not None:
+                self.result_indices.append(len(self.results))
                 self.results.append(result)
+            else:
+                self.result_indices.append(None)
 
             logger.info("  → f=[%.3f, %.3f, %.3f] (%.1fs)",
                          objectives[0], objectives[1], objectives[2], dt)
@@ -322,7 +329,10 @@ class OptimizationEngine:
             self.X_observed.append(x_next_ss)
             self.Y_observed.append(objectives)
             if result is not None:
+                self.result_indices.append(len(self.results))
                 self.results.append(result)
+            else:
+                self.result_indices.append(None)
 
             logger.info("  → f=[%.3f, %.3f, %.3f]  HV=%.4f (%.1fs)",
                          objectives[0], objectives[1], objectives[2], hv, dt)
@@ -352,6 +362,28 @@ class OptimizationEngine:
             pareto_mask = is_non_dominated(neg_Y)
             pareto_idx = pareto_mask.numpy()
 
+        # Node 6: per-Pareto-candidate evidence tiers. For each surviving
+        # X_observed index in pareto_idx, look up the matching FullResult via
+        # result_indices and read its run_report.min_evidence_tier. When the
+        # result is missing (failed eval) or has no run_report, label as
+        # "unknown" so the field length always matches pareto_X.
+        pareto_tier_strings: list[str] = []
+        survivors = np.where(pareto_idx)[0].tolist()
+        for full_idx in survivors:
+            result_pos = (
+                self.result_indices[full_idx]
+                if full_idx < len(self.result_indices) else None
+            )
+            if result_pos is None:
+                pareto_tier_strings.append("unknown")
+                continue
+            res = self.results[result_pos]
+            rr = getattr(res, "run_report", None)
+            if rr is None:
+                pareto_tier_strings.append("unknown")
+            else:
+                pareto_tier_strings.append(rr.compute_min_tier().value)
+
         state = OptimizationState(
             X_observed=X_all,
             Y_observed=Y_all,
@@ -364,6 +396,7 @@ class OptimizationEngine:
                 (max(self.hv_history[-5:]) - min(self.hv_history[-5:]))
                 / max(max(self.hv_history[-5:]), 1e-10) < self.convergence_tol
             ),
+            pareto_evidence_tiers=pareto_tier_strings,
         )
 
         # Save state
@@ -394,6 +427,7 @@ class OptimizationEngine:
                  zip(PARAM_NAMES, _from_search_space(x))}
                 for x in state.pareto_X
             ],
+            "pareto_evidence_tiers": list(state.pareto_evidence_tiers),
         }
         with open(self.output_dir / "optimization_results.json", "w") as f:
             json.dump(out, f, indent=2)

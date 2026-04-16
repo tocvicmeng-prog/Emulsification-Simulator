@@ -19,8 +19,11 @@ from emulsim.visualization.ui_model_metadata import (
     M1_PORE_META,
     M2_ACS_META,
     M3_BREAKTHROUGH_META,
+    M3_GRADIENT_META,
     M3_MASS_BALANCE_META,
 )
+from emulsim.module2_functionalization.modification_steps import ModificationStepType
+from emulsim.visualization.ui_validators import _M2_SUPPORTED_STEP_TYPES
 from emulsim.visualization.ui_validators import (
     ValidationResult,
     validate_m1_inputs,
@@ -117,9 +120,15 @@ class TestOutputMetadata:
     def test_prebuilt_m2_acs_meta(self):
         assert M2_ACS_META.source_module == "M2"
         assert M2_ACS_META.confidence == ConfidenceLevel.LOW
+        assert "All 9 backend step types" in M2_ACS_META.validity_range
 
     def test_prebuilt_mass_balance_meta_high(self):
         assert M3_MASS_BALANCE_META.confidence == ConfidenceLevel.HIGH
+
+    def test_gradient_meta_not_stale(self):
+        warning_text = " ".join(M3_GRADIENT_META.warnings)
+        assert "BF-2" not in warning_text
+        assert "diagnostic" in warning_text.lower()
 
 
 # ─── M1 Validation tests ──────────────────────────────────────────────────────
@@ -237,6 +246,25 @@ class TestValidationM2:
         result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
         assert result.valid is True
 
+    @pytest.mark.parametrize(
+        "step_type_value",
+        [
+            "secondary_crosslinking",
+            "activation",
+            "ligand_coupling",
+            "protein_coupling",
+            "quenching",
+            "spacer_arm",
+            "metal_charging",
+            "protein_pretreatment",
+            "washing",
+        ],
+    )
+    def test_all_backend_supported_step_types_accepted(self, step_type_value):
+        steps = [self._FakeStep(step_type_value)]
+        result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
+        assert result.valid is True
+
     def test_unknown_step_type_blocker(self):
         steps = [self._FakeStep("magic_enchantment")]
         result = validate_m2_inputs(steps, acs_state=object(), m1_trust_level="TRUSTWORTHY")
@@ -293,6 +321,7 @@ class TestValidationM3:
         )
         assert result.valid is True
         assert any("diagnostic" in w.lower() or "gradient" in w.lower() for w in result.warnings)
+        assert all("BF-2" not in w for w in result.warnings)
 
     def test_gradient_linear_warning(self):
         result = validate_m3_chromatography(
@@ -525,3 +554,59 @@ class TestUnitConversions:
         s = format_concentration(5.0)
         assert "mM" in s
         assert "5" in s
+
+
+# ─── Node 11 (v6.1, F6): UI metadata vs backend drift guards ──────────────
+
+
+class TestUiBackendDriftGuards:
+    """Lock in F6 fixes — fail loudly if UI metadata diverges from backend.
+
+    These regression tests catch the failure modes that doc 35 documented:
+      - validate_m2_inputs accepting only a subset of the actual M2 step types
+        (so a user-defined workflow silently passes UI validation but crashes
+        deeper in the orchestrator).
+      - ui_model_metadata advertising stale claims about isotherm behaviour
+        (e.g. "gradient does not affect binding" after gradient-aware routing
+        was implemented).
+    """
+
+    def test_m2_validator_supports_every_backend_step_type(self):
+        """_M2_SUPPORTED_STEP_TYPES must equal the full ModificationStepType enum."""
+        backend_types = {st.value for st in ModificationStepType}
+        ui_types = set(_M2_SUPPORTED_STEP_TYPES)
+        missing_in_ui = backend_types - ui_types
+        extra_in_ui = ui_types - backend_types
+        assert not missing_in_ui, (
+            f"UI validator missing backend step types: {sorted(missing_in_ui)}. "
+            "User workflows using these would silently fail UI validation."
+        )
+        assert not extra_in_ui, (
+            f"UI validator advertises non-existent step types: {sorted(extra_in_ui)}."
+        )
+
+    def test_m2_acs_metadata_lists_every_step_type(self):
+        """M2_ACS_META.validity_range must mention every backend step type by name."""
+        # Comparison is uppercase-insensitive — the metadata renders the
+        # enum values uppercased.
+        text = M2_ACS_META.validity_range.upper()
+        for st in ModificationStepType:
+            token = st.value.upper()
+            assert token in text, (
+                f"M2_ACS_META.validity_range omits step type {token!r}; "
+                "users won't know it's supported."
+            )
+
+    def test_m3_gradient_warning_not_stale(self):
+        """Gradient warning must reflect the current gradient-aware behaviour.
+
+        The doc-35 stale claim was that gradient does not affect binding for
+        competitive Langmuir. After the H6 wiring (v6.0) and the manifest
+        rollout (Node 5), the metadata must NOT contain that wording.
+        """
+        joined = " ".join(M3_GRADIENT_META.warnings).lower()
+        assert "does not affect binding" not in joined
+        assert "gradient does not" not in joined
+        # Positive assertion: the new wording mentions gradient-sensitive
+        # isotherms updating binding during elution.
+        assert "gradient-sensitive" in joined or "update binding" in joined

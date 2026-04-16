@@ -146,7 +146,11 @@ M1_MECHANICAL_META = OutputMetadata(
 M2_ACS_META = OutputMetadata(
     model_basis=ModelBasis.SEMI_QUANTITATIVE,
     confidence=ConfidenceLevel.LOW,
-    validity_range="All 5 workflows: SECONDARY_CROSSLINKING, ACTIVATION, LIGAND_COUPLING, PROTEIN_COUPLING, QUENCHING",
+    validity_range=(
+        "All 9 backend step types: SECONDARY_CROSSLINKING, ACTIVATION, "
+        "LIGAND_COUPLING, PROTEIN_COUPLING, QUENCHING, SPACER_ARM, "
+        "METAL_CHARGING, PROTEIN_PRETREATMENT, WASHING"
+    ),
     calibration_required=True,
     warnings=(
         "ACS inventory uses simplified site-density model.",
@@ -212,11 +216,11 @@ M3_PRESSURE_META = OutputMetadata(
 M3_GRADIENT_META = OutputMetadata(
     model_basis=ModelBasis.SEMI_QUANTITATIVE,
     confidence=ConfidenceLevel.LOW,
-    validity_range="Competitive Langmuir; gradient elution",
+    validity_range="Gradient-sensitive SMA, HIC, IMAC, Protein A, and lectin adapters",
     calibration_required=True,
     warnings=(
-        "Gradient affects competitive Langmuir binding: badge 'Gradient affects binding: NO' "
-        "until BF-2 fix is deployed.",
+        "Gradient-sensitive isotherms update binding during elution; plain competitive "
+        "Langmuir remains diagnostic only.",
         "Default isotherm parameters are illustrative — user calibration required.",
     ),
     recommended_use="Qualitative elution order prediction; not for yield optimization.",

@@ -82,9 +82,27 @@ class UncertaintyPropagator:
         being perturbed around a point estimate.
     """
 
-    def __init__(self, n_samples: int = 20, seed: int = 42):
+    def __init__(self, n_samples: int = 20, seed: int = 42, n_jobs: int = 1):
+        """Initialise an MC propagator.
+
+        Parameters
+        ----------
+        n_samples : int
+            Number of Monte Carlo samples.
+        seed : int
+            Master RNG seed for reproducibility.
+        n_jobs : int
+            Node 15 (v7.0, P5b): joblib parallelism. ``1`` (default) keeps
+            the legacy serial loop. ``-1`` uses every available core.
+            ``PropertyDatabase`` is in-memory and process-safe by
+            construction (no disk cache, no shared mutable state), so
+            joblib's ``"loky"`` backend is safe with default settings.
+            Each worker re-imports the solver modules; first-call Numba JIT
+            compile cost (Node 14) is paid per worker on cold start.
+        """
         self.n_samples = n_samples
         self.rng = np.random.default_rng(seed)
+        self.n_jobs = n_jobs
 
     def _generate_perturbations(self) -> list[dict]:
         """Generate LHS-like perturbation factors for uncertain parameters."""
@@ -155,85 +173,51 @@ class UncertaintyPropagator:
 
         perturbations = self._generate_perturbations()
 
+        # Pre-compute perturbed prop snapshots so the worker function is a
+        # pure mapping (i, props_i, params_i, perturb) -> sample triple. This
+        # is the joblib boundary: keep RNG draws on the master process so the
+        # results are bit-identical to the serial path (joblib does not
+        # guarantee determinism if workers seed independently).
+        prepared = []
+        for i, perturb in enumerate(perturbations):
+            props_i = self._apply_perturbation(base_props, perturb)
+            # Apply L1 breakage_C3 perturbation here so workers see the
+            # final perturbed props (legacy behaviour kept identical).
+            props_i.breakage_C3 = props_i.breakage_C3 * perturb['breakage_C3_factor']
+            params_i = copy.deepcopy(params)
+            params_i.run_id = f"mc_{i:03d}"
+            prepared.append((i, props_i, params_i, perturb))
+
+        if self.n_jobs == 1:
+            # Serial path — preserves byte-for-byte legacy behaviour and
+            # avoids joblib's process-fork overhead for tiny n_samples.
+            outputs = [
+                _mc_one_sample(item, crosslinker_key, uv_intensity, l2_mode)
+                for item in prepared
+            ]
+        else:
+            # Parallel path (Node 15). Loky backend uses cloudpickle to
+            # transfer params; PropertyDatabase is rebuilt per worker via
+            # solver imports.
+            from joblib import Parallel, delayed
+            outputs = Parallel(n_jobs=self.n_jobs, backend="loky")(
+                delayed(_mc_one_sample)(
+                    item, crosslinker_key, uv_intensity, l2_mode,
+                ) for item in prepared
+            )
+
         d32_samples = []
         pore_samples = []
         G_DN_samples = []
         n_failed = 0
-
-        for i, perturb in enumerate(perturbations):
-            props_i = self._apply_perturbation(base_props, perturb)
-
-            # Override the database properties for this run
-            params_i = copy.deepcopy(params)
-            params_i.run_id = f"mc_{i:03d}"
-
-            try:
-                # Run pipeline with perturbed properties
-                # Bypass the orchestrator's update_for_conditions
-                # and inject perturbed props directly
-                from .level1_emulsification.solver import PBESolver
-                from .level2_gelation.solver import solve_gelation
-                from .level3_crosslinking.solver import solve_crosslinking
-                from .level4_mechanical.solver import solve_mechanical
-
-                # phi_d: let solve() resolve per mode (volumetric for
-                # stirred-vessel, formulation.phi_d for legacy)
-
-                # L1 — apply breakage kernel structural uncertainty
-                # Perturb breakage_C3 (viscous correction constant read by PBE)
-                props_i.breakage_C3 = props_i.breakage_C3 * perturb['breakage_C3_factor']
-
-                pbe = PBESolver(
-                    n_bins=params_i.solver.l1_n_bins,
-                    d_min=params_i.solver.l1_d_min,
-                    d_max=params_i.solver.l1_d_max,
-                )
-                emul = pbe.solve(params_i, props_i)
-
-                # L2
-                R = emul.d50 / 2.0
-                gel = solve_gelation(params_i, props_i, R_droplet=R, mode=l2_mode)
-
-                # Apply pore-model perturbations post-hoc.
-                # NOTE: this post-hoc injection is valid *only* for the
-                # empirical L2 path (algebraic model).  For algebraic models
-                # the output is a closed-form function of the inputs, so
-                # multiplying the result by a prefactor factor is
-                # mathematically equivalent to perturbing the prefactor
-                # before the solve (pre-hoc == post-hoc).  Mechanistic CH
-                # solvers (ch_1d / ch_2d) are nonlinear PDEs where pre-hoc
-                # and post-hoc perturbations are NOT equivalent; the pore
-                # uncertainty block below should be revisited if those modes
-                # are used in production UQ runs.
-                pore_raw = gel.pore_size_mean
-                pore_perturbed = (
-                    pore_raw
-                    * perturb['pore_prefactor_factor']
-                    # exponent offset: scale as (c/c0)^offset relative to base
-                    * np.exp(perturb['pore_exponent_offset'] * 0.5)
-                )
-                # Confinement: cap pore at alpha * bead diameter
-                pore_conf_max = perturb['confinement_alpha'] * 2.0 * R
-                if pore_conf_max > 0:
-                    pore_perturbed = min(pore_perturbed, pore_conf_max)
-                gel.pore_size_mean = float(pore_perturbed)
-
-                # L3 -- Fix 8: pass crosslinker_key and uv_intensity through
-                xl = solve_crosslinking(params_i, props_i, R_droplet=R,
-                                        porosity=gel.porosity,
-                                        crosslinker_key=crosslinker_key,
-                                        uv_intensity=uv_intensity)
-
-                # L4
-                mech = solve_mechanical(params_i, props_i, gel, xl)
-
-                d32_samples.append(emul.d32)
-                pore_samples.append(gel.pore_size_mean)
-                G_DN_samples.append(mech.G_DN)
-
-            except Exception as e:
-                logger.debug("MC sample %d failed: %s", i, e)
+        for i, out in enumerate(outputs):
+            if out is None:
                 n_failed += 1
+                continue
+            d32_i, pore_i, G_DN_i = out
+            d32_samples.append(d32_i)
+            pore_samples.append(pore_i)
+            G_DN_samples.append(G_DN_i)
 
         d32_arr = np.array(d32_samples)
         pore_arr = np.array(pore_samples)
@@ -255,3 +239,58 @@ class UncertaintyPropagator:
             n_samples=len(d32_arr),
             n_failed=n_failed,
         )
+
+
+# ─── Node 15 (v7.0, P5b): module-level worker for joblib parallelism ──────
+
+
+def _mc_one_sample(item, crosslinker_key, uv_intensity, l2_mode):
+    """Run one full pipeline sample for the MC engine.
+
+    Module-level (not a method) so joblib's loky backend can pickle it
+    without dragging the UncertaintyPropagator instance across the process
+    boundary. Returns (d32, pore, G_DN) on success, None on failure.
+
+    The perturbations are pre-applied on the master process; this function
+    just runs the deterministic pipeline given the perturbed props/params.
+    """
+    i, props_i, params_i, perturb = item
+    try:
+        # Local imports keep the worker bootstrap minimal — Numba JIT
+        # compiles lazily on first call per process.
+        from .level1_emulsification.solver import PBESolver
+        from .level2_gelation.solver import solve_gelation
+        from .level3_crosslinking.solver import solve_crosslinking
+        from .level4_mechanical.solver import solve_mechanical
+
+        pbe = PBESolver(
+            n_bins=params_i.solver.l1_n_bins,
+            d_min=params_i.solver.l1_d_min,
+            d_max=params_i.solver.l1_d_max,
+        )
+        emul = pbe.solve(params_i, props_i)
+
+        R = emul.d50 / 2.0
+        gel = solve_gelation(params_i, props_i, R_droplet=R, mode=l2_mode)
+
+        # Apply pore-model perturbations post-hoc (valid for empirical L2 only).
+        pore_raw = gel.pore_size_mean
+        pore_perturbed = (
+            pore_raw
+            * perturb['pore_prefactor_factor']
+            * np.exp(perturb['pore_exponent_offset'] * 0.5)
+        )
+        pore_conf_max = perturb['confinement_alpha'] * 2.0 * R
+        if pore_conf_max > 0:
+            pore_perturbed = min(pore_perturbed, pore_conf_max)
+        gel.pore_size_mean = float(pore_perturbed)
+
+        xl = solve_crosslinking(
+            params_i, props_i, R_droplet=R, porosity=gel.porosity,
+            crosslinker_key=crosslinker_key, uv_intensity=uv_intensity,
+        )
+        mech = solve_mechanical(params_i, props_i, gel, xl)
+        return (emul.d32, gel.pore_size_mean, mech.G_DN)
+    except Exception as exc:
+        logger.debug("MC sample %d failed: %s", i, exc)
+        return None

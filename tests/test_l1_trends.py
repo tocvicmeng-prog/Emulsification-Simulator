@@ -127,7 +127,18 @@ class TestMonotonicTrends:
         result = solver.solve(params, props, phi_d=0.05)
         return result.d32
 
-    @pytest.mark.xfail(reason="Known Gap 3: L1 RPM-d32 trend nonphysical with default kernel constants. Requires kernel calibration.")
+    @pytest.mark.xfail(
+        reason=(
+            "F1 (doc 35): legacy rotor-stator PBE produces nonphysical RPM->d32 "
+            "trend at mu_d=1 Pa.s, sigma=5 mN/m. Root cause is runaway CT "
+            "coalescence at high droplet number density: high RPM produces many "
+            "small droplets whose d_h^4 in the film-drainage damping collapses, "
+            "letting coalescence pull d32 back up. Dispatch routing is now "
+            "fixed (solver.py:251-274 honours KernelConfig), so the system is "
+            "ready for kernel-constant calibration per docs/35 Phase 2 / "
+            "Study A. Will pass after experimental DSD vs RPM data is fitted."
+        )
+    )
     def test_increasing_rpm_decreases_d32(self):
         """Higher agitation -> smaller droplets (within turbulent regime)."""
         d32_low = self._run_l1(rpm=5000)
@@ -137,7 +148,14 @@ class TestMonotonicTrends:
             f"d32(15k)={d32_high*1e6:.2f} um"
         )
 
-    @pytest.mark.xfail(reason="Known Gap 3: L1 sigma-d32 trend nonphysical with default kernel constants. Requires kernel calibration.")
+    @pytest.mark.xfail(
+        reason=(
+            "F1 (doc 35): legacy rotor-stator PBE produces nonphysical "
+            "sigma->d32 trend with default uncalibrated CT/Alopaeus constants. "
+            "Same calibration path as the RPM trend (Study A in docs/35 §9). "
+            "Dispatch routing is now fixed; kernel constants need fitting."
+        )
+    )
     def test_increasing_sigma_increases_d32(self):
         """Higher IFT -> more resistance to breakage -> larger droplets."""
         d32_low_sigma = self._run_l1(sigma=2e-3)

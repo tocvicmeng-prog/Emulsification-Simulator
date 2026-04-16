@@ -77,28 +77,53 @@ def compute_objectives(result: FullResult, mode: str | None = None) -> np.ndarra
 
 # ── v6.1: Trust-aware optimization ───────────────────────────────────────
 
-# Penalty values added to ALL objectives when evidence tier is weak
+# Penalty values added to ALL objectives when evidence tier is weak.
+#
+# Calibration to engine REF_POINT (engine.py REF_POINT = 5.0 for all 3
+# objectives). The Pareto filter at engine.py:338 excludes any candidate whose
+# max objective exceeds REF_POINT, so the penalty must push QUALITATIVE_TREND
+# and UNSUPPORTED candidates *above* 5.0 in at least one objective for them
+# to drop off the front. Base objectives are dimensionless ratios bounded
+# roughly [0, 3]; with the values below:
+#
+#   VALIDATED_QUANTITATIVE: max objective ≈ base − 0.05    -> kept (preferred)
+#   CALIBRATED_LOCAL:       max objective ≈ base           -> kept
+#   SEMI_QUANTITATIVE:      max objective ≈ base + 0.1     -> kept (mild deprioritization)
+#   QUALITATIVE_TREND:      max objective ≈ base + 5.5     -> EXCLUDED (>REF_POINT)
+#   UNSUPPORTED:            max objective ≈ base + 10.0    -> EXCLUDED (>>REF_POINT)
+#
+# Node 6 (consensus plan §5): bumped QUALITATIVE_TREND from 1.0 -> 5.5 so
+# the documented "effectively excluded from Pareto" behaviour actually holds.
 _TRUST_PENALTIES = {
-    ModelEvidenceTier.VALIDATED_QUANTITATIVE: -0.05,   # bonus
+    ModelEvidenceTier.VALIDATED_QUANTITATIVE: -0.05,
     ModelEvidenceTier.CALIBRATED_LOCAL: 0.0,
     ModelEvidenceTier.SEMI_QUANTITATIVE: 0.1,
-    ModelEvidenceTier.QUALITATIVE_TREND: 1.0,          # effectively excluded from Pareto
-    ModelEvidenceTier.UNSUPPORTED: 10.0,               # hard block
+    ModelEvidenceTier.QUALITATIVE_TREND: 5.5,
+    ModelEvidenceTier.UNSUPPORTED: 10.0,
 }
+
+
+def trust_penalty_for_tier(tier: ModelEvidenceTier) -> float:
+    """Public lookup for the per-tier optimizer penalty (Node 6).
+
+    Returns the additive penalty applied to each objective component for
+    candidates whose weakest evidence tier is `tier`. Defaults to the
+    SEMI_QUANTITATIVE penalty for unknown tiers (defensive).
+    """
+    return _TRUST_PENALTIES.get(tier, _TRUST_PENALTIES[ModelEvidenceTier.SEMI_QUANTITATIVE])
 
 
 def compute_trust_penalty(result: FullResult) -> float:
     """Return a scalar penalty based on the weakest evidence tier in the run.
 
     Added to each objective component, so candidates with weaker evidence
-    are deprioritized in the Pareto front.
+    are deprioritized in the Pareto front. A run without a RunReport is
+    treated as SEMI_QUANTITATIVE (the v6.1 default for unmanaged outputs).
     """
     rr = getattr(result, "run_report", None)
     if rr is None:
         return _TRUST_PENALTIES[ModelEvidenceTier.SEMI_QUANTITATIVE]
-
-    min_tier = rr.compute_min_tier()
-    return _TRUST_PENALTIES.get(min_tier, 0.1)
+    return trust_penalty_for_tier(rr.compute_min_tier())
 
 
 def compute_objectives_trust_aware(
@@ -107,7 +132,8 @@ def compute_objectives_trust_aware(
     """Compute trust-penalized objectives (v6.1).
 
     Same as compute_objectives but adds trust penalty to each component.
-    Candidates with UNSUPPORTED evidence are effectively blocked.
+    QUALITATIVE_TREND and UNSUPPORTED candidates land above the engine
+    REF_POINT and are dropped from the Pareto front by the feasible_mask.
     """
     base = compute_objectives(result, mode=mode)
     penalty = compute_trust_penalty(result)

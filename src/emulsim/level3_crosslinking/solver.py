@@ -843,6 +843,13 @@ def solve_crosslinking(params: SimulationParameters,
     # the correct kinetic constants and reactive groups are used for each chemistry.
     # This fixes the bug where the old pre-dispatch check always used amine/genipin
     # parameters (props.k_xlink_0, NH2) regardless of the actual crosslinker.
+    #
+    # Node 9 (F9): track whether an approximate-fallback path was used. The
+    # michaelis_menten branch (EDC/NHS) currently routes to second-order amine
+    # kinetics in the absence of a dedicated solver; when that happens the L3
+    # manifest tier is downgraded to QUALITATIVE_TREND below.
+    _fallback_used = False
+
     if xl.kinetics_model == 'second_order':
         if xl.mechanism in _HYDROXYL_MECHANISMS:
             # Hydroxyl crosslinkers (DVS, ECH, citric acid) — PDE not supported
@@ -927,6 +934,7 @@ def solve_crosslinking(params: SimulationParameters,
             _check_diffusion_limited_unsupported(
                 xl, R_droplet, params, props, "ionic")
         result = _solve_ionic_instant(params, props, xl, R_droplet, porosity)
+        _fallback_used = False
         metadata = NetworkTypeMetadata(
             solver_family="ionic_reversible",
             network_target="chitosan",
@@ -938,11 +946,25 @@ def solve_crosslinking(params: SimulationParameters,
         # Michaelis-Menten crosslinkers (e.g. EDC/NHS) fall back to
         # second-order amine kinetics as an approximation until a
         # dedicated solver is implemented.
-        logger.info("L3: michaelis_menten model not yet implemented; "
-                    "falling back to second_order amine kinetics for '%s'. "
-                    "NOTE: results are approximate -- EDC/NHS kinetics involve "
-                    "competitive hydrolysis not captured by simple second-order model.",
-                    crosslinker_key)
+        #
+        # Node 9 (F9, scientific applicability): EDC/NHS chemistry requires
+        # carboxyl groups to activate before it can react with amines. Native
+        # chitosan + agarose carry NH2 and OH only — no COOH. Running EDC/NHS
+        # on the M1 fabrication state without prior M2 carboxyl introduction
+        # is scientifically inappropriate. We let the fallback ODE run so the
+        # pipeline does not crash, but the L3 manifest is forcibly downgraded
+        # to QUALITATIVE_TREND below so the trust-aware optimizer (Node 6)
+        # excludes such candidates from the Pareto front and the UI cannot
+        # advertise the result as decision-grade.
+        _fallback_used = True
+        logger.warning(
+            "L3: EDC/NHS (michaelis_menten) dispatched without dedicated solver "
+            "AND without M2 COOH-introduction context for crosslinker '%s'. "
+            "Falling back to second-order amine kinetics; result tier downgraded "
+            "to QUALITATIVE_TREND. To use EDC/NHS quantitatively, run M2 "
+            "carboxyl-introduction first or supply experimental kinetics.",
+            crosslinker_key,
+        )
         # EDC/NHS targets amine groups — PDE is supported (amine chemistry)
         if R_droplet is not None and R_droplet > 20e-6:
             D_xlink = 1e-10
@@ -984,15 +1006,35 @@ def solve_crosslinking(params: SimulationParameters,
 
     # Attach model manifest for evidence provenance (v6.1)
     if result.model_manifest is None:
+        # Node 9 (F9): downgrade tier when an approximate fallback fired so
+        # the trust-aware optimizer (Node 6) and UI badges (Sprint 6) reflect
+        # the lost confidence. The default for matched chemistries stays at
+        # SEMI_QUANTITATIVE.
+        _l3_tier = (
+            ModelEvidenceTier.QUALITATIVE_TREND
+            if _fallback_used
+            else ModelEvidenceTier.SEMI_QUANTITATIVE
+        )
+        _l3_assumptions = [
+            f"solver_family={metadata.solver_family}",
+            f"kinetics={xl.kinetics_model}",
+            f"crosslinker={crosslinker_key}",
+        ]
+        if _fallback_used:
+            _l3_assumptions.append(
+                "michaelis_menten -> second-order amine fallback used; "
+                "EDC/NHS requires carboxyl groups not present in native "
+                "chitosan/agarose. Output is ranking-only until a dedicated "
+                "solver and/or M2 carboxyl introduction is in place."
+            )
         result.model_manifest = ModelManifest(
             model_name=f"L3.Crosslink.{xl.kinetics_model}",
-            evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
-            assumptions=[
-                f"solver_family={metadata.solver_family}",
-                f"kinetics={xl.kinetics_model}",
-                f"crosslinker={crosslinker_key}",
-            ],
-            diagnostics={"p_final": result.p_final},
+            evidence_tier=_l3_tier,
+            assumptions=_l3_assumptions,
+            diagnostics={
+                "p_final": result.p_final,
+                "approximate_fallback": _fallback_used,
+            },
         )
 
     # v6.1: populate solver diagnostics on the result

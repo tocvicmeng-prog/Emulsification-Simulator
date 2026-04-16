@@ -1221,3 +1221,115 @@ def test_smpeg_without_amine_distal_fails():
     orchestrator = ModificationOrchestrator()
     with pytest.raises(ValueError, match="no prior"):
         orchestrator.run(contract, steps)
+
+
+# ─── Node 4 (v6.1): M2 ModelManifest evidence wiring ──────────────────────
+
+
+class TestM2ModelManifest:
+    """Verifies that ModelManifest fields are populated end-to-end through M2.
+
+    Acceptance for Node 4:
+      - solve_modification_step attaches a manifest to every ModificationResult.
+      - ModificationOrchestrator.run produces a FunctionalMicrosphere whose
+        composite manifest reflects the weakest tier across all steps.
+      - build_functional_media_contract attaches an FMC manifest combining
+        the upstream microsphere tier with the FMC's own mapping confidence.
+      - Ranking-only ligand classes (affinity, biotin, heparin) cap evidence
+        at QUALITATIVE_TREND.
+    """
+
+    def test_modification_result_has_manifest(self):
+        """A genipin crosslinking step attaches a SEMI_QUANTITATIVE manifest."""
+        from emulsim.datatypes import ModelEvidenceTier, ModelManifest
+
+        contract = _make_contract(nh2_bulk=100.0)
+        surface_model = _make_surface_model(contract)
+        acs_state = _make_acs_state(contract, surface_model)
+
+        step = ModificationStep(
+            step_type=ModificationStepType.SECONDARY_CROSSLINKING,
+            reagent_key="genipin_secondary",
+            target_acs=ACSSiteType.AMINE_PRIMARY,
+            temperature=310.15, time=14400.0,
+            reagent_concentration=10.0, stoichiometry=0.5,
+        )
+        result = solve_modification_step(
+            step, acs_state, surface_model, REAGENT_PROFILES["genipin_secondary"]
+        )
+
+        assert result.model_manifest is not None
+        assert isinstance(result.model_manifest, ModelManifest)
+        # Genipin is not ranking-only and conservation is preserved -> SEMI
+        assert result.model_manifest.evidence_tier == ModelEvidenceTier.SEMI_QUANTITATIVE
+        assert "secondary_crosslinking" in result.model_manifest.model_name
+        assert "genipin_secondary" in result.model_manifest.model_name
+        # Diagnostics carry the achieved conversion
+        diag = result.model_manifest.diagnostics
+        assert "conversion" in diag and diag["conversion"] > 0
+        assert diag["conservation_ok"] is True
+
+    def test_microsphere_composite_manifest_weakest_wins(self):
+        """Composite manifest reports the weakest tier across all steps."""
+        from emulsim.datatypes import ModelEvidenceTier
+        from emulsim.module2_functionalization.orchestrator import (
+            build_functional_media_contract,
+        )
+
+        contract = _make_contract(nh2_bulk=200.0, oh_bulk=400.0)
+        # Two steps: ECH activation (SEMI) then a ranking-only affinity coupling
+        # to force the composite down to QUALITATIVE_TREND.
+        steps = [
+            ModificationStep(
+                step_type=ModificationStepType.ACTIVATION,
+                reagent_key="ech_activation",
+                target_acs=ACSSiteType.HYDROXYL,
+                product_acs=ACSSiteType.EPOXIDE,
+                temperature=298.15, time=7200.0,
+                reagent_concentration=50.0, ph=12.0,
+            ),
+            ModificationStep(
+                step_type=ModificationStepType.PROTEIN_COUPLING,
+                reagent_key="protein_a_coupling",
+                target_acs=ACSSiteType.EPOXIDE,
+                temperature=277.15, time=14400.0,
+                reagent_concentration=0.05, ph=7.0,
+            ),
+        ]
+
+        microsphere = ModificationOrchestrator().run(contract, steps)
+
+        assert microsphere.model_manifest is not None
+        # Protein A is functional_mode='affinity_ligand' -> ranking-only ->
+        # composite must be QUALITATIVE_TREND or weaker.
+        _ORDER = list(ModelEvidenceTier)
+        composite_idx = _ORDER.index(microsphere.model_manifest.evidence_tier)
+        qt_idx = _ORDER.index(ModelEvidenceTier.QUALITATIVE_TREND)
+        assert composite_idx >= qt_idx, (
+            f"Composite tier {microsphere.model_manifest.evidence_tier} should "
+            "be QUALITATIVE_TREND or weaker after a ranking-only coupling step."
+        )
+        # Diagnostics enumerate steps
+        steps_diag = microsphere.model_manifest.diagnostics["steps"]
+        assert len(steps_diag) == 2
+
+        # FMC manifest inherits the weakest of microsphere + FMC's own tier
+        fmc = build_functional_media_contract(microsphere)
+        assert fmc.model_manifest is not None
+        fmc_idx = _ORDER.index(fmc.model_manifest.evidence_tier)
+        assert fmc_idx >= composite_idx, (
+            "FMC tier must not be stronger than upstream microsphere tier."
+        )
+        # FMC manifest names ligand_type
+        assert fmc.model_manifest.diagnostics["ligand_type"] == "affinity"
+
+    def test_empty_history_yields_unsupported(self):
+        """No steps -> microsphere manifest is UNSUPPORTED, not None."""
+        from emulsim.datatypes import ModelEvidenceTier
+
+        contract = _make_contract()
+        microsphere = ModificationOrchestrator().run(contract, steps=[])
+
+        assert microsphere.model_manifest is not None
+        assert microsphere.model_manifest.evidence_tier == ModelEvidenceTier.UNSUPPORTED
+        assert microsphere.model_manifest.diagnostics["n_steps"] == 0

@@ -301,9 +301,9 @@ def render_tab_m3(tab_container) -> None:
 
                     _grad_affects = getattr(_ge, "gradient_affects_binding", False)
                     if _grad_affects:
-                        st.success("Gradient affects binding: YES \u2014 competitive Langmuir mechanistically coupled.")
+                        st.success("Gradient affects binding: YES - selected isotherm is gradient-sensitive.")
                     else:
-                        st.info("Gradient affects binding: NO \u2014 gradient is diagnostic/display only (BF-2 not deployed).")
+                        st.info("Gradient affects binding: NO - plain competitive Langmuir is diagnostic/display only.")
 
                     _ge_time = getattr(_ge, "time", None)
                     _ge_uv = getattr(_ge, "uv_signal", None)
@@ -320,9 +320,9 @@ def render_tab_m3(tab_container) -> None:
                     st.plotly_chart(plot_peak_table(_ge_peaks), use_container_width=True)
 
                     st.caption(
-                        "Ranking only \u2014 multi-component gradient elution with competitive Langmuir. "
-                        "Gradient salt concentration does not yet affect binding affinity (BF-2 pending). "
-                        "Elution order is indicative; quantitative yields require isotherm calibration."
+                        "Ranking only - gradient-sensitive adapters update binding during elution; "
+                        "plain competitive Langmuir remains diagnostic. Quantitative yields require "
+                        "isotherm calibration."
                     )
                 _m3_idx += 1
 

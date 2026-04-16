@@ -1,0 +1,57 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "EmulSim L1 DSD AssayRecord",
+  "description": "JSON schema for a droplet-size-distribution assay used to calibrate the L1 PBE kernel constants. Aligned with emulsim.assay_record.AssayRecord v1.0.",
+  "type": "object",
+  "required": ["record_id", "kind", "units", "replicates", "process_conditions"],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "record_id": {
+      "type": "string",
+      "description": "Unique identifier (lab notebook page or LIMS ID)."
+    },
+    "kind": {
+      "const": "droplet_size_distribution"
+    },
+    "units": {
+      "enum": ["m", "um"],
+      "description": "Diameter unit. Use 'm' (SI) when possible; the fitter converts 'um' on ingest."
+    },
+    "replicates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["value"],
+        "properties": {
+          "value": {"type": "number", "description": "Sauter mean diameter d32."},
+          "std": {"type": "number", "minimum": 0},
+          "flag": {"enum": ["", "outlier", "censored_low", "censored_high"]},
+          "notes": {"type": "string"}
+        }
+      }
+    },
+    "process_conditions": {
+      "type": "object",
+      "required": ["rpm_min_1"],
+      "properties": {
+        "rpm_min_1": {"type": "number", "exclusiveMinimum": 0, "description": "Stirrer speed in 1/min."},
+        "T_K": {"type": "number"},
+        "phi_d": {"type": "number", "minimum": 0, "maximum": 1},
+        "surfactant_kg_m3": {"type": "number", "minimum": 0},
+        "mu_d_pa_s": {"type": "number", "minimum": 0},
+        "sigma_n_m": {"type": "number", "minimum": 0},
+        "stirrer_type": {"enum": ["pitched_blade", "rotor_stator_small", "rotor_stator_legacy"]}
+      }
+    },
+    "sample_id": {"type": "string"},
+    "instrument": {"type": "string", "description": "e.g. 'Mastersizer3000_S/N12345'"},
+    "operator": {"type": "string"},
+    "notebook_ref": {"type": "string"},
+    "timestamp_utc": {"type": "string", "format": "date-time"},
+    "target_module": {"const": "L1"},
+    "notes": {"type": "string"}
+  }
+}
