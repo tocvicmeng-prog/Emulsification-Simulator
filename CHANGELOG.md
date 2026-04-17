@@ -1,5 +1,42 @@
 # Changelog
 
+## v8.3.6 — Import-probe launchers + auto-open browser (2026-04-17)
+
+### Fixed
+
+- `_cmd_ui` no longer passes `--server.headless true` to streamlit,
+  so the UI opens the user's default browser automatically. The old
+  behaviour required the user to notice the "Open
+  http://localhost:8501 in your browser" line and navigate there by
+  hand — easy to miss.
+- `launch_ui.bat` and `launch_cli.bat` now probe
+  `python -c "import emulsim"` as well as checking `.venv\` file
+  existence. A partially-created venv (say install.bat failed
+  between `python -m venv .venv` and the wheel pip-install) no
+  longer bypasses the self-heal path.
+
+### Added
+
+- `release/.../WHERE_ARE_THE_PROGRAM_FILES.txt` — prominent
+  short explainer answering the "I don't see a program in the
+  install folder!" question. Describes the wheel → venv → site-
+  packages flow and gives the one-line command to verify the
+  install worked.
+- `install.bat` success banner now prints the exact path where
+  program files landed after pip install:
+  `<install_dir>\.venv\Lib\site-packages\emulsim\`.
+
+### Version bumps
+
+- `pyproject.toml`, `__init__.py`: 8.3.5 → 8.3.6.
+
+### Artefacts
+
+- `release/EmulSim-8.3.6-Setup.exe` (2.54 MB)
+- `release/EmulSim-8.3.6-Windows-x64.zip` (566 KB)
+
+---
+
 ## v8.3.5 — Diagnostic-safe launch (fixes flash-crash window) (2026-04-17)
 
 Hotfix for a "flash-and-close" launch experience where double-clicking

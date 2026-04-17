@@ -480,17 +480,23 @@ def _cmd_ui(args):
     import subprocess
     app_path = Path(__file__).parent / "visualization" / "app.py"
     print(f"Launching EmulSim UI on port {args.port}...")
-    print(f"Open http://localhost:{args.port} in your browser")
+    print(f"Your default browser should open automatically.")
+    print(f"If not, navigate to http://localhost:{args.port} manually.")
+    print()
+    # Streamlit default is to open the user's browser automatically.
+    # We keep headless=false explicitly so that behaviour is reliable,
+    # and suppress the anonymous-usage ping.
     result = subprocess.run([
         sys.executable, "-m", "streamlit", "run", str(app_path),
         "--server.port", str(args.port),
-        "--server.headless", "true",
+        "--server.headless", "false",
+        "--browser.gatherUsageStats", "false",
     ])
-    # Propagate streamlit's exit code so the wrapping batch script (or
-    # any parent process) can detect an abnormal exit and pause for
-    # diagnosis. Previously this function returned None unconditionally,
-    # so a crashing streamlit silently produced a zero-exit python and
-    # the launch window closed without showing the error.
+    # Propagate streamlit's exit code so the wrapping batch script can
+    # pause for diagnosis. Previously this function returned None
+    # unconditionally, so a crashing streamlit silently produced a
+    # zero-exit python and the launch window closed without showing
+    # the error.
     if result.returncode != 0:
         sys.exit(result.returncode)
 

@@ -1,6 +1,6 @@
 """EmulSim: Multi-scale emulsification simulation for hydrogel microsphere preparation."""
 
-__version__ = "8.3.5"
+__version__ = "8.3.6"
 
 from .datatypes import (
     SimulationParameters,
