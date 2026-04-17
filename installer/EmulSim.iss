@@ -1,9 +1,9 @@
-; EmulSim 8.3.7 -- Windows 11 x64 Inno Setup installer
+; EmulSim 9.0.0 -- Windows 11 x64 Inno Setup installer
 ; Build with: ISCC.exe installer\EmulSim.iss
-; Produces:  release\EmulSim-8.3.7-Setup.exe
+; Produces:  release\EmulSim-9.0.0-Setup.exe
 
 #define MyAppName       "EmulSim"
-#define MyAppVersion    "8.3.7"
+#define MyAppVersion    "9.0.0"
 #define MyAppPublisher  "Holocyte Pty Ltd"
 #define MyAppURL        "https://github.com/tocvicmeng-prog/Emulsification-Simulator"
 #define MyAppExeLauncher "launch_ui.bat"
@@ -61,12 +61,17 @@ Source: "stage\LICENSE.txt";            DestDir: "{app}"; Flags: ignoreversion
 Source: "LICENSE_AND_IP.txt";           DestDir: "{app}"; Flags: ignoreversion
 Source: "stage\wheels\*";               DestDir: "{app}\wheels";  Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "stage\configs\*";              DestDir: "{app}\configs"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Ships every PDF staged into installer\stage\docs, which includes
+; User_Manual_First_Edition.pdf and Appendix_J_Functionalization_Protocols.pdf.
+; No .md source files are staged here — runtime users don't need them (v9.0
+; cleanliness: no technical development docs in the installer).
 Source: "stage\docs\*";                 DestDir: "{app}\docs";    Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\EmulSim (Web UI)"; Filename: "{app}\launch_ui.bat"; WorkingDir: "{app}"; Comment: "Launch the EmulSim web dashboard"; Tasks: startmenuicon
 Name: "{group}\EmulSim (Command line)"; Filename: "{app}\launch_cli.bat"; WorkingDir: "{app}"; Comment: "Open a Command Prompt with emulsim on PATH"; Tasks: startmenuicon
 Name: "{group}\User Manual (PDF)"; Filename: "{app}\docs\User_Manual_First_Edition.pdf"; WorkingDir: "{app}\docs"; Comment: "First Edition instruction manual"; Tasks: startmenuicon
+Name: "{group}\Appendix J - Functionalisation Protocols (PDF)"; Filename: "{app}\docs\Appendix_J_Functionalization_Protocols.pdf"; WorkingDir: "{app}\docs"; Comment: "44 wet-lab protocols with full SDS-lite safety blocks"; Tasks: startmenuicon
 Name: "{group}\Release Notes"; Filename: "{app}\RELEASE_NOTES.md"; WorkingDir: "{app}"; Tasks: startmenuicon
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"; Tasks: startmenuicon
 Name: "{autodesktop}\{#MyAppName} (Web UI)"; Filename: "{app}\launch_ui.bat"; WorkingDir: "{app}"; Comment: "Launch the EmulSim web dashboard"; Tasks: desktopicon

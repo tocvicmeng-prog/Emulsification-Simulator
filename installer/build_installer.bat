@@ -34,19 +34,23 @@ copy /y configs\default.toml            installer\stage\configs\       > nul
 copy /y configs\fast_smoke.toml         installer\stage\configs\       > nul
 copy /y configs\stirred_vessel.toml     installer\stage\configs\       > nul
 
-REM Manual: rebuild the PDF if Markdown is newer.
+REM Manuals: rebuild both PDFs (main + Appendix J) from Markdown sources.
+REM build_pdf.py iterates its BUILD_TARGETS registry to cover both files.
 if exist docs\user_manual\build_pdf.py (
     python docs\user_manual\build_pdf.py > nul
 )
 copy /y docs\user_manual\polysaccharide_microsphere_simulator_first_edition.pdf ^
         installer\stage\docs\User_Manual_First_Edition.pdf > nul
-copy /y docs\user_manual\polysaccharide_microsphere_simulator_first_edition.md ^
-        installer\stage\docs\User_Manual_First_Edition.md > nul
+REM Do NOT ship the Markdown source of the main manual in the installer.
+REM Runtime users do not need the .md; it belongs in the repo only.
+REM (v9.0 cleanliness: no technical development docs in the installer.)
+copy /y docs\user_manual\appendix_J_functionalization_protocols.pdf ^
+        installer\stage\docs\Appendix_J_Functionalization_Protocols.pdf > nul
 
 REM Bundled launcher + installer scripts from the release tree.
 for %%F in (install.bat launch_ui.bat launch_cli.bat uninstall.bat
             README.txt INSTALL.md RELEASE_NOTES.md) do (
-    copy /y release\EmulSim-8.3.7-Windows-x64\%%F installer\stage\ > nul
+    copy /y release\EmulSim-9.0.0-Windows-x64\%%F installer\stage\ > nul
 )
 copy /y LICENSE installer\stage\LICENSE.txt > nul
 
@@ -78,6 +82,6 @@ echo [build-installer] 4/4  Compiling installer
 
 echo.
 echo [build-installer] DONE.
-echo Output: release\EmulSim-8.3.7-Setup.exe
+echo Output: release\EmulSim-9.0.0-Setup.exe
 endlocal
 exit /b 0
