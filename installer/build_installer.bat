@@ -47,10 +47,12 @@ REM (v9.0 cleanliness: no technical development docs in the installer.)
 copy /y docs\user_manual\appendix_J_functionalization_protocols.pdf ^
         installer\stage\docs\Appendix_J_Functionalization_Protocols.pdf > nul
 
-REM Bundled launcher + installer scripts from the release tree.
+REM Bundled launcher + docs from the tracked template directory.
+REM These live under installer\templates\ so the build is reproducible
+REM from a fresh clone (release\ is gitignored and would be missing).
 for %%F in (install.bat launch_ui.bat launch_cli.bat uninstall.bat
             README.txt INSTALL.md RELEASE_NOTES.md) do (
-    copy /y release\EmulSim-9.0.0-Windows-x64\%%F installer\stage\ > nul
+    copy /y installer\templates\%%F installer\stage\ > nul
 )
 copy /y LICENSE installer\stage\LICENSE.txt > nul
 

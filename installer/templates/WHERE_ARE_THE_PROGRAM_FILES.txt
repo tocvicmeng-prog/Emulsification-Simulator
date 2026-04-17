@@ -1,0 +1,93 @@
+WHERE ARE THE PROGRAM FILES?
+============================
+
+This is a question that comes up because EmulSim ships as a Python
+package inside a wheel file -- it does NOT ship as a traditional
+Windows .exe. Here is the full picture.
+
+WHAT IS IN THIS FOLDER
+----------------------
+
+    install.bat             Sets up the runtime.
+    launch_ui.bat           Starts the web UI.
+    launch_cli.bat          Opens a CLI shell.
+    uninstall.bat           Removes the runtime.
+    wheels\emulsim-*.whl    The EmulSim program, compressed.
+    configs\                Example TOML input files.
+    docs\                   User manual (PDF + Markdown).
+    LICENSE.txt             GPL-3.0.
+    LICENSE_AND_IP.txt      IP statement + GPL summary + source URL.
+    README.txt              Quickstart.
+    INSTALL.md              Detailed install guide.
+    RELEASE_NOTES.md        What's new in this version.
+
+The file named "emulsim-<version>-py3-none-any.whl" IS the program.
+A wheel is a zip archive of Python source code. It is inert until
+pip extracts it into a Python environment.
+
+WHERE THE PROGRAM LIVES AFTER INSTALL
+--------------------------------------
+
+When install.bat runs, it:
+
+    1. Creates a Python virtual environment at  .venv\
+    2. Runs pip to install the wheel into the venv
+    3. Pip extracts the wheel contents to:
+
+       <this folder>\.venv\Lib\site-packages\emulsim\
+
+THAT folder is the program source -- real .py files, sub-packages,
+the UI app, all four solver families, the manifests, everything.
+You never see it at the top level because it is nested two layers
+deep inside .venv.
+
+Typical path on a default install:
+
+    C:\Users\<you>\AppData\Local\Programs\EmulSim\
+        .venv\
+            Scripts\
+                python.exe
+                activate.bat
+                emulsim.exe
+            Lib\
+                site-packages\
+                    emulsim\                <-- program source is here
+                    numpy\
+                    scipy\
+                    streamlit\
+                    ...
+
+HOW TO CHECK THE INSTALL SUCCEEDED
+-----------------------------------
+
+Open a Command Prompt and run:
+
+    cd /d "%LOCALAPPDATA%\Programs\EmulSim"
+    .venv\Scripts\python.exe -c "import emulsim; print(emulsim.__version__, emulsim.__file__)"
+
+Expected output:
+
+    9.0.0 C:\Users\...\AppData\Local\Programs\EmulSim\.venv\Lib\site-packages\emulsim\__init__.py
+
+If you see this, the program is installed.
+If you see ModuleNotFoundError, install.bat did not finish
+successfully -- re-run install.bat manually in a Command Prompt
+to see the error, or open an issue on GitHub with the output.
+
+WHY NOT SHIP A TRADITIONAL .EXE?
+---------------------------------
+
+Bundling Python + scipy + matplotlib + streamlit + botorch + torch
+into a single .exe via tools like PyInstaller would produce a
+300-500 MB installer (vs the current ~2.5 MB) and would complicate
+reproducibility -- users could not tell which numpy/scipy version
+was actually executing. Shipping a wheel + a lightweight venv
+bootstrap keeps everything visible, upgradeable, and debuggable via
+standard Python tooling.
+
+Power users can work directly with the wheel:
+
+    pip install wheels\emulsim-<version>-py3-none-any.whl[ui,optimization]
+    python -m emulsim ui
+
+-- no install.bat required.
