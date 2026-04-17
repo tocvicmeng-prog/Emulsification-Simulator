@@ -481,11 +481,18 @@ def _cmd_ui(args):
     app_path = Path(__file__).parent / "visualization" / "app.py"
     print(f"Launching EmulSim UI on port {args.port}...")
     print(f"Open http://localhost:{args.port} in your browser")
-    subprocess.run([
+    result = subprocess.run([
         sys.executable, "-m", "streamlit", "run", str(app_path),
         "--server.port", str(args.port),
         "--server.headless", "true",
     ])
+    # Propagate streamlit's exit code so the wrapping batch script (or
+    # any parent process) can detect an abnormal exit and pause for
+    # diagnosis. Previously this function returned None unconditionally,
+    # so a crashing streamlit silently produced a zero-exit python and
+    # the launch window closed without showing the error.
+    if result.returncode != 0:
+        sys.exit(result.returncode)
 
 
 # ─── Node 24 (v7.0.1, audit N4): batch / dossier / ingest CLI surfacing ────

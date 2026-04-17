@@ -1,9 +1,9 @@
-; EmulSim 8.3.4 -- Windows 11 x64 Inno Setup installer
+; EmulSim 8.3.5 -- Windows 11 x64 Inno Setup installer
 ; Build with: ISCC.exe installer\EmulSim.iss
-; Produces:  release\EmulSim-8.3.4-Setup.exe
+; Produces:  release\EmulSim-8.3.5-Setup.exe
 
 #define MyAppName       "EmulSim"
-#define MyAppVersion    "8.3.4"
+#define MyAppVersion    "8.3.5"
 #define MyAppPublisher  "Holocyte Pty Ltd"
 #define MyAppURL        "https://github.com/tocvicmeng-prog/Emulsification-Simulator"
 #define MyAppExeLauncher "launch_ui.bat"

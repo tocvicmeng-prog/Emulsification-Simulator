@@ -1,5 +1,67 @@
 # Changelog
 
+## v8.3.5 — Diagnostic-safe launch (fixes flash-crash window) (2026-04-17)
+
+Hotfix for a "flash-and-close" launch experience where double-clicking
+the desktop shortcut opened a Command Prompt that disappeared in a
+fraction of a second, giving the user no chance to read the actual
+error.
+
+### Root cause
+
+Two compounding bugs:
+
+1. `_cmd_ui` (in `src/emulsim/__main__.py`) called
+   `subprocess.run(["streamlit", ...])` without propagating the
+   subprocess's return code. When Streamlit crashed (e.g., import
+   error, port conflict), the parent Python process exited with
+   code 0, pretending success.
+2. `launch_ui.bat` ran the Python command and did
+   `exit /b %ERRORLEVEL%` immediately afterward. A zero exit code
+   → normal completion → `cmd /c` closes the window
+   instantaneously, taking any error output with it.
+
+Result: users saw a black cmd window blink open and close; no way
+to diagnose.
+
+### Fix
+
+- `src/emulsim/__main__.py` / `_cmd_ui`: capture the subprocess
+  result and `sys.exit(result.returncode)` when it is non-zero.
+  Streamlit failures now propagate up.
+- `release/EmulSim-8.3.5-Windows-x64/launch_ui.bat`: after the
+  Python call returns, if the exit code is non-zero, print a
+  diagnostic block (port-conflict / dependency / version hints)
+  + a manual-diagnosis command line, then `pause` before exit.
+  The window now stays open whenever the UI exited abnormally.
+  Normal shutdown (Streamlit exit code 0) still closes the window
+  cleanly.
+
+### Version bumps
+
+- `pyproject.toml`, `src/emulsim/__init__.py`: 8.3.4 → 8.3.5.
+- Installer script + build helper + release tree: 8.3.4 → 8.3.5.
+
+### Artefacts
+
+- `release/EmulSim-8.3.5-Setup.exe` (2.54 MB)
+- `release/EmulSim-8.3.5-Windows-x64.zip` (564 KB)
+
+### Immediate workaround for v8.3.4 users
+
+If you can't wait for the installer rebuild, open a Command Prompt
+manually and run:
+
+```
+cd /d "%LOCALAPPDATA%\Programs\EmulSim"
+.venv\Scripts\python.exe -m emulsim ui
+```
+
+That bypasses the `.bat` wrapper entirely and shows the actual
+traceback in a window that stays open.
+
+---
+
 ## v8.3.4 — Per-user install by default (fixes Access Denied) (2026-04-17)
 
 Hotfix for a second install-time failure reported after v8.3.3:
