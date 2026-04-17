@@ -5,3 +5,6 @@ __pycache__/
 *.pyc
 .context/
 scientific_advisor_output.md
+build/
+dist/
+release/

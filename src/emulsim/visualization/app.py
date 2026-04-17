@@ -53,8 +53,33 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("\U0001f52c EmulSim — Double-Network Hydrogel Microsphere Simulator")
-st.caption("Multi-scale simulation: Emulsification \u2192 Gelation \u2192 Crosslinking \u2192 Mechanical Properties")
+_title_col, _manual_col = st.columns([6, 1])
+with _title_col:
+    st.title("\U0001f52c EmulSim — Double-Network Hydrogel Microsphere Simulator")
+    st.caption("Multi-scale simulation: Emulsification \u2192 Gelation \u2192 Crosslinking \u2192 Mechanical Properties")
+with _manual_col:
+    # Upper-right download button for the First Edition PDF manual.
+    _manual_pdf = (
+        _root
+        / "docs" / "user_manual"
+        / "polysaccharide_microsphere_simulator_first_edition.pdf"
+    )
+    if _manual_pdf.exists():
+        with open(_manual_pdf, "rb") as _f:
+            st.download_button(
+                label="Manual (PDF)",
+                data=_f.read(),
+                file_name="EmulSim_First_Edition.pdf",
+                mime="application/pdf",
+                help="Polysaccharide-Based Microsphere Emulsification "
+                     "Simulator — First Edition (instruction manual).",
+                use_container_width=True,
+            )
+    else:
+        st.caption(
+            "Manual PDF not built yet — run "
+            "`python docs/user_manual/build_pdf.py`"
+        )
 
 # ─── Session State Manager ────────────────────────────────────────────────
 

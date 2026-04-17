@@ -1560,9 +1560,17 @@ REAGENT_PROFILES: dict[str, ReagentProfile] = {
         buffer_incompatibilities="Tris,glycine,primary_amine_buffers",
         profile_role="activated",
         m3_support_level="not_mapped",
-        confidence_tier="ranking_only",
-        calibration_source="Pseudo-single-step EDC/NHS; ranking_only (F5)",
-        notes="Two-step mechanism simplified to single activation. NHS ester half-life ~2h at pH 7.5",
+        confidence_tier="semi_quantitative",
+        calibration_source=(
+            "Node 31 mechanistic two-step ODE; Hermanson 2013, Wang 2011, "
+            "Cline & Hanna 1988 literature rate constants. Promotes to "
+            "quantitative tier via CalibrationStore posteriors (Node 30) "
+            "after Study A."
+        ),
+        notes=(
+            "Node 31 (v7.1): mechanistic two-step kinetic (4-ODE) with "
+            "competitive hydrolysis. See edc_nhs_kinetics.react_edc_nhs_two_step."
+        ),
     ),
 
     # ═══════════════════════════════════════════════════════════════════

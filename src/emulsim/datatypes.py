@@ -14,6 +14,23 @@ from typing import Any, Optional
 import numpy as np
 
 
+# ─── Platform / polymer family ───────────────────────────────────────────
+
+
+class PolymerFamily(Enum):
+    """Microsphere polymer family (Node F1-a, v8.0).
+
+    Drives L2 gelation-solver dispatch. AGAROSE_CHITOSAN is the legacy
+    v7.x platform (thermal TIPS + optional covalent crosslinking);
+    ALGINATE uses diffusion-limited Ca²⁺ ionic gelation; CELLULOSE and
+    PLGA are stubs for future F1-b / F1-c work.
+    """
+    AGAROSE_CHITOSAN = "agarose_chitosan"
+    ALGINATE = "alginate"
+    CELLULOSE = "cellulose"
+    PLGA = "plga"
+
+
 # ─── Equipment Enums ─────────────────────────────────────────────────────
 
 class VesselType(Enum):
@@ -514,13 +531,20 @@ class FormulationParameters:
     """
     c_agarose: float = 42.0             # [kg/m³] (4.2% w/v)
     c_chitosan: float = 18.0            # [kg/m³] (1.8% w/v)
+    c_alginate: float = 0.0             # [kg/m³] Node F1-a; 0 = not-alginate
+    phi_cellulose_0: float = 0.0        # [-] Node F1-b; initial cellulose vol. fraction
+    solvent_system: str = ""            # [Node F1-b] cellulose solvent preset key; "" = skip
+    phi_PLGA_0: float = 0.0             # [-] Node F1-c; initial PLGA vol. fraction in droplet
+    plga_grade: str = ""                # [Node F1-c] PLGA grade preset key ("" = skip)
     c_span80: float = 20.0              # [kg/m³] (~2% w/v)
     c_genipin: float = 2.0              # [mol/m³] (~2 mM)
+    c_Ca_bath: float = 100.0            # [mol/m³] Node F1-a; external CaCl₂ bath
     T_oil: float = 363.15              # [K] (90°C)
     cooling_rate: float = 0.167         # [K/s] (~10°C/min)
     T_crosslink: float = 310.15         # [K] (37°C)
     t_crosslink: float = 86400.0        # [s] (24 hours)
     phi_d: float = 0.05                 # [-] dispersed phase volume fraction
+    pH: float = 7.0                     # [-] reaction pH (Node 31; EDC/NHS + future pH-dependent chemistries)
     # ── Stirred-vessel volumetric fields ──
     c_span80_vol_pct: float = 1.5       # [% v/v] Span-80 in paraffin oil
     v_oil_span80_mL: float = 300.0      # [mL] volume of oil + Span-80 mixture
@@ -811,6 +835,42 @@ class MaterialProperties:
 
     # Network / pore
     r_fiber: float = 1.5e-9            # [m] agarose fiber radius
+
+    # Surface carboxyl (Node 31): introduced by prior M2 steps (e.g.
+    # succinylation of chitosan NH2 -> NH-CO-CH2-CH2-COOH). Zero on
+    # native chitosan/agarose; non-zero gates L3 EDC/NHS to run the
+    # mechanistic path instead of falling back to QUALITATIVE_TREND.
+    surface_cooh_concentration: float = 0.0  # [mol/m^3] grafted COOH sites
+
+    # Platform / polymer family (Node F1-a, v8.0): drives L2 solver
+    # dispatch. Default keeps legacy chitosan/agarose behaviour.
+    polymer_family: PolymerFamily = PolymerFamily.AGAROSE_CHITOSAN
+
+    # Alginate-specific defaults (F1-a). Harmless for other families.
+    f_guluronate: float = 0.5          # [-] guluronate fraction (G-block)
+    D_Ca: float = 1.0e-9               # [m²/s] Ca²⁺ diffusivity in alginate gel
+    k_bind_Ca: float = 1.0e3           # [M⁻²·s⁻¹] Ca²⁺ + 2 COO⁻ binding rate
+    K_alg_modulus: float = 30.0e3      # [Pa] modulus prefactor (Kong 2004)
+    n_alg_modulus: float = 2.0         # [-] modulus exponent
+
+    # Cellulose-specific defaults (F1-b Phase 1, NaOH/urea). Harmless for
+    # other families. See docs/f1b_cellulose_nips_protocol.md §5.
+    N_p_cellulose: float = 370.0           # [-] degree of polymerisation (M_n/M_AGU)
+    chi_PS_cellulose: float = 0.45         # [-] χ polymer-solvent
+    chi_PN_cellulose: float = 0.85         # [-] χ polymer-nonsolvent (water)
+    chi_SN_cellulose: float = 0.30         # [-] χ solvent-nonsolvent
+    D_solvent_cellulose: float = 5.0e-11   # [m²/s] solvent self-diffusion in gel
+    D_nonsolvent_cellulose: float = 1.0e-10  # [m²/s] water self-diffusion in gel
+    kappa_CH_cellulose: float = 1.0e-17    # [J·m⁻¹] Cahn-Hilliard gradient energy coef
+    K_cell_modulus: float = 5.0e5          # [Pa] modulus prefactor (Zhang 2020)
+    alpha_cell_modulus: float = 2.25       # [-] modulus exponent (entangled regime)
+
+    # PLGA-specific defaults (F1-c Phase 1, PLGA 50:50). Harmless for
+    # other families. See docs/f1c_plga_protocol.md §5.
+    D_DCM_plga: float = 1.0e-9             # [m²/s] DCM effective diffusivity in PLGA/DCM
+    phi_DCM_eq: float = 0.005              # [-] bath-equilibrium DCM fraction (Henry)
+    G_glassy_plga: float = 7.0e8           # [Pa] PLGA glassy-state shear modulus
+    n_plga_modulus: float = 2.0            # [-] Gibson-Ashby exponent
 
 
 # ─── Model Evidence and Provenance ────────────────────────────────────────

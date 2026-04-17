@@ -176,78 +176,12 @@ class TestCalibrationIntegration:
 # ═════════════════════════════════════════════════════════════════════════
 # 2. UNCERTAINTY INTEGRATION
 # ═════════════════════════════════════════════════════════════════════════
-
-class TestUncertaintyIntegration:
-    """Uncertainty propagation end-to-end through M2."""
-
-    def test_screening_defaults_produce_bounds(self):
-        """Monte Carlo with screening CVs produces p5/p95 bounds."""
-        from emulsim.uncertainty_propagation import (
-            M1UncertaintyContract, run_with_uncertainty,
-        )
-        from emulsim.module2_functionalization import (
-            ModificationStep, ModificationStepType, ACSSiteType,
-        )
-
-        contract = _make_contract(nh2_bulk=100.0, oh_bulk=400.0)
-        unc = M1UncertaintyContract.screening_defaults()
-
-        steps = [
-            ModificationStep(
-                step_type=ModificationStepType.ACTIVATION,
-                reagent_key="ech_activation",
-                target_acs=ACSSiteType.HYDROXYL,
-                product_acs=ACSSiteType.EPOXIDE,
-                temperature=298.15, time=7200.0,
-                reagent_concentration=100.0, ph=12.0,
-            ),
-        ]
-
-        result = run_with_uncertainty(
-            contract=contract,
-            steps=steps,
-            uncertainty=unc,
-            n_samples=20,  # small N for speed
-            seed=42,
-        )
-
-        assert result.n_samples == 20
-        assert result.n_valid > 0, "Should have at least some valid samples"
-        assert result.p5_q_max <= result.median_q_max <= result.p95_q_max
-        assert result.cv_q_max >= 0.0
-        assert result.tier == "assumed"
-
-    def test_deterministic_produces_single_value(self):
-        """Zero CVs = deterministic, all percentiles equal."""
-        from emulsim.uncertainty_propagation import (
-            M1UncertaintyContract, run_with_uncertainty,
-        )
-        from emulsim.module2_functionalization import (
-            ModificationStep, ModificationStepType, ACSSiteType,
-        )
-
-        contract = _make_contract()
-        unc = M1UncertaintyContract()  # all CVs=0
-
-        steps = [
-            ModificationStep(
-                step_type=ModificationStepType.ACTIVATION,
-                reagent_key="ech_activation",
-                target_acs=ACSSiteType.HYDROXYL,
-                product_acs=ACSSiteType.EPOXIDE,
-                temperature=298.15, time=7200.0,
-                reagent_concentration=100.0, ph=12.0,
-            ),
-        ]
-
-        result = run_with_uncertainty(
-            contract=contract, steps=steps, uncertainty=unc,
-            n_samples=5, seed=0,
-        )
-
-        # Deterministic: all values equal
-        assert result.p5_q_max == pytest.approx(result.p95_q_max, rel=1e-6)
-        assert result.cv_q_max == pytest.approx(0.0, abs=1e-6)
+# Node 30 (v7.1) removed the legacy uncertainty_propagation package and
+# its M2-specific Monte Carlo (M1UncertaintyContract / run_with_uncertainty).
+# The merged M1-L4 MC lives in UnifiedUncertaintyEngine; see
+# tests/test_uncertainty_unified.py for end-to-end coverage. An M2-specific
+# UQ path can be re-introduced in v7.2 on top of the unified schema if
+# user demand warrants it.
 
 
 # ═════════════════════════════════════════════════════════════════════════

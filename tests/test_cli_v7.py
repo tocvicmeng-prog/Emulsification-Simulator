@@ -181,8 +181,11 @@ class TestUncertaintyCommand:
         assert "kinds=[material_property]" in cp.stdout
         assert "engine=unified" in cp.stdout
 
-    def test_legacy_engine_byte_compat(self, tmp_path):
-        """--engine legacy reproduces the v6.x output format."""
+    def test_legacy_engine_flag_routes_through_unified(self, tmp_path):
+        """Node 30: --engine legacy runs the merged engine with no
+        posterior injection (scripts get the same MaterialProperties
+        perturbations they got in v7.0.x, but in the unified output
+        schema). The legacy UncertaintyResult header is gone."""
         if not SMOKE_CFG.exists():
             pytest.skip("fast_smoke.toml missing")
         cp = _run_cli(
@@ -191,8 +194,10 @@ class TestUncertaintyCommand:
             "--engine", "legacy",
         )
         assert cp.returncode == 0, cp.stderr
-        assert "Uncertainty-Quantified Results" in cp.stdout
-        assert "90% CI" in cp.stdout
+        assert "engine=legacy" in cp.stdout
+        assert "Unified UQ" in cp.stdout
+        # Without a calibration store, no posterior kinds are sampled.
+        assert "kinds=[material_property]" in cp.stdout
 
     def test_n_jobs_flag_accepted(self, tmp_path):
         """--n-jobs > 1 must not crash (joblib clamps; loky safe)."""

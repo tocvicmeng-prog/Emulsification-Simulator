@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "emulsim"
-version = "0.1.0"
-description = "Multi-scale simulation of emulsification for double-network polysaccharide hydrogel microsphere preparation"
+version = "8.3.2"
+description = "Multi-scale simulation of polysaccharide microsphere preparation (emulsification + gelation + crosslinking + mechanical)"
 requires-python = ">=3.11"
 dependencies = [
     "numpy>=1.26",

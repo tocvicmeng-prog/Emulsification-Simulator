@@ -463,21 +463,58 @@ def _solve_activation_step(
 
     Consumes HYDROXYL sites, produces EPOXIDE or VINYL_SULFONE sites.
     Includes hydrolysis side reaction for ECH (k_hydrol > 0).
+
+    Node 31 (v7.1): when the reagent's chemistry_class is "edc_nhs" the
+    step dispatches to the mechanistic two-step EDC/NHS ODE instead of
+    the single-step solve_second_order_consumption. The target is
+    CARBOXYL_DISTAL (COOH on the matrix); the product is NHS_ESTER.
     """
-    k0 = _arrhenius_prefactor(
-        reagent_profile.k_forward, reagent_profile.E_a, reagent_profile.temperature_default
-    )
-    conversion, reagent_remaining = solve_second_order_consumption(
-        acs_concentration=acs_concentration,
-        reagent_concentration=step.reagent_concentration,
-        k_forward=reagent_profile.k_forward,
-        stoichiometry=step.stoichiometry,
-        time=step.time,
-        temperature=step.temperature,
-        E_a=reagent_profile.E_a,
-        k0=k0,
-        hydrolysis_rate=reagent_profile.hydrolysis_rate,
-    )
+    if reagent_profile.chemistry_class == "edc_nhs":
+        # Mechanistic dispatch: two-step activation with competitive
+        # hydrolysis. c_nh2_total=0 because the amine coupling happens
+        # in a downstream LIGAND_COUPLING step, not during activation.
+        from .edc_nhs_kinetics import EdcNhsKinetics, react_edc_nhs_two_step
+        pH_rxn = getattr(step, "ph", None) or reagent_profile.ph_optimum or 5.5
+        edc_result = react_edc_nhs_two_step(
+            c_cooh_initial=acs_concentration,
+            c_nh2_total=0.0,
+            c_edc_initial=step.reagent_concentration,
+            c_nhs_initial=step.reagent_concentration,
+            pH=pH_rxn,
+            T=step.temperature,
+            time=step.time,
+            kin=EdcNhsKinetics(),
+        )
+        # Conversion := fraction of COOH successfully converted to NHS
+        # ester (ready for downstream aminolysis). Hydrolysis losses and
+        # still-pending O-acylisourea are NOT counted as "converted".
+        conversion = float(edc_result.p_residual_nhs_ester)
+        # Estimated EDC consumed: one EDC per activation attempt. The
+        # kinetic system tracked [EDC]_free, but we only need a scalar
+        # remaining-fraction here for the existing downstream logic.
+        # Approximate: reagent consumption is ≈ (conversion + p_hydrolysed)
+        # of the initial C0, multiplied by V_bead → reagent_concentration
+        # ratio to convert COOH basis to bulk EDC basis.
+        c0 = acs_concentration
+        c_edc0 = max(step.reagent_concentration, 1e-300)
+        reagent_consumed_molar = (conversion + edc_result.p_hydrolysed) * c0
+        reagent_remaining = max(1.0 - reagent_consumed_molar / c_edc0, 0.0)
+    else:
+        k0 = _arrhenius_prefactor(
+            reagent_profile.k_forward, reagent_profile.E_a,
+            reagent_profile.temperature_default,
+        )
+        conversion, reagent_remaining = solve_second_order_consumption(
+            acs_concentration=acs_concentration,
+            reagent_concentration=step.reagent_concentration,
+            k_forward=reagent_profile.k_forward,
+            stoichiometry=step.stoichiometry,
+            time=step.time,
+            temperature=step.temperature,
+            E_a=reagent_profile.E_a,
+            k0=k0,
+            hydrolysis_rate=reagent_profile.hydrolysis_rate,
+        )
 
     # Sites consumed from target (hydroxyl) — activation consumes into activated_consumed
     # (Codex P2-1: activation is NOT crosslinking, does not contribute to G_DN)

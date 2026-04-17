@@ -23,6 +23,13 @@ from ..trust import TrustAssessment, assess_trust
 from ..properties.database import PropertyDatabase
 from ..level1_emulsification.solver import PBESolver
 from ..level2_gelation.solver import solve_gelation, solve_gelation_timing
+from ..level2_gelation.ionic_ca import solve_ionic_ca_gelation
+from ..level2_gelation.nips_cellulose import solve_nips_cellulose
+from ..level2_gelation.solvent_evaporation import solve_solvent_evaporation
+from ..level4_mechanical.alginate import solve_mechanical_alginate
+from ..level4_mechanical.cellulose import solve_mechanical_cellulose
+from ..level4_mechanical.plga import solve_mechanical_plga
+from ..datatypes import PolymerFamily
 from ..level3_crosslinking.solver import (
     solve_crosslinking,
     available_amine_concentration,
@@ -182,13 +189,56 @@ class PipelineOrchestrator:
         logger.info("L1 done: d32=%.2f µm, d_mode=%.2f µm, span=%.2f (%.1fs)",
                      emul_result.d32 * 1e6, d_mode_um, emul_result.span, timings["L1"])
 
-        # ── Level 2a: Gelation Timing ──────────────────────────────────
-        # Use d50 (volume median) as the representative droplet size for L2.
-        # d32 (Sauter mean) overweights large droplets; d50 better represents the
-        # population center.  The full size distribution (d10–d90) is recorded in
-        # the summary so downstream users can estimate pore-size spread via the
-        # Cahn-Hilliard scaling λ* ~ sqrt(R).
+        # Use d50 as representative droplet size.
         R_droplet = emul_result.d50 / 2.0
+
+        # ── Node F1-a: Alginate platform branch ──────────────────────────
+        # ALGINATE skips L2a/L3 (ionic gelation IS the crosslinking),
+        # runs the ionic-Ca L2 solver and the alginate L4 modulus
+        # directly, and returns a stubbed CrosslinkingResult so the
+        # FullResult schema stays intact.
+        if props.polymer_family == PolymerFamily.ALGINATE:
+            return self._run_alginate(
+                params=params, props=props,
+                emul_result=emul_result, R_droplet=R_droplet,
+                timings=timings, run_dir=run_dir, run_id=run_id,
+                crosslinker_key=crosslinker_key,
+                l2_mode=l2_mode,
+                applied_calibrations=applied_calibrations,
+            )
+
+        # ── Node F1-b: Cellulose NIPS platform branch ───────────────────
+        # CELLULOSE skips L2a/L3 (NIPS demixing IS the gelation), runs
+        # the ternary Cahn-Hilliard + Fickian L2 solver and the
+        # Zhang-2020 L4 modulus directly, and returns a stubbed
+        # CrosslinkingResult.
+        if props.polymer_family == PolymerFamily.CELLULOSE:
+            return self._run_cellulose(
+                params=params, props=props,
+                emul_result=emul_result, R_droplet=R_droplet,
+                timings=timings, run_dir=run_dir, run_id=run_id,
+                crosslinker_key=crosslinker_key,
+                l2_mode=l2_mode,
+                applied_calibrations=applied_calibrations,
+            )
+
+        # ── Node F1-c: PLGA solvent-evaporation platform branch ─────────
+        # PLGA skips L2a/L3 (the glassy microsphere forms by solvent
+        # evaporation — no covalent crosslinking), runs the 1D
+        # Fickian DCM-depletion L2 solver and the Gibson-Ashby L4
+        # modulus directly.
+        if props.polymer_family == PolymerFamily.PLGA:
+            return self._run_plga(
+                params=params, props=props,
+                emul_result=emul_result, R_droplet=R_droplet,
+                timings=timings, run_dir=run_dir, run_id=run_id,
+                crosslinker_key=crosslinker_key,
+                l2_mode=l2_mode,
+                applied_calibrations=applied_calibrations,
+            )
+
+        # ── Level 2a: Gelation Timing ──────────────────────────────────
+        # Cahn-Hilliard scaling λ* ~ sqrt(R).
         logger.info("L2a: Gelation timing (R=%.2f um)", R_droplet * 1e6)
         timing_result = solve_gelation_timing(params, props, R_droplet=R_droplet)
         logger.info("L2a done: t_gel=%.1fs, alpha=%.3f, cool_eff=%.4f K/s",
@@ -320,6 +370,340 @@ class PipelineOrchestrator:
         run_report.min_evidence_tier = run_report.compute_min_tier().value
         full_result.run_report = run_report
 
+        return full_result
+
+    def _run_alginate(self, *, params, props, emul_result, R_droplet,
+                      timings, run_dir, run_id, crosslinker_key,
+                      l2_mode, applied_calibrations):
+        """Alginate sub-pipeline (Node F1-a Phase 2b).
+
+        L2 = ionic-Ca shrinking-core; L3 = N/A (stubbed zero result);
+        L4 = Kong 2004 alginate modulus. Reuses all pre-L1 setup and
+        the RunReport / summary tail from ``run_single``.
+        """
+        from ..level3_crosslinking.solver import _build_zero_result as _zero_xlink
+
+        # L2: ionic-Ca
+        logger.info("L2 (alginate ionic-Ca): R=%.2f um, C_Ca_bath=%.0f mM",
+                    R_droplet * 1e6, params.formulation.c_Ca_bath)
+        t0 = time.perf_counter()
+        gel_result = solve_ionic_ca_gelation(
+            params, props, R_droplet=R_droplet,
+            C_Ca_bath=params.formulation.c_Ca_bath,
+        )
+        timings["L2"] = time.perf_counter() - t0
+        logger.info(
+            "L2 done: alpha=%.3f, pore=%.1f nm, porosity=%.2f (%.1fs)",
+            gel_result.alpha_final, gel_result.pore_size_mean * 1e9,
+            gel_result.porosity, timings["L2"],
+        )
+
+        # L3: stubbed (no separate crosslinking for pure alginate)
+        xlink_result = _zero_xlink(params, xl=None)
+
+        # L4: alginate modulus
+        logger.info("L4 (alginate): Kong 2004 modulus")
+        t0 = time.perf_counter()
+        mech_result = solve_mechanical_alginate(
+            params, props, gel_result, R_droplet=R_droplet,
+        )
+        timings["L4"] = time.perf_counter() - t0
+        logger.info("L4 done: G_DN=%.0f Pa, E*=%.0f Pa (%.4fs)",
+                    mech_result.G_DN, mech_result.E_star, timings["L4"])
+
+        total = sum(timings.values())
+        logger.info("Pipeline complete (alginate): %.1fs total", total)
+
+        full_result = FullResult(
+            parameters=params,
+            emulsification=emul_result,
+            gelation=gel_result,
+            crosslinking=xlink_result,
+            mechanical=mech_result,
+            gelation_timing=None,  # no L2a timing for ionic gelation
+        )
+
+        # Minimal summary JSON (mirrors run_single shape)
+        summary = {
+            "run_id": run_id,
+            "timings": timings,
+            "total_time_s": total,
+            "polymer_family": props.polymer_family.value,
+            "level1": {
+                "d32_um": emul_result.d32 * 1e6,
+                "d50_um": emul_result.d50 * 1e6,
+                "span": emul_result.span,
+                "converged": bool(emul_result.converged),
+            },
+            "level2": {
+                "pore_size_mean_nm": gel_result.pore_size_mean * 1e9,
+                "porosity": gel_result.porosity,
+                "alpha_final": gel_result.alpha_final,
+            },
+            "level3": {"note": "not applicable for alginate (ionic gelation)"},
+            "level4": {
+                "G_DN_Pa": mech_result.G_DN,
+                "E_star_Pa": mech_result.E_star,
+            },
+        }
+        with open(run_dir / "summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+
+        _manifests = [
+            r.model_manifest
+            for r in (emul_result, gel_result, mech_result)
+            if getattr(r, "model_manifest", None) is not None
+        ]
+        _diagnostics: dict = {"timings": timings, "total_time_s": total,
+                               "polymer_family": props.polymer_family.value}
+        if applied_calibrations:
+            _diagnostics["calibrations_applied"] = list(applied_calibrations)
+            _diagnostics["calibration_count"] = len(applied_calibrations)
+        run_report = RunReport(
+            model_graph=_manifests,
+            trust_level="medium",
+            trust_warnings=[],
+            trust_blockers=[],
+            diagnostics=_diagnostics,
+        )
+        run_report.min_evidence_tier = run_report.compute_min_tier().value
+        full_result.run_report = run_report
+        return full_result
+
+    def _run_cellulose(self, *, params, props, emul_result, R_droplet,
+                       timings, run_dir, run_id, crosslinker_key,
+                       l2_mode, applied_calibrations):
+        """Cellulose sub-pipeline (Node F1-b Phase 2).
+
+        L2 = ternary NIPS (Cahn-Hilliard + Fickian); L3 = N/A (stubbed
+        zero result); L4 = Zhang-2020 phi-power-law modulus. Reuses
+        all pre-L1 setup and the RunReport / summary tail from
+        ``run_single``. Mirrors the structure of ``_run_alginate``.
+        """
+        from ..level3_crosslinking.solver import _build_zero_result as _zero_xlink
+
+        # Apply solvent-system preset if one was declared on the params
+        solvent_key = getattr(params.formulation, "solvent_system", "") or ""
+        if solvent_key:
+            from ..properties.cellulose_defaults import apply_preset
+            apply_preset(props, solvent_key)
+            logger.info("Applied cellulose solvent preset: %s", solvent_key)
+
+        # L2: ternary NIPS demixing
+        logger.info(
+            "L2 (cellulose NIPS): R=%.2f um, phi_0=%.3f, t=%.0fs",
+            R_droplet * 1e6,
+            params.formulation.phi_cellulose_0,
+            params.formulation.t_crosslink,
+        )
+        t0 = time.perf_counter()
+        gel_result = solve_nips_cellulose(
+            params, props, R_droplet=R_droplet,
+        )
+        timings["L2"] = time.perf_counter() - t0
+        logger.info(
+            "L2 done: phi_mean=%.3f, porosity=%.2f, bic_score=%.2f (%.1fs)",
+            gel_result.model_manifest.diagnostics.get("phi_mean_final", 0.0),
+            gel_result.porosity,
+            gel_result.bicontinuous_score,
+            timings["L2"],
+        )
+
+        # L3: stubbed (NIPS IS the gelation; no separate crosslinking)
+        xlink_result = _zero_xlink(params, xl=None)
+
+        # L4: cellulose modulus
+        logger.info("L4 (cellulose): Zhang 2020 modulus")
+        t0 = time.perf_counter()
+        mech_result = solve_mechanical_cellulose(
+            params, props, gel_result, R_droplet=R_droplet,
+        )
+        timings["L4"] = time.perf_counter() - t0
+        logger.info("L4 done: G_DN=%.0f Pa, E*=%.0f Pa (%.4fs)",
+                    mech_result.G_DN, mech_result.E_star, timings["L4"])
+
+        total = sum(timings.values())
+        logger.info("Pipeline complete (cellulose): %.1fs total", total)
+
+        full_result = FullResult(
+            parameters=params,
+            emulsification=emul_result,
+            gelation=gel_result,
+            crosslinking=xlink_result,
+            mechanical=mech_result,
+            gelation_timing=None,
+        )
+
+        # Minimal summary JSON
+        summary = {
+            "run_id": run_id,
+            "timings": timings,
+            "total_time_s": total,
+            "polymer_family": props.polymer_family.value,
+            "level1": {
+                "d32_um": emul_result.d32 * 1e6,
+                "d50_um": emul_result.d50 * 1e6,
+                "span": emul_result.span,
+                "converged": bool(emul_result.converged),
+            },
+            "level2": {
+                "phi_mean_final": gel_result.model_manifest.diagnostics.get(
+                    "phi_mean_final", 0.0
+                ),
+                "porosity": gel_result.porosity,
+                "bicontinuous_score": gel_result.bicontinuous_score,
+                "demixing_index": gel_result.alpha_final,
+            },
+            "level3": {"note": "not applicable for cellulose (NIPS)"},
+            "level4": {
+                "G_DN_Pa": mech_result.G_DN,
+                "E_star_Pa": mech_result.E_star,
+            },
+        }
+        with open(run_dir / "summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+
+        _manifests = [
+            r.model_manifest
+            for r in (emul_result, gel_result, mech_result)
+            if getattr(r, "model_manifest", None) is not None
+        ]
+        _diagnostics: dict = {
+            "timings": timings, "total_time_s": total,
+            "polymer_family": props.polymer_family.value,
+        }
+        if applied_calibrations:
+            _diagnostics["calibrations_applied"] = list(applied_calibrations)
+            _diagnostics["calibration_count"] = len(applied_calibrations)
+        run_report = RunReport(
+            model_graph=_manifests,
+            trust_level="medium",
+            trust_warnings=[],
+            trust_blockers=[],
+            diagnostics=_diagnostics,
+        )
+        run_report.min_evidence_tier = run_report.compute_min_tier().value
+        full_result.run_report = run_report
+        return full_result
+
+    def _run_plga(self, *, params, props, emul_result, R_droplet,
+                  timings, run_dir, run_id, crosslinker_key,
+                  l2_mode, applied_calibrations):
+        """PLGA sub-pipeline (Node F1-c Phase 2).
+
+        L2 = 1D Fickian DCM depletion (solvent evaporation);
+        L3 = N/A (stubbed zero result); L4 = Gibson-Ashby glassy-foam
+        modulus. Reuses all pre-L1 setup and the RunReport / summary
+        tail from ``run_single``. Mirrors the structure of
+        ``_run_cellulose`` / ``_run_alginate``.
+        """
+        from ..level3_crosslinking.solver import _build_zero_result as _zero_xlink
+
+        # Apply PLGA-grade preset if declared on params
+        grade_key = getattr(params.formulation, "plga_grade", "") or ""
+        if grade_key:
+            from ..properties.plga_defaults import apply_preset
+            apply_preset(props, grade_key)
+            logger.info("Applied PLGA grade preset: %s", grade_key)
+
+        # L2: solvent evaporation
+        logger.info(
+            "L2 (PLGA solvent evap): R=%.2f um, phi_PLGA_0=%.3f, t=%.0fs",
+            R_droplet * 1e6,
+            params.formulation.phi_PLGA_0,
+            params.formulation.t_crosslink,
+        )
+        t0 = time.perf_counter()
+        gel_result = solve_solvent_evaporation(
+            params, props, R_droplet=R_droplet,
+        )
+        timings["L2"] = time.perf_counter() - t0
+        diag = gel_result.model_manifest.diagnostics
+        logger.info(
+            "L2 done: phi_plga=%.3f, t_vit=%.1fs, skin=%.1f um (%.1fs)",
+            diag.get("phi_plga_mean_final", 0.0),
+            diag.get("t_vitrification", 0.0),
+            diag.get("skin_thickness_proxy", 0.0) * 1e6,
+            timings["L2"],
+        )
+
+        # L3: stubbed (no covalent crosslinking — PLGA is glassy /
+        # entangled, not crosslinked)
+        xlink_result = _zero_xlink(params, xl=None)
+
+        # L4: Gibson-Ashby modulus
+        logger.info("L4 (PLGA): Gibson-Ashby modulus")
+        t0 = time.perf_counter()
+        mech_result = solve_mechanical_plga(
+            params, props, gel_result, R_droplet=R_droplet,
+        )
+        timings["L4"] = time.perf_counter() - t0
+        logger.info("L4 done: G_DN=%.2e Pa, E*=%.2e Pa (%.4fs)",
+                    mech_result.G_DN, mech_result.E_star, timings["L4"])
+
+        total = sum(timings.values())
+        logger.info("Pipeline complete (PLGA): %.1fs total", total)
+
+        full_result = FullResult(
+            parameters=params,
+            emulsification=emul_result,
+            gelation=gel_result,
+            crosslinking=xlink_result,
+            mechanical=mech_result,
+            gelation_timing=None,
+        )
+
+        summary = {
+            "run_id": run_id,
+            "timings": timings,
+            "total_time_s": total,
+            "polymer_family": props.polymer_family.value,
+            "level1": {
+                "d32_um": emul_result.d32 * 1e6,
+                "d50_um": emul_result.d50 * 1e6,
+                "span": emul_result.span,
+                "converged": bool(emul_result.converged),
+            },
+            "level2": {
+                "phi_plga_mean_final": diag.get("phi_plga_mean_final", 0.0),
+                "phi_dcm_mean_final": diag.get("phi_dcm_mean_final", 0.0),
+                "t_vitrification_s": diag.get("t_vitrification", 0.0),
+                "skin_thickness_proxy_m": diag.get(
+                    "skin_thickness_proxy", 0.0
+                ),
+                "R_shrunk_m": diag.get("R_shrunk_m", 0.0),
+                "porosity": gel_result.porosity,
+            },
+            "level3": {"note": "not applicable for PLGA (solvent evaporation)"},
+            "level4": {
+                "G_DN_Pa": mech_result.G_DN,
+                "E_star_Pa": mech_result.E_star,
+            },
+        }
+        with open(run_dir / "summary.json", "w") as f:
+            json.dump(summary, f, indent=2)
+
+        _manifests = [
+            r.model_manifest
+            for r in (emul_result, gel_result, mech_result)
+            if getattr(r, "model_manifest", None) is not None
+        ]
+        _diagnostics: dict = {
+            "timings": timings, "total_time_s": total,
+            "polymer_family": props.polymer_family.value,
+        }
+        if applied_calibrations:
+            _diagnostics["calibrations_applied"] = list(applied_calibrations)
+            _diagnostics["calibration_count"] = len(applied_calibrations)
+        run_report = RunReport(
+            model_graph=_manifests,
+            trust_level="medium",
+            trust_warnings=[],
+            trust_blockers=[],
+            diagnostics=_diagnostics,
+        )
+        run_report.min_evidence_tier = run_report.compute_min_tier().value
+        full_result.run_report = run_report
         return full_result
 
     def run_rpm_sweep(self, rpms: list[float],

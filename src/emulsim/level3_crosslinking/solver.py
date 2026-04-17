@@ -943,61 +943,149 @@ def solve_crosslinking(params: SimulationParameters,
             eta_coupling_recommended=xl.eta_coupling_recommended,
         )
     elif xl.kinetics_model == 'michaelis_menten':
-        # Michaelis-Menten crosslinkers (e.g. EDC/NHS) fall back to
-        # second-order amine kinetics as an approximation until a
-        # dedicated solver is implemented.
+        # Node 31 (v7.1): EDC/NHS gated mechanistic dispatch.
         #
-        # Node 9 (F9, scientific applicability): EDC/NHS chemistry requires
-        # carboxyl groups to activate before it can react with amines. Native
-        # chitosan + agarose carry NH2 and OH only — no COOH. Running EDC/NHS
-        # on the M1 fabrication state without prior M2 carboxyl introduction
-        # is scientifically inappropriate. We let the fallback ODE run so the
-        # pipeline does not crash, but the L3 manifest is forcibly downgraded
-        # to QUALITATIVE_TREND below so the trust-aware optimizer (Node 6)
-        # excludes such candidates from the Pareto front and the UI cannot
-        # advertise the result as decision-grade.
-        _fallback_used = True
-        logger.warning(
-            "L3: EDC/NHS (michaelis_menten) dispatched without dedicated solver "
-            "AND without M2 COOH-introduction context for crosslinker '%s'. "
-            "Falling back to second-order amine kinetics; result tier downgraded "
-            "to QUALITATIVE_TREND. To use EDC/NHS quantitatively, run M2 "
-            "carboxyl-introduction first or supply experimental kinetics.",
-            crosslinker_key,
-        )
-        # EDC/NHS targets amine groups — PDE is supported (amine chemistry)
-        if R_droplet is not None and R_droplet > 20e-6:
-            D_xlink = 1e-10
-            k_rate = arrhenius_rate_constant(T, xl.k_xlink_0, xl.E_a_xlink)
-            NH2 = available_amine_concentration(
+        # EDC/NHS requires carboxyl groups to activate before it can
+        # couple to amines. Native chitosan + agarose carry NH2 and OH
+        # only — no COOH. Without prior M2 carboxyl introduction (e.g.
+        # succinylation), running EDC/NHS is scientifically inappropriate.
+        #
+        # Gate on ``props.surface_cooh_concentration``:
+        #   - 0 (native matrix): fall back to second-order amine with
+        #     QUALITATIVE_TREND downgrade (preserves v7.0.x behaviour).
+        #   - >0 (carboxylated matrix): run the mechanistic two-step
+        #     solver and emit a SEMI_QUANTITATIVE result.
+        surface_cooh = float(getattr(props, "surface_cooh_concentration", 0.0) or 0.0)
+
+        if surface_cooh > 0.0:
+            # Mechanistic path (Node 31 closure of Node 9 F9).
+            from ..module2_functionalization.edc_nhs_kinetics import (
+                EdcNhsKinetics, react_edc_nhs_two_step,
+            )
+            NH2_total = available_amine_concentration(
                 params.formulation.c_chitosan, props.DDA, props.M_GlcN,
             )
-            Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
-            if Phi > 1.0:
-                logger.info(
-                    "Thiele modulus %.1f > 1: using reaction-diffusion "
-                    "solver (R=%.0f um, crosslinker='%s')",
-                    Phi, R_droplet * 1e6, crosslinker_key,
+            # c_genipin is the crosslinker-concentration field reused for
+            # EDC (and implicitly NHS at 1:1 stoich). Node 31 note: a
+            # dedicated c_edc + c_nhs would be cleaner (Node 31b).
+            c_edc = c_nhs = params.formulation.c_genipin
+            pH_rxn = getattr(params.formulation, "pH", 7.0)
+            edc_result = react_edc_nhs_two_step(
+                c_cooh_initial=surface_cooh,
+                c_nh2_total=NH2_total,
+                c_edc_initial=c_edc,
+                c_nhs_initial=c_nhs,
+                pH=pH_rxn,
+                T=T,
+                time=params.formulation.t_crosslink,
+                kin=EdcNhsKinetics(),
+            )
+            # Build a CrosslinkingResult from the mechanistic output.
+            # p_final is fraction of surface COOH coupled to amine =
+            # crosslink-density proxy in this mechanism. Map using the
+            # existing scaffold.
+            # reactive_total for the conservation book-keeping is
+            # min(NH2_total, surface_cooh) — whichever runs out first.
+            reactive_total = min(NH2_total, surface_cooh)
+            if reactive_total <= 0:
+                result = _build_zero_result(params, xl=xl)
+            else:
+                # The mechanistic solver returned a fraction (p_final);
+                # _build_result_arrays expects an X_arr in [mol/m^3] of
+                # crosslink bond density and computes p_final as
+                # 2*X_arr[-1]/reactive_total (two reactive groups per
+                # bond: one COOH + one NH2). So inject
+                # X = 0.5 * p_final * reactive_total to round-trip.
+                t_arr = np.array([0.0, params.formulation.t_crosslink])
+                X_arr = np.array([0.0, 0.5 * edc_result.p_final * reactive_total])
+                c_polymer = params.formulation.c_chitosan
+                # f_bridge for zero-length EDC/NHS amide: default to
+                # props.f_bridge if set, else profile default, else 1.0.
+                f_bridge_edc = getattr(
+                    xl, 'f_bridge_recommended',
+                    getattr(props, 'f_bridge', 1.0),
                 )
-                rd_result, _ = _solve_reaction_diffusion(
-                    params, props, R_droplet, D_xlink,
+                result = _build_result_arrays(
+                    t_arr, X_arr, c_polymer, T, props.DDA, props.M_GlcN,
+                    reactive_total, f_bridge_edc,
                 )
-                rd_result.network_metadata = NetworkTypeMetadata(
-                    solver_family="amine_covalent",
-                    network_target="chitosan",
-                    bond_type="covalent",
-                    is_true_second_network=True,
-                    eta_coupling_recommended=xl.eta_coupling_recommended,
+            metadata = NetworkTypeMetadata(
+                solver_family="edc_nhs_mechanistic",
+                network_target="edc_activated",
+                bond_type="covalent",
+                is_true_second_network=True,
+                eta_coupling_recommended=xl.eta_coupling_recommended,
+            )
+            result.model_manifest = ModelManifest(
+                model_name="L3.Crosslink.edc_nhs_two_step",
+                evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
+                assumptions=[
+                    "solver_family=edc_nhs_mechanistic",
+                    "kinetics=two_step_mechanistic",
+                    f"crosslinker={crosslinker_key}",
+                    f"surface_cooh={surface_cooh:.3g} mol/m^3 (from prior M2)",
+                    f"pH={pH_rxn:.2f}, T={T:.1f}K",
+                ],
+                diagnostics={
+                    "p_final": edc_result.p_final,
+                    "p_hydrolysed": edc_result.p_hydrolysed,
+                    "p_residual_nhs_ester": edc_result.p_residual_nhs_ester,
+                    "mass_balance_error": edc_result.mass_balance_error,
+                    "time_to_half_s": edc_result.time_to_half,
+                    "approximate_fallback": False,
+                },
+            )
+            _fallback_used = False
+            logger.info(
+                "L3: EDC/NHS mechanistic (surface_cooh=%.2g mol/m^3): "
+                "p_final=%.3f, p_hydrolysed=%.3f, pH=%.2f, T=%.1fK",
+                surface_cooh, edc_result.p_final, edc_result.p_hydrolysed, pH_rxn, T,
+            )
+        else:
+            # Native matrix: no COOH -> honest fallback path (v7.0.x compat).
+            _fallback_used = True
+            logger.warning(
+                "L3: EDC/NHS (michaelis_menten) dispatched on native matrix "
+                "(surface_cooh_concentration=0) for crosslinker '%s'. "
+                "Falling back to second-order amine kinetics; result tier "
+                "downgraded to QUALITATIVE_TREND. Run prior M2 carboxyl "
+                "introduction (e.g. succinylation) and set "
+                "MaterialProperties.surface_cooh_concentration > 0 to use "
+                "the mechanistic path.",
+                crosslinker_key,
+            )
+            if R_droplet is not None and R_droplet > 20e-6:
+                D_xlink = 1e-10
+                k_rate = arrhenius_rate_constant(T, xl.k_xlink_0, xl.E_a_xlink)
+                NH2 = available_amine_concentration(
+                    params.formulation.c_chitosan, props.DDA, props.M_GlcN,
                 )
-                return rd_result
-        result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
-        metadata = NetworkTypeMetadata(
-            solver_family="amine_covalent",
-            network_target="chitosan",
-            bond_type="covalent",
-            is_true_second_network=True,
-            eta_coupling_recommended=xl.eta_coupling_recommended,
-        )
+                Phi = compute_thiele_modulus(R_droplet, k_rate, NH2, D_xlink)
+                if Phi > 1.0:
+                    logger.info(
+                        "Thiele modulus %.1f > 1: using reaction-diffusion "
+                        "solver (R=%.0f um, crosslinker='%s')",
+                        Phi, R_droplet * 1e6, crosslinker_key,
+                    )
+                    rd_result, _ = _solve_reaction_diffusion(
+                        params, props, R_droplet, D_xlink,
+                    )
+                    rd_result.network_metadata = NetworkTypeMetadata(
+                        solver_family="amine_covalent",
+                        network_target="chitosan",
+                        bond_type="covalent",
+                        is_true_second_network=True,
+                        eta_coupling_recommended=xl.eta_coupling_recommended,
+                    )
+                    return rd_result
+            result = _solve_second_order_amine(params, props, xl, R_droplet, porosity)
+            metadata = NetworkTypeMetadata(
+                solver_family="amine_covalent",
+                network_target="chitosan",
+                bond_type="covalent",
+                is_true_second_network=True,
+                eta_coupling_recommended=xl.eta_coupling_recommended,
+            )
     else:
         raise ValueError(f"Unknown kinetics model: {xl.kinetics_model}")
 

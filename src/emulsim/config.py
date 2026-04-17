@@ -177,8 +177,29 @@ def load_config(path: Path) -> SimulationParameters:
         )
 
     # ── Formulation ──
-    form_data = raw.get("formulation", {})
+    form_data = dict(raw.get("formulation", {}))  # copy so we can pop
+    # Node F1-a Phase 2c polish: consume [formulation].gelant BEFORE
+    # unpacking into FormulationParameters (the dataclass has no gelant
+    # field — it's a preset-selector, not a model parameter).
+    gelant_name = form_data.pop("gelant", None)
+    # Node F1-b Phase 2: `[formulation].solvent_system` unpacks into
+    # FormulationParameters.solvent_system directly. Validation is
+    # deferred to solver time (apply_preset raises KeyError on unknown).
     form = FormulationParameters(**form_data) if form_data else FormulationParameters()
+    if gelant_name is not None:
+        from .reagent_library_alginate import (
+            GELANTS_ALGINATE,
+            effective_bath_concentration,
+        )
+        if gelant_name not in GELANTS_ALGINATE:
+            raise ValueError(
+                f"Unknown alginate gelant '{gelant_name}'. "
+                f"Available: {sorted(GELANTS_ALGINATE)}"
+            )
+        profile = GELANTS_ALGINATE[gelant_name]
+        form.c_Ca_bath = effective_bath_concentration(
+            profile, t_end=form.t_crosslink,
+        )
 
     # ── Solver ──
     solver_raw = raw.get("solver", {})
@@ -232,5 +253,15 @@ def load_properties(path: Optional[Path] = None) -> MaterialProperties:
                     props[key] = val["value"]
                 elif not isinstance(val, dict):
                     props[key] = val
+    # Also accept top-level scalar keys (e.g. polymer_family at TOML root)
+    for key, val in raw.items():
+        if not isinstance(val, dict):
+            props[key] = val
+
+    # Node F1-a Phase 2c: polymer_family arrives as a string from TOML; the
+    # MaterialProperties constructor expects a PolymerFamily enum.
+    if "polymer_family" in props and isinstance(props["polymer_family"], str):
+        from .datatypes import PolymerFamily
+        props["polymer_family"] = PolymerFamily(props["polymer_family"].lower())
 
     return MaterialProperties(**{k: v for k, v in props.items() if hasattr(MaterialProperties, k)})

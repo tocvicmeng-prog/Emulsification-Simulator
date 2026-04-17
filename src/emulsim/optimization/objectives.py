@@ -3,12 +3,15 @@
 Maps simulation FullResult → objective vector for BoTorch.
 All objectives are MINIMIZED (lower is better).
 
-Supports two target sets:
-  - Legacy rotor-stator: d32=2 µm, pore=80 nm
-  - Stirred-vessel: d_mode=100 µm, pore=100 nm
+Supports two fixed target sets (legacy / stirred-vessel) plus — as of
+Node F3-a (v8.0 Phase 1) — a user-supplied ``TargetSpec`` with per-dimension
+tolerances for inverse-design runs.
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -138,6 +141,155 @@ def compute_objectives_trust_aware(
     base = compute_objectives(result, mode=mode)
     penalty = compute_trust_penalty(result)
     return base + penalty
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Node F3-a (v8.0 Phase 1): Inverse-design target-spec objectives
+# ═════════════════════════════════════════════════════════════════════════
+
+
+@dataclass(frozen=True)
+class TargetSpec:
+    """User-supplied target specification for inverse-design BO.
+
+    Each target field pairs a target value with a tolerance. Objectives
+    are computed as tolerance-normalised absolute distances so every
+    dimension lands on a comparable [0, ~few] scale regardless of
+    physical units. Setting a target or its tolerance to ``None``
+    removes that dimension from the objective vector.
+
+    Attributes:
+        d32_target: Target Sauter mean diameter [m]. Use None to
+            target d_mode instead (stirred-vessel mode).
+        d32_tol: Tolerance [m]; used as the scale for
+            ``|d32 - target| / tol``.
+        pore_target: Target pore size [m].
+        pore_tol: Pore tolerance [m].
+        G_DN_target: Target shear modulus [Pa]. Distance uses
+            ``|log10(G_DN) - log10(target)| / log10_tol``.
+        G_DN_log10_tol: log10-scale tolerance for G_DN.
+        Kav_target: Target distribution coefficient [-] (optional;
+            requires result.m3 block).
+        Kav_tol: Tolerance on Kav.
+    """
+    d32_target: Optional[float] = None
+    d32_tol: Optional[float] = None
+    pore_target: Optional[float] = None
+    pore_tol: Optional[float] = None
+    G_DN_target: Optional[float] = None
+    G_DN_log10_tol: Optional[float] = None
+    Kav_target: Optional[float] = None
+    Kav_tol: Optional[float] = None
+
+    def active_dims(self) -> list[str]:
+        """Return the list of dimensions that will contribute to the
+        objective vector (i.e. both target and tol set)."""
+        dims: list[str] = []
+        if self.d32_target is not None and self.d32_tol is not None:
+            dims.append("d32")
+        if self.pore_target is not None and self.pore_tol is not None:
+            dims.append("pore")
+        if self.G_DN_target is not None and self.G_DN_log10_tol is not None:
+            dims.append("G_DN")
+        if self.Kav_target is not None and self.Kav_tol is not None:
+            dims.append("Kav")
+        return dims
+
+    def validate(self) -> None:
+        """Raise ValueError if the spec has no active dimension or any
+        tolerance is non-positive."""
+        dims = self.active_dims()
+        if not dims:
+            raise ValueError(
+                "TargetSpec has no active dimension; at least one of "
+                "(d32, pore, G_DN, Kav) must be specified with its tolerance."
+            )
+        for name, tol in (
+            ("d32_tol", self.d32_tol),
+            ("pore_tol", self.pore_tol),
+            ("G_DN_log10_tol", self.G_DN_log10_tol),
+            ("Kav_tol", self.Kav_tol),
+        ):
+            if tol is not None and tol <= 0:
+                raise ValueError(f"{name} must be > 0, got {tol}")
+
+
+def compute_inverse_design_objectives(
+    result: FullResult,
+    target: TargetSpec,
+    trust_aware: bool = True,
+    mode: str | None = None,
+) -> np.ndarray:
+    """Compute user-target-normalised objectives for inverse design.
+
+    Each active dimension contributes ``|value - target| / tol`` (or the
+    log10 variant for G_DN). Trust penalty (Node 6) is added to every
+    dimension when ``trust_aware=True`` so weak-evidence candidates
+    land above the engine REF_POINT and drop off the Pareto front.
+
+    Parameters
+    ----------
+    result : FullResult
+        Pipeline result whose emulsification/gelation/crosslinking/
+        mechanical blocks provide the observables.
+    target : TargetSpec
+        User-supplied target specification. Must have at least one
+        active dimension; ``target.validate()`` is called.
+    trust_aware : bool, default True
+        When True, each objective component has the Node 6 trust
+        penalty added so the Pareto filter can drop weak-evidence
+        candidates.
+    mode : str, optional
+        Pipeline mode ("rotor_stator_legacy" | "stirred_vessel"). When
+        ``d32_target`` is set the d32 attribute is used; when it is
+        None the function substitutes d_mode for stirred-vessel mode,
+        matching the convention from the fixed-target functions above.
+    """
+    target.validate()
+    if mode is None:
+        mode = getattr(result.parameters.emulsification, "mode", "rotor_stator_legacy")
+
+    components: list[float] = []
+
+    if target.d32_target is not None and target.d32_tol is not None:
+        if mode == "stirred_vessel":
+            d_val = getattr(result.emulsification, "d_mode", None)
+            if d_val is None:
+                d_val = result.emulsification.d32
+        else:
+            d_val = result.emulsification.d32
+        components.append(abs(d_val - target.d32_target) / target.d32_tol)
+
+    if target.pore_target is not None and target.pore_tol is not None:
+        pore = result.gelation.pore_size_mean
+        components.append(abs(pore - target.pore_target) / target.pore_tol)
+
+    if target.G_DN_target is not None and target.G_DN_log10_tol is not None:
+        G_DN = max(result.mechanical.G_DN, 1.0)
+        components.append(
+            abs(np.log10(G_DN) - np.log10(max(target.G_DN_target, 1.0)))
+            / target.G_DN_log10_tol
+        )
+
+    if target.Kav_target is not None and target.Kav_tol is not None:
+        # Kav lives on the M3 result block if present. When absent,
+        # emit +inf so the candidate is dropped by the feasibility
+        # filter — a user asking for Kav-target on a run that doesn't
+        # produce M3 is a configuration error.
+        m3 = getattr(result, "m3", None)
+        if m3 is None:
+            components.append(float("inf"))
+        else:
+            kav = getattr(m3, "Kav", None)
+            if kav is None:
+                components.append(float("inf"))
+            else:
+                components.append(abs(kav - target.Kav_target) / target.Kav_tol)
+
+    obj = np.array(components, dtype=float)
+    if trust_aware:
+        obj = obj + compute_trust_penalty(result)
+    return obj
 
 
 def check_constraints(result: FullResult, mode: str | None = None) -> tuple[bool, list[str]]:

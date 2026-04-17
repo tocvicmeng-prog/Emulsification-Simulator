@@ -43,6 +43,8 @@ from .objectives import (
     PARAM_NAMES,
     LOG_SCALE_INDICES,
     LOG_SCALE_INDICES_SV,
+    TargetSpec,
+    compute_inverse_design_objectives,
     compute_objectives_trust_aware,
     check_constraints,
     get_param_bounds,
@@ -139,12 +141,76 @@ class OptimizationEngine:
         output_dir: Optional[Path] = None,
         db: Optional[PropertyDatabase] = None,
         template_params: Optional[SimulationParameters] = None,
+        target_spec: Optional[TargetSpec] = None,
+        robust_variance_weight: float = 0.0,
+        robust_n_samples: int = 0,
+        robust_cvar_alpha: float = 0.0,
     ):
+        """Construct a multi-objective BO engine.
+
+        Node F3-b (v8.0 Phase 1): optional ``target_spec`` selects
+        inverse-design objectives at construction. When given, the
+        engine uses ``compute_inverse_design_objectives`` and sizes
+        internal arrays (REF_POINT, penalties) to
+        ``len(target_spec.active_dims())``.
+
+        Node F4 (v8.0 Phase 1): ``robust_variance_weight > 0`` switches
+        the engine to mean-variance robust optimisation — for each
+        candidate x the engine evaluates ``robust_n_samples`` perturbed
+        runs and reports ``mean(obj) + robust_variance_weight * std(obj)``
+        per dimension. Requires ``target_spec`` (robust BO is defined
+        against user targets, not the fixed legacy / stirred-vessel
+        objectives).
+        """
         self.n_initial = n_initial
         self.max_iterations = max_iterations
         self.convergence_tol = convergence_tol
         self.output_dir = Path(output_dir) if output_dir else Path("output/optimization")
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.target_spec = target_spec
+        if target_spec is not None:
+            target_spec.validate()
+        self.robust_variance_weight = float(robust_variance_weight)
+        self.robust_n_samples = int(robust_n_samples)
+        self.robust_cvar_alpha = float(robust_cvar_alpha)
+        # Node F4-b: CVaR α must be in (0, 1].
+        if self.robust_cvar_alpha < 0.0 or self.robust_cvar_alpha > 1.0:
+            raise ValueError(
+                "robust_cvar_alpha must be in [0, 1], "
+                f"got {self.robust_cvar_alpha}"
+            )
+        if self.robust_cvar_alpha > 0 and self.robust_n_samples < 2:
+            raise ValueError(
+                "robust_n_samples must be >= 2 when robust_cvar_alpha > 0"
+            )
+        if self.robust_cvar_alpha > 0 and target_spec is None:
+            raise ValueError(
+                "robust_cvar_alpha > 0 requires target_spec "
+                "(inverse-design BO)"
+            )
+        if self.robust_variance_weight > 0 and target_spec is None:
+            raise ValueError(
+                "robust_variance_weight > 0 requires target_spec "
+                "(robust BO is defined against user targets)"
+            )
+        if self.robust_variance_weight > 0 and self.robust_n_samples < 2:
+            raise ValueError(
+                "robust_n_samples must be >= 2 when robust_variance_weight > 0"
+            )
+
+        # Dimension-sized REF_POINT and penalty vectors. Legacy fixed
+        # targets use the module-level REF_POINT; inverse-design sets a
+        # uniform 5.0 * active_dims to stay compatible with the Node 6
+        # trust-penalty convention (QUALITATIVE_TREND = +5.5 drops
+        # candidates above 5.0 in every dimension).
+        if target_spec is None:
+            self._ref_point = REF_POINT
+            self._n_obj = 3
+        else:
+            n_obj = len(target_spec.active_dims())
+            self._n_obj = n_obj
+            self._ref_point = torch.tensor([5.0] * n_obj, **tkwargs)
 
         self.orchestrator = PipelineOrchestrator(db=db, output_dir=self.output_dir / "runs")
         self.template_params = template_params or SimulationParameters()
@@ -166,12 +232,64 @@ class OptimizationEngine:
         self.result_indices: list[int | None] = []
         self.hv_history: list[float] = []
 
+    def _compute_obj_for_result(self, result: FullResult) -> np.ndarray:
+        """Objective vector for a single result.
+
+        Dispatches between the fixed-target and inverse-design
+        objective builders based on ``self.target_spec``.
+        """
+        if self.target_spec is None:
+            return compute_objectives_trust_aware(result)
+        return compute_inverse_design_objectives(
+            result, self.target_spec, trust_aware=True, mode=self._mode,
+        )
+
     def _evaluate(self, x_physical: np.ndarray) -> tuple[np.ndarray, FullResult]:
-        """Run the full pipeline for a parameter vector. Returns (objectives, result)."""
+        """Run the full pipeline for a parameter vector.
+
+        Returns ``(objectives, result)`` for the primary (deterministic
+        or nominal-center) run. When robust optimisation is active
+        (``robust_variance_weight > 0``), additional perturbed runs are
+        executed and the reported objective is mean + w * std per
+        dimension; the nominal result is still returned for provenance.
+        """
         params = _x_to_params(x_physical, self.template_params)
         params.run_id = f"opt_{len(self.X_observed):04d}"
         result = self.orchestrator.run_single(params)
-        objectives = compute_objectives_trust_aware(result)
+        objectives = self._compute_obj_for_result(result)
+
+        # F4: robust BO layer — resample with the unified UQ engine's
+        # default perturbations around the nominal candidate to get a
+        # dispersion estimate, then aggregate (F4-a mean+λ·std or F4-b
+        # CVaR_α). CVaR path takes precedence if both are configured.
+        if self.robust_variance_weight > 0 or self.robust_cvar_alpha > 0:
+            samples = [objectives]
+            try:
+                for k in range(int(self.robust_n_samples) - 1):
+                    params_k = copy.deepcopy(params)
+                    params_k.run_id = f"opt_{len(self.X_observed):04d}_r{k}"
+                    # RPM jitter (placeholder for full spec-driven MC)
+                    params_k.emulsification.rpm *= (1.0 + 0.01 * (k + 1))
+                    res_k = self.orchestrator.run_single(params_k)
+                    samples.append(self._compute_obj_for_result(res_k))
+                arr = np.array(samples)
+                if self.robust_cvar_alpha > 0:
+                    # F4-b: CVaR_α = mean of the worst ⌈α·n⌉ samples
+                    # per objective dimension. Worst = largest value
+                    # for a minimisation objective.
+                    n_resamples = arr.shape[0]
+                    k_cut = max(1, int(np.ceil(
+                        self.robust_cvar_alpha * n_resamples
+                    )))
+                    sorted_asc = np.sort(arr, axis=0)
+                    objectives = sorted_asc[-k_cut:].mean(axis=0)
+                else:
+                    # F4-a: mean + λ·std per objective dimension
+                    mean = arr.mean(axis=0)
+                    std = arr.std(axis=0, ddof=0)
+                    objectives = mean + self.robust_variance_weight * std
+            except Exception as exc:
+                logger.warning("Robust BO resampling failed (%s); using nominal objectives", exc)
 
         # Check feasibility constraints and penalise infeasible points
         feasible, violations = check_constraints(result)
@@ -195,7 +313,7 @@ class OptimizationEngine:
         """Compute dominated hypervolume of current Pareto front."""
         # Negate because BoTorch assumes maximisation for HV
         neg_Y = -Y
-        ref = -REF_POINT
+        ref = -self._ref_point
         try:
             partitioning = FastNondominatedPartitioning(ref_point=ref, Y=neg_Y)
             return float(partitioning.compute_hypervolume().item())
@@ -231,7 +349,7 @@ class OptimizationEngine:
                 objectives, result = self._evaluate(x_phys)
             except Exception as e:
                 logger.warning("Evaluation failed: %s — using penalty", e)
-                objectives = np.array([10.0, 10.0, 10.0])
+                objectives = np.full(self._n_obj, 10.0)
                 result = None
             dt = time.perf_counter() - t0
 
@@ -243,8 +361,8 @@ class OptimizationEngine:
             else:
                 self.result_indices.append(None)
 
-            logger.info("  → f=[%.3f, %.3f, %.3f] (%.1fs)",
-                         objectives[0], objectives[1], objectives[2], dt)
+            logger.info("  → f=%s (%.1fs)",
+                         ["%.3f" % v for v in objectives], dt)
 
         # ── Phase 2: Bayesian Optimisation ────────────────────────────
         logger.info("Phase 2: Bayesian Optimisation (%d iterations)", max_iter)
@@ -284,12 +402,12 @@ class OptimizationEngine:
                 neg_Y = -Y_torch  # BoTorch maximises
 
                 partitioning = FastNondominatedPartitioning(
-                    ref_point=-REF_POINT, Y=neg_Y,
+                    ref_point=-self._ref_point, Y=neg_Y,
                 )
 
                 acqf = qLogExpectedHypervolumeImprovement(
                     model=model,
-                    ref_point=(-REF_POINT).tolist(),
+                    ref_point=(-self._ref_point).tolist(),
                     partitioning=partitioning,
                     sampler=None,
                 )
@@ -322,7 +440,7 @@ class OptimizationEngine:
                 objectives, result = self._evaluate(x_next_phys)
             except Exception as e:
                 logger.warning("Evaluation failed: %s", e)
-                objectives = np.array([10.0, 10.0, 10.0])
+                objectives = np.full(self._n_obj, 10.0)
                 result = None
             dt = time.perf_counter() - t0
 

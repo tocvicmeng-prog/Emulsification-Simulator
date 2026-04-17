@@ -20,6 +20,37 @@ def main():
                        help="Path to TOML config file (default: configs/default.toml)")
     run_p.add_argument("--rpm", type=float, help="Override RPM")
     run_p.add_argument("--phi-d", type=float, help="Override dispersed phase volume fraction")
+    run_p.add_argument(
+        "--polymer-family", dest="polymer_family", default=None,
+        choices=["agarose_chitosan", "alginate", "cellulose", "plga"],
+        help="Override polymer family (Node F1-a Phase 2c). Routes the "
+             "pipeline to the matching L2/L4 solver pair. Default: honour "
+             "MaterialProperties from the config / property database.",
+    )
+    run_p.add_argument(
+        "--gelant", default=None,
+        choices=["cacl2_external", "gdl_caco3_internal"],
+        help="Alginate gelant preset (Phase 2c polish). Applies the "
+             "profile's effective Ca²⁺ concentration to "
+             "formulation.c_Ca_bath using the current t_crosslink. Only "
+             "meaningful with --polymer-family alginate.",
+    )
+    run_p.add_argument(
+        "--cellulose-solvent", dest="cellulose_solvent", default=None,
+        choices=["naoh_urea", "nmmo", "emim_ac", "dmac_licl"],
+        help="Cellulose solvent-system preset (F1-b Phase 2 / 3). "
+             "Patches MaterialProperties with the preset's χ, D, and "
+             "modulus parameters. Only meaningful with "
+             "--polymer-family cellulose.",
+    )
+    run_p.add_argument(
+        "--plga-grade", dest="plga_grade", default=None,
+        choices=["50_50", "75_25", "85_15", "pla"],
+        help="PLGA grade preset (F1-c Phase 2). Patches "
+             "MaterialProperties with the grade's D_DCM, phi_DCM_eq, "
+             "G_glassy, and n_plga parameters. Only meaningful with "
+             "--polymer-family plga.",
+    )
     run_p.add_argument("--output", "-o", default="output", help="Output directory")
     run_p.add_argument("--quiet", "-q", action="store_true")
 
@@ -35,6 +66,46 @@ def main():
     opt_p.add_argument("--n-initial", type=int, default=15)
     opt_p.add_argument("--max-iter", type=int, default=200)
     opt_p.add_argument("--output", "-o", default="output/optimization")
+
+    # design command (F3-c, v8.0 Phase 1): inverse-design BO with user targets
+    des_p = sub.add_parser(
+        "design",
+        help="Inverse design: BO over user-specified (d32, pore, G_DN, Kav) targets",
+    )
+    des_p.add_argument("--d32", type=float, default=None,
+                        help="Target d32 [m]. Omit to leave dimension out of spec.")
+    des_p.add_argument("--d32-tol", type=float, default=None,
+                        help="d32 tolerance [m]. Required if --d32 is set.")
+    des_p.add_argument("--pore", type=float, default=None,
+                        help="Target pore size [m].")
+    des_p.add_argument("--pore-tol", type=float, default=None)
+    des_p.add_argument("--G-DN", dest="G_DN", type=float, default=None,
+                        help="Target shear modulus [Pa].")
+    des_p.add_argument("--G-DN-log10-tol", dest="G_DN_log10_tol",
+                        type=float, default=None,
+                        help="log10-space tolerance for G_DN.")
+    des_p.add_argument("--Kav", type=float, default=None,
+                        help="Target distribution coefficient [-] (requires M3).")
+    des_p.add_argument("--Kav-tol", dest="Kav_tol", type=float, default=None)
+    des_p.add_argument(
+        "--robust-variance-weight", dest="robust_variance_weight",
+        type=float, default=0.0,
+        help="F4-a: add lambda * std(obj) to mean(obj). 0 = nominal BO.",
+    )
+    des_p.add_argument(
+        "--robust-n-samples", dest="robust_n_samples", type=int, default=5,
+        help="Resamples per candidate for robust BO.",
+    )
+    des_p.add_argument(
+        "--robust-cvar-alpha", dest="robust_cvar_alpha",
+        type=float, default=0.0,
+        help="F4-b: CVaR_α tail-risk aggregation. α ∈ (0, 1]. Takes "
+             "precedence over --robust-variance-weight when both set. "
+             "0 = nominal BO.",
+    )
+    des_p.add_argument("--n-initial", type=int, default=10)
+    des_p.add_argument("--max-iter", type=int, default=50)
+    des_p.add_argument("--output", "-o", default="output/design")
 
     # uncertainty command
     unc_p = sub.add_parser("uncertainty", help="Run Monte Carlo uncertainty propagation")
@@ -52,9 +123,11 @@ def main():
     )
     unc_p.add_argument(
         "--engine", choices=["legacy", "unified"], default="unified",
-        help="MC engine. 'unified' (default, Node 18) uses "
-             "UnifiedUncertaintyEngine and emits the schema-uniform result; "
-             "'legacy' uses uncertainty_core.UncertaintyPropagator directly.",
+        help="MC engine. 'unified' (default) runs the merged engine "
+             "including any CalibrationStore posterior samples. "
+             "'legacy' runs the merged engine with no posterior injection "
+             "(byte-compat with v7.0.x uncertainty_core output for scripts "
+             "that only want the default MaterialProperties perturbations).",
     )
 
     # info command
@@ -131,6 +204,8 @@ def main():
         _cmd_optimize(args)
     elif args.command == "uncertainty":
         _cmd_uncertainty(args)
+    elif args.command == "design":
+        _cmd_design(args)
     elif args.command == "info":
         _cmd_info(args)
     elif args.command == "ui":
@@ -165,8 +240,80 @@ def _cmd_run(args):
     # per mode (volumetric for stirred-vessel, formulation.phi_d for legacy)
     phi_d = args.phi_d if args.phi_d is not None else None
 
+    # Node F1-a Phase 2c: --polymer-family overrides the default dispatch.
+    props_overrides = None
+    if getattr(args, "polymer_family", None) is not None:
+        from .datatypes import PolymerFamily
+        props_overrides = {"polymer_family": PolymerFamily(args.polymer_family)}
+
+    # Node F1-a Phase 2c polish: --gelant applies a reagent-library preset
+    # to formulation.c_Ca_bath (and resolves effective internal-release
+    # concentration using the current t_crosslink).
+    if getattr(args, "gelant", None) is not None:
+        from .reagent_library_alginate import (
+            GELANTS_ALGINATE,
+            effective_bath_concentration,
+        )
+        profile = GELANTS_ALGINATE[args.gelant]
+        t_end = params.formulation.t_crosslink
+        params.formulation.c_Ca_bath = effective_bath_concentration(
+            profile, t_end=t_end,
+        )
+        if not args.quiet:
+            print(
+                f"Gelant preset: {profile.name}  "
+                f"(c_Ca_bath = {params.formulation.c_Ca_bath:.1f} mol/m³ "
+                f"at t_crosslink = {t_end:.0f} s)"
+            )
+
+    # Node F1-b Phase 2: --cellulose-solvent folds a solvent-system
+    # preset into props_overrides so that run_single receives the
+    # correct χ, D, and modulus parameters.
+    if getattr(args, "cellulose_solvent", None) is not None:
+        from .properties.cellulose_defaults import CELLULOSE_SOLVENT_PRESETS
+        preset = CELLULOSE_SOLVENT_PRESETS[args.cellulose_solvent]
+        if props_overrides is None:
+            props_overrides = {}
+        props_overrides.update({
+            "N_p_cellulose": preset.N_p,
+            "chi_PS_cellulose": preset.chi_PS,
+            "chi_PN_cellulose": preset.chi_PN,
+            "chi_SN_cellulose": preset.chi_SN,
+            "D_solvent_cellulose": preset.D_solvent,
+            "D_nonsolvent_cellulose": preset.D_nonsolvent,
+            "kappa_CH_cellulose": preset.kappa_CH,
+            "K_cell_modulus": preset.K_cell,
+            "alpha_cell_modulus": preset.alpha_cell,
+        })
+        if not args.quiet:
+            print(
+                f"Cellulose solvent preset: {preset.name}  "
+                f"(N_p={preset.N_p}, χ_PS={preset.chi_PS}, "
+                f"K_cell={preset.K_cell:.1e} Pa)"
+            )
+
+    # Node F1-c Phase 2: --plga-grade folds a PLGA grade preset into
+    # props_overrides.
+    if getattr(args, "plga_grade", None) is not None:
+        from .properties.plga_defaults import PLGA_GRADE_PRESETS
+        grade = PLGA_GRADE_PRESETS[args.plga_grade]
+        if props_overrides is None:
+            props_overrides = {}
+        props_overrides.update({
+            "D_DCM_plga": grade.D_DCM,
+            "phi_DCM_eq": grade.phi_DCM_eq,
+            "G_glassy_plga": grade.G_glassy,
+            "n_plga_modulus": grade.n_plga,
+        })
+        if not args.quiet:
+            print(
+                f"PLGA grade preset: {grade.name}  "
+                f"(D_DCM={grade.D_DCM:.1e} m²/s, "
+                f"G_glassy={grade.G_glassy:.1e} Pa)"
+            )
+
     orch = PipelineOrchestrator(output_dir=Path(args.output))
-    result = orch.run_single(params, phi_d=phi_d)
+    result = orch.run_single(params, phi_d=phi_d, props_overrides=props_overrides)
 
     e = result.emulsification
     g = result.gelation
@@ -220,37 +367,73 @@ def _cmd_optimize(args):
     print()
 
 
+def _cmd_design(args):
+    """Inverse-design BO with user-specified target spec (F3-c, v8.0).
+
+    Builds a ``TargetSpec`` from CLI flags, constructs an
+    ``OptimizationEngine(target_spec=...)``, and runs. The engine's
+    legacy Pareto filter and trust-aware gating remain active; the
+    only change is what "good" means.
+
+    F4-a: --robust-variance-weight lambda turns on mean+lambda*std
+    objective evaluation for robust BO.
+    """
+    from .optimization.engine import OptimizationEngine
+    from .optimization.objectives import TargetSpec
+    from .optimization.analysis import pareto_summary, best_compromise
+
+    target = TargetSpec(
+        d32_target=args.d32, d32_tol=args.d32_tol,
+        pore_target=args.pore, pore_tol=args.pore_tol,
+        G_DN_target=args.G_DN, G_DN_log10_tol=args.G_DN_log10_tol,
+        Kav_target=args.Kav, Kav_tol=args.Kav_tol,
+    )
+    try:
+        target.validate()
+    except ValueError as exc:
+        raise SystemExit(f"Invalid --design target: {exc}")
+
+    print(f"Design targets: active dims = {target.active_dims()}")
+    if args.robust_variance_weight > 0:
+        print(
+            f"Robust BO: lambda = {args.robust_variance_weight}, "
+            f"n_samples/candidate = {args.robust_n_samples}"
+        )
+
+    engine = OptimizationEngine(
+        n_initial=args.n_initial,
+        max_iterations=args.max_iter,
+        output_dir=Path(args.output),
+        target_spec=target,
+        robust_variance_weight=args.robust_variance_weight,
+        robust_n_samples=args.robust_n_samples,
+    )
+    state = engine.run()
+    print()
+    print(pareto_summary(state))
+    idx = best_compromise(state)
+    print(f"\nBest compromise: Pareto point #{idx+1}")
+    print(f"  objectives = {state.pareto_Y[idx]}")
+    print()
+
+
 def _cmd_uncertainty(args):
     """MC uncertainty propagation.
 
-    Node 25 (v7.0.1, audit N5): defaults to the UnifiedUncertaintyEngine
-    (Node 18) so calibration-store posteriors are surfaced and the result
-    schema is consistent with the rest of the v7.0+ stack. The legacy
-    engine is still available via --engine legacy for byte-equivalence
-    with v6.x output.
+    Node 30 (v7.1): both ``--engine unified`` and ``--engine legacy`` run
+    the single merged UnifiedUncertaintyEngine. ``unified`` includes any
+    CalibrationStore posterior samples; ``legacy`` constructs a fresh
+    engine with ``calibration_store=None`` for byte-compat with v7.0.x
+    scripts that expect the default MaterialProperties perturbations
+    only.
     """
-    params = _load_params(args.config)
-
-    if args.engine == "legacy":
-        from .uncertainty_core import UncertaintyPropagator
-        propagator = UncertaintyPropagator(
-            n_samples=args.n_samples,
-            seed=args.seed,
-            n_jobs=args.n_jobs,
-        )
-        print(f"Running legacy MC ({args.n_samples} samples, "
-              f"n_jobs={args.n_jobs})...")
-        result = propagator.run(params)
-        print()
-        print(result.summary())
-        print()
-        return
-
-    # Default: unified engine (audit N5)
     from .uncertainty_unified import UnifiedUncertaintyEngine
-    engine = UnifiedUncertaintyEngine()
+
+    params = _load_params(args.config)
+    engine = UnifiedUncertaintyEngine()  # no calibration store wired in CLI yet
+    label = "legacy" if args.engine == "legacy" else "unified"
     print(f"Running unified MC ({args.n_samples} samples, "
-          f"n_jobs={args.n_jobs}, engine=unified)...")
+          f"n_jobs={args.n_jobs}, engine={label})...")
     result = engine.run_m1l4(
         params,
         n_samples=args.n_samples,
