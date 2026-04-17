@@ -1,5 +1,57 @@
 # Changelog
 
+## v8.3.3 — Self-healing launch scripts (2026-04-17)
+
+Hotfix for a dead-end user experience on first run: if the installer's
+post-install step was skipped or failed silently (e.g. because
+Python 3.11+ was not on PATH at install time), the launcher batch
+files previously printed only "Installation not found. Run install.bat
+first." and exited, with no actionable guidance.
+
+### Fixed
+
+- `release/.../launch_ui.bat` and `release/.../launch_cli.bat`:
+  **self-healing**. On missing `.venv`, they now
+  1. report the exact expected path,
+  2. probe for `python` on `PATH` and show the detected version,
+  3. if Python is absent, print a hyperlink to
+     `https://www.python.org/downloads/windows/` and abort cleanly
+     with a press-any-key,
+  4. if Python is present, offer to run `install.bat --no-test`
+     automatically and then continue to the launch,
+  5. if setup fails, show the error code and keep the window
+     open so the user sees the cause.
+- `release/.../install.bat`: always `pause` on completion so the
+  user sees the success / failure message. Honours
+  `NONINTERACTIVE=1` when invoked from automation. Explicit error
+  message + pause on pip-upgrade failure (previously exited 4
+  silently).
+
+### Changed (version bumps)
+
+- `pyproject.toml`: 8.3.2 → 8.3.3.
+- `src/emulsim/__init__.py.__version__`: 8.3.2 → 8.3.3.
+- `installer/EmulSim.iss`, `installer/build_installer.bat`: all
+  `8.3.2` references updated to `8.3.3`.
+
+### Artefacts
+
+- `release/EmulSim-8.3.3-Setup.exe` (2.54 MB) — Inno Setup wizard.
+- `release/EmulSim-8.3.3-Windows-x64.zip` (563 KB) — portable.
+- `dist/emulsim-8.3.3-py3-none-any.whl` (~408 KB) — wheel.
+
+All three are identical in wheel contents to v8.3.2; only the
+launcher batch files changed. Users who already have a working
+v8.3.2 install can just replace `launch_ui.bat` / `launch_cli.bat` /
+`install.bat` with the v8.3.3 versions.
+
+### Smoke verified
+
+Fresh temp venv + `pip install emulsim-8.3.3-py3-none-any.whl` +
+`import emulsim` — works end-to-end.
+
+---
+
 ## v8.3.2 — One-click Windows 11 installer (.exe) (2026-04-17)
 
 Ships a proper Windows installer wizard as

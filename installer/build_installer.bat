@@ -46,7 +46,7 @@ copy /y docs\user_manual\polysaccharide_microsphere_simulator_first_edition.md ^
 REM Bundled launcher + installer scripts from the release tree.
 for %%F in (install.bat launch_ui.bat launch_cli.bat uninstall.bat
             README.txt INSTALL.md RELEASE_NOTES.md) do (
-    copy /y release\EmulSim-8.3.2-Windows-x64\%%F installer\stage\ > nul
+    copy /y release\EmulSim-8.3.3-Windows-x64\%%F installer\stage\ > nul
 )
 copy /y LICENSE installer\stage\LICENSE.txt > nul
 
@@ -66,6 +66,6 @@ echo [build-installer] 4/4  Compiling installer
 
 echo.
 echo [build-installer] DONE.
-echo Output: release\EmulSim-8.3.2-Setup.exe
+echo Output: release\EmulSim-8.3.3-Setup.exe
 endlocal
 exit /b 0
