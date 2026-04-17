@@ -419,10 +419,60 @@ def build(md_path: Path, pdf_path: Path) -> None:
     doc.build(flowables, onFirstPage=_footer, onLaterPages=_footer)
 
 
+def _build_and_report(md_path: Path, pdf_path: Path) -> None:
+    """Build `md_path` into `pdf_path` and log size. Windows-cp1252-safe."""
+    build(md_path, pdf_path)
+    size_kb = pdf_path.stat().st_size / 1024.0
+    try:
+        print(f"Built: {pdf_path}  ({size_kb:.1f} KB)")
+    except UnicodeEncodeError:
+        print(f"Built: {pdf_path.name}  ({size_kb:.1f} KB)")
+
+
+# Registry of markdown → PDF build targets. Extend here to ship additional
+# printable documents alongside the main manual. The UI auto-builds any
+# missing target on first render via the same runner.run_path call (see
+# visualization/app.py Manual-PDF section).
+BUILD_TARGETS: list[tuple[str, str]] = [
+    (
+        "polysaccharide_microsphere_simulator_first_edition.md",
+        "polysaccharide_microsphere_simulator_first_edition.pdf",
+    ),
+    (
+        "appendix_J_functionalization_protocols.md",
+        "appendix_J_functionalization_protocols.pdf",
+    ),
+]
+
+
 if __name__ == "__main__":
+    import sys
+
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except (AttributeError, OSError):
+        pass
+
     here = Path(__file__).parent
-    md = here / "polysaccharide_microsphere_simulator_first_edition.md"
-    pdf = here / "polysaccharide_microsphere_simulator_first_edition.pdf"
-    build(md, pdf)
-    size_kb = pdf.stat().st_size / 1024.0
-    print(f"Built: {pdf}  ({size_kb:.1f} KB)")
+
+    # Optional CLI override: `python build_pdf.py <input.md> [output.pdf]`
+    # builds a single specified target, skipping the registry. Useful when
+    # iterating on a draft appendix without rebuilding the whole manual.
+    argv = sys.argv[1:]
+    if argv:
+        md_override = Path(argv[0])
+        if not md_override.is_absolute():
+            md_override = here / md_override
+        pdf_override = (
+            Path(argv[1]) if len(argv) > 1 else md_override.with_suffix(".pdf")
+        )
+        if not pdf_override.is_absolute():
+            pdf_override = here / pdf_override
+        _build_and_report(md_override, pdf_override)
+    else:
+        for md_rel, pdf_rel in BUILD_TARGETS:
+            md_path = here / md_rel
+            if not md_path.exists():
+                print(f"Skipped (source missing): {md_rel}")
+                continue
+            _build_and_report(md_path, here / pdf_rel)

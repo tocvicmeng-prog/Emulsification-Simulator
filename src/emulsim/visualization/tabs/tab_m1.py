@@ -58,9 +58,197 @@ from emulsim.level3_crosslinking.solver import (
 )
 
 
+def _render_non_ac_family(*, tab_container, family, is_stirred_default, model_mode_enum, _smgr) -> None:
+    """Render the M1 tab for alginate / cellulose / PLGA (v9.0 M5-M7).
+
+    Shares Hardware Mode + shared L1 inputs (RPM, time, phi_d, v_oil/v_poly)
+    with the A+C path, but dispatches to the family-specific formulation
+    module and builds SimulationParameters with polymer_family set so the
+    orchestrator routes through _run_alginate / _run_cellulose / _run_plga.
+    """
+    from emulsim.visualization.tabs.m1.hardware_section import render_hardware_mode_radio
+    from emulsim.datatypes import PolymerFamily
+
+    m1_col_left, m1_col_right = st.columns(2)
+    with m1_col_left:
+        st.subheader("Emulsification (L1)")
+        is_stirred = render_hardware_mode_radio()
+
+        if is_stirred:
+            vessel_choice = st.selectbox(
+                "Vessel", ["Glass Beaker (100 mm)", "Jacketed Vessel (92 mm)"],
+                key="m1_vessel",
+            )
+            stirrer_choice = st.selectbox(
+                "Stirrer", ["Stirrer A - Pitched Blade (59 mm)", "Stirrer B - Rotor-Stator (32 mm)"],
+                key="m1_stirrer",
+            )
+            is_stirrer_A = "Pitched" in stirrer_choice
+            rpm = st.slider(
+                "Stirrer Speed (RPM)", 800, 2000 if is_stirrer_A else 9000,
+                1300 if is_stirrer_A else 1800,
+                step=50 if is_stirrer_A else 100,
+                key="m1_rpm" if is_stirrer_A else "m1_rpm_rs",
+            )
+            t_emul = st.number_input("Emulsification Time (min)", 1, 60, 10, key="m1_t_emul")
+            v_oil_mL = st.slider("Oil + surfactant (mL)", 100, 500, 300, step=10, key="m1_v_oil")
+            v_poly_mL = st.slider("Dispersed phase (mL)", 50, 300, 200, step=10, key="m1_v_poly")
+            total_mL = v_oil_mL + v_poly_mL
+            phi_d = v_poly_mL / total_mL
+            st.caption(f"Total: {total_mL} mL | phi_d = {phi_d:.2f}")
+        else:
+            rpm = st.slider("Rotor Speed (RPM)", 3000, 25000, 10000, step=500, key="m1_rpm_leg")
+            t_emul = st.number_input("Emulsification Time (min)", 1, 60, 10, key="m1_t_emul_leg")
+            phi_d = st.slider("Dispersed Phase Fraction (phi_d)", 0.01, 0.30, 0.05, step=0.01, key="m1_phi_d")
+            v_oil_mL, v_poly_mL, total_mL = 300, 200, 500
+
+    # Compare families by .value to survive importlib.reload of datatypes
+    # (see tab_m1.py family-dispatch comment and RunReport.compute_min_tier).
+    family_value = getattr(family, "value", family)
+    with m1_col_right:
+        if family_value == PolymerFamily.ALGINATE.value:
+            from emulsim.visualization.tabs.m1.formulation_alginate import render_formulation_alginate
+            fctx = render_formulation_alginate(is_stirred=is_stirred)
+        elif family_value == PolymerFamily.CELLULOSE.value:
+            from emulsim.visualization.tabs.m1.formulation_cellulose import render_formulation_cellulose
+            fctx = render_formulation_cellulose(is_stirred=is_stirred)
+        elif family_value == PolymerFamily.PLGA.value:
+            from emulsim.visualization.tabs.m1.formulation_plga import render_formulation_plga
+            fctx = render_formulation_plga(is_stirred=is_stirred)
+        else:
+            st.error(f"Unknown family: {family_value}")
+            return
+
+    st.divider()
+    run_btn = st.button(
+        "\u25b6 Run M1: Fabrication Pipeline", type="primary",
+        use_container_width=True, key="m1v9_run_non_ac",
+    )
+    if not run_btn:
+        return
+
+    # ── Build SimulationParameters for the selected family ──────────────
+    if is_stirred:
+        if "Beaker" in vessel_choice:
+            vessel = VesselGeometry.glass_beaker(working_volume=total_mL * 1e-6)
+            heating = HeatingConfig.flat_plate()
+        else:
+            vessel = VesselGeometry.jacketed_vessel(working_volume=total_mL * 1e-6)
+            heating = HeatingConfig.hot_water_jacket()
+        stirrer = StirrerGeometry.pitched_blade_A() if is_stirrer_A else StirrerGeometry.rotor_stator_B()
+        heating.T_initial = fctx.T_oil_C + 273.15
+        kernels = KernelConfig.for_stirrer_type(stirrer.stirrer_type)
+        emul = EmulsificationParameters(
+            mode="stirred_vessel", rpm=float(rpm),
+            t_emulsification=float(t_emul * 60),
+            vessel=vessel, stirrer=stirrer, heating=heating, kernels=kernels,
+        )
+    else:
+        emul = EmulsificationParameters(
+            mode="rotor_stator_legacy", rpm=float(rpm),
+            t_emulsification=float(t_emul * 60),
+            mixer=MixerGeometry(),
+        )
+
+    formulation = FormulationParameters(
+        c_span80=fctx.c_span80_pct * 10.0,
+        T_oil=fctx.T_oil_C + 273.15,
+        phi_d=phi_d,
+        c_span80_vol_pct=fctx.c_span80_vol_pct,
+        v_oil_span80_mL=float(v_oil_mL),
+        v_polysaccharide_mL=float(v_poly_mL),
+    )
+
+    props_overrides: dict = {"polymer_family": family}
+    if family_value == PolymerFamily.ALGINATE.value:
+        formulation.c_alginate = fctx.c_alginate_kg_m3
+        if fctx.c_Ca_bath_mM > 0:
+            # External CaCl2 bath: direct concentration.
+            formulation.c_Ca_bath = fctx.c_Ca_bath_mM
+        else:
+            # Internal release (GDL+CaCO3): lumped-parameter approximation
+            # c_eff(t) = C_source * (1 - exp(-k*t)) per Draget 1997. Use the
+            # gelant profile's recommended t_default as the process time.
+            from emulsim.reagent_library_alginate import (
+                GELANTS_ALGINATE,
+                effective_bath_concentration,
+            )
+            profile = GELANTS_ALGINATE.get(fctx.gelant_key)
+            if profile is not None and profile.mode == "internal_release":
+                # Recompute with the UI-provided k_release (which overrides
+                # profile.k_release when the user adjusts it) by building a
+                # synthetic profile with the current widget values.
+                from dataclasses import replace
+                live_profile = replace(
+                    profile,
+                    C_Ca_source=fctx.C_Ca_source_mM,
+                    k_release=fctx.k_release_1_s,
+                )
+                formulation.c_Ca_bath = effective_bath_concentration(
+                    live_profile, profile.t_default,
+                )
+            else:
+                formulation.c_Ca_bath = fctx.C_Ca_source_mM
+    elif family_value == PolymerFamily.CELLULOSE.value:
+        formulation.phi_cellulose_0 = fctx.phi_cellulose_0
+        formulation.solvent_system = fctx.solvent_system
+        formulation.cooling_rate = fctx.cooling_rate_Cmin / 60.0 if fctx.cooling_rate_Cmin > 0 else 0.0
+    elif family_value == PolymerFamily.PLGA.value:
+        formulation.phi_PLGA_0 = fctx.phi_PLGA_0
+        formulation.plga_grade = fctx.plga_grade
+
+    params = SimulationParameters(
+        model_mode=model_mode_enum,
+        emulsification=emul,
+        formulation=formulation,
+        solver=SolverSettings(l2_n_grid=64),
+    )
+
+    _smgr.invalidate_downstream(from_module=1)
+    with st.spinner(f"Running L1→L2→L4 pipeline for {family.value}..."):
+        t_start = time.time()
+        db = PropertyDatabase()
+        orch = PipelineOrchestrator(db=db)
+        try:
+            result = orch.run_single(
+                params, l2_mode="empirical",
+                props_overrides=props_overrides,
+                crosslinker_key="genipin",  # ignored for non-A+C families
+                uv_intensity=0.0,
+            )
+        except Exception as ex:
+            st.error(f"Simulation failed: {ex}")
+            st.exception(ex)
+            return
+        elapsed = time.time() - t_start
+
+    st.success(f"Pipeline complete in {elapsed:.1f}s")
+
+    # ── Family-neutral results display ────────────────────────────────
+    e, g, m = result.emulsification, result.gelation, result.mechanical
+    c1, c2, c3, c4 = st.columns(4)
+    d_mode = getattr(e, "d_mode", 0.0)
+    c1.metric("d_mode", f"{d_mode*1e6:.1f} µm" if d_mode > 0 else f"d32 {e.d32*1e6:.2f} µm")
+    c2.metric("Pore size", f"{g.pore_size_mean*1e9:.1f} nm")
+    c3.metric("Porosity", f"{g.porosity:.2f}")
+    c4.metric("G (modulus)", f"{m.G_DN/1000:.1f} kPa")
+
+    if getattr(e, "model_manifest", None):
+        st.caption(f"L1 model: `{e.model_manifest.model_name}` ({e.model_manifest.evidence_tier.value})")
+    if getattr(g, "model_manifest", None):
+        st.caption(f"L2 model: `{g.model_manifest.model_name}` ({g.model_manifest.evidence_tier.value})")
+    if getattr(m, "model_manifest", None):
+        st.caption(f"L4 model: `{m.model_manifest.model_name}` ({m.model_manifest.evidence_tier.value})")
+
+    # Save to session state so tabs M2/M3 can consume the result
+    st.session_state["result"] = result
+    st.session_state["elapsed"] = elapsed
+    st.session_state["params"] = params
+
+
 def render_tab_m1(
     tab_container,
-    is_stirred: bool,
+    is_stirred: bool | None,
     model_mode_enum: ModelMode,
     _smgr,
     _const_input,
@@ -70,14 +258,41 @@ def render_tab_m1(
 
     Args:
         tab_container: Streamlit tab container from st.tabs().
-        is_stirred: Whether stirred vessel mode is selected.
+        is_stirred: Whether stirred vessel mode is selected. Pass ``None``
+            (v9.0 default) to render the Hardware Mode radio locally at
+            the top of the Emulsification section.
         model_mode_enum: Scientific mode enum.
         _smgr: SessionStateManager instance.
         _const_input: Callable for rendering per-constant selector with protocol link.
         _proto_sections: Dict of calibration protocol sections.
     """
+    from emulsim.visualization.tabs.m1.hardware_section import render_hardware_mode_radio
+    from emulsim.visualization.tabs.m1.family_selector import render_family_selector
+    from emulsim.datatypes import PolymerFamily as _PF
+
     with tab_container:
         st.header("Module 1: Fabrication Pipeline (L1→L2→L3→L4)")
+
+        # ── Polymer family (v9.0) — drives L2 dispatch and downstream rendering ──
+        _family_ctx = render_family_selector()
+        _family = _family_ctx.family
+
+        # v9.0 M5-M7: dispatch non-A+C families to the family-specific runner.
+        # Compare by .value (string), not enum identity — app.py reloads
+        # emulsim.datatypes on every rerun, producing a new PolymerFamily
+        # class. m1.family_selector is not in the reload list, so it returns
+        # a stale-class enum member. Identity comparison would mis-classify
+        # every family after the first rerun. See also
+        # RunReport.compute_min_tier for the same hazard.
+        if getattr(_family, "value", _family) != _PF.AGAROSE_CHITOSAN.value:
+            _render_non_ac_family(
+                tab_container=tab_container,
+                family=_family,
+                is_stirred_default=None,  # hardware_mode_radio already rendered in app.py sidebar v8 or by us in M2
+                model_mode_enum=model_mode_enum,
+                _smgr=_smgr,
+            )
+            return
 
         # ── M1 INPUT SECTION ─────────────────────────────────────────────────
         m1_col_left, m1_col_right = st.columns(2)
@@ -85,6 +300,13 @@ def render_tab_m1(
         # ── Left column: Emulsification + Formulation ──
         with m1_col_left:
             st.subheader("Emulsification (L1)")
+
+            # v9.0: Hardware Mode relocated from Global Settings sidebar
+            # into the M1 Emulsification section (see scientific-advisor
+            # audit §C). Back-compat: if caller still passes a bool,
+            # honour it; otherwise render the radio here.
+            if is_stirred is None:
+                is_stirred = render_hardware_mode_radio()
 
             if is_stirred:
                 vessel_choice = st.selectbox(
@@ -142,164 +364,63 @@ def render_tab_m1(
                 l1_conv_tol = 0.01
                 l1_max_ext = 2
 
-            st.subheader("Formulation")
-
-            _surf_keys = list(SURFACTANTS.keys())
-            _surf_names = [SURFACTANTS[k].name for k in _surf_keys]
-            _surf_sel_name = st.selectbox(
-                "Surfactant", _surf_names,
-                index=_surf_keys.index("span80"),
-                help="Select surfactant for W/O emulsification",
-                key="m1_surfactant",
+            # v9.0 M4: formulation + cooling + pore-structure moved into
+            # formulation_agarose_chitosan.render_formulation_section.
+            from emulsim.visualization.tabs.m1.formulation_agarose_chitosan import (
+                render_formulation_section as _render_ac_formulation,
             )
-            _surf_sel_key = _surf_keys[_surf_names.index(_surf_sel_name)]
-            surf = SURFACTANTS[_surf_sel_key]
-            st.caption(f"HLB={surf.hlb} | MW={surf.mw} g/mol | {surf.notes[:60]}")
+            _ac_ctx = _render_ac_formulation(is_stirred=is_stirred)
+            c_agarose_pct = _ac_ctx.c_agarose_pct
+            c_chitosan_pct = _ac_ctx.c_chitosan_pct
+            _surf_sel_key = _ac_ctx.surfactant_key
+            c_span80_pct = _ac_ctx.c_span80_pct
+            c_span80_vol_pct = _ac_ctx.c_span80_vol_pct
+            T_oil_C = _ac_ctx.T_oil_C
+            cooling_rate_Cmin = _ac_ctx.cooling_rate_Cmin
+            l2_mode = _ac_ctx.l2_mode
+            grid_size = _ac_ctx.grid_size
+            surf = _ac_ctx.surfactant
 
-            _fc1, _fc2 = st.columns(2)
-            with _fc1:
-                c_agarose_pct = st.number_input("Agarose (% w/v)", 1.0, 10.0, 4.2, step=0.1, key="m1_c_agar")
-            with _fc2:
-                c_chitosan_pct = st.number_input("Chitosan (% w/v)", 0.5, 5.0, 1.8, step=0.1, key="m1_c_chit")
-
-            if is_stirred:
-                c_span80_vol_pct = st.slider("Span-80 in oil (% v/v)", 0.2, 5.0, 1.5, step=0.1, key="m1_span_vv")
-                c_span80_pct = c_span80_vol_pct * 986.0 / 1000.0
-                T_oil_C = st.slider("Paraffin Oil Temperature (C)", 65, 110, 80, step=1, key="m1_T_oil",
-                                     help="Oil temperature at start of emulsification.")
-            else:
-                c_span80_pct = st.slider("Surfactant (% w/v)", 0.5, 5.0, 2.0, step=0.1, key="m1_span_wv")
-                c_span80_vol_pct = 1.5
-                T_oil_C = st.slider("Oil Temperature (C)", 60, 95, 90, key="m1_T_oil_leg")
-
-        # ── Right column: Gelation + Crosslinking + Material Constants + Targets ──
+        # ── Right column: Crosslinking + Targets + Material Constants ──
         with m1_col_right:
-            st.subheader("Cooling & Gelation (L2)")
-            if is_stirred:
-                cooling_rate_Cmin = st.slider("Cooling Rate (C/min)", 0.1, 15.0, 0.67, step=0.1,
-                                               key="m1_cool_rate",
-                                               help="Natural cooling: ~0.67 C/min for 500 mL beaker")
-            else:
-                cooling_rate_Cmin = st.slider("Cooling Rate (C/min)", 1.0, 20.0, 10.0, step=0.5,
-                                               key="m1_cool_rate_leg")
-            l2_model = st.radio(
-                "Pore Structure Model",
-                ["Empirical (fast, calibrated)", "Cahn-Hilliard 2D (mechanistic)"],
-                index=0, key="m1_l2_model",
-                help="Empirical: literature-calibrated power law (~1 ms). "
-                     "CH 2D: phase-field spinodal decomposition (slower, requires parameter tuning).",
+            # v9.0 M4: crosslinking section moved into module.
+            from emulsim.visualization.tabs.m1.crosslinking_section import (
+                render_crosslinking_section as _render_crosslinking,
             )
-            l2_mode = "empirical" if "Empirical" in l2_model else "ch_2d"
-            grid_size = 64
-            if l2_mode == "ch_2d":
-                grid_size = st.select_slider("Phase-Field Grid", [32, 64, 128], value=64, key="m1_grid")
-
-            st.subheader("Crosslinking (L3)")
-
-            _xl_keys = list(CROSSLINKERS.keys())
-            _xl_names = [CROSSLINKERS[k].name for k in _xl_keys]
-            _xl_sel_name = st.selectbox(
-                "Crosslinker", _xl_names,
-                index=_xl_keys.index("genipin"),
-                help="Select crosslinking agent",
-                key="m1_crosslinker",
+            _DDA_out: list = []
+            _xl_ctx = _render_crosslinking(
+                c_chitosan_pct=c_chitosan_pct, DDA_out=_DDA_out,
             )
-            _xl_sel_key = _xl_keys[_xl_names.index(_xl_sel_name)]
-            xl = CROSSLINKERS[_xl_sel_key]
-            st.caption(f"{xl.mechanism} | k\u2080={xl.k_xlink_0:.1e} | Score: {xl.suitability}/10")
+            _xl_sel_key = _xl_ctx.crosslinker_key
+            c_genipin_mM = _xl_ctx.c_genipin_mM
+            T_xlink_C = _xl_ctx.T_xlink_C
+            t_xlink_h = _xl_ctx.t_xlink_h
+            uv_intensity = _xl_ctx.uv_intensity
+            xl = _xl_ctx.crosslinker
+            _DDA = _DDA_out[0] if _DDA_out else 0.85
 
-            c_genipin_mM = st.slider("Crosslinker Concentration (mM)", 0.5, 500.0, 10.0, step=0.5,
-                                      key="m1_c_xl")
-            st.markdown(
-                f"[View mechanism & protocol](/reagent_detail"
-                f"?key={_xl_sel_key}&source=crosslinkers"
-                f"&T={xl.T_crosslink_default}&t={xl.t_crosslink_default}"
-                f"&c={c_genipin_mM}&pH=7.4)",
+            # v9.0 M4: targets moved into module.
+            from emulsim.visualization.tabs.m1.targets_section import (
+                render_targets_section as _render_targets,
             )
+            _tgt_ctx = _render_targets(family=_family, is_stirred=is_stirred)
+            target_d32 = _tgt_ctx.target_d32
+            target_d_mode = _tgt_ctx.target_d_mode
+            target_pore = _tgt_ctx.target_pore
+            target_G = _tgt_ctx.target_G
 
-            _DDA = st.slider("DDA (degree of deacetylation)", 0.50, 0.99, 0.85, step=0.01,
-                              key="m1_DDA",
-                              help="Chitosan degree of deacetylation. Affects NH2 density and crosslinking capacity.")
-            _M_GlcN = 161.16
-            _c_chit_kg = c_chitosan_pct * 10.0
-            _NH2 = available_amine_concentration(_c_chit_kg, _DDA, _M_GlcN)
-            if _NH2 > 0:
-                _ratio = c_genipin_mM / _NH2
-                _c_rec = recommended_crosslinker_concentration(_c_chit_kg, _DDA, _M_GlcN, target_p=0.20)
-                if _ratio >= 0.10:
-                    st.success(f"Crosslinker/NH\u2082 = {_ratio:.3f} \u2014 sufficient for p \u2265 0.20")
-                elif _ratio >= 0.05:
-                    st.warning(
-                        f"Crosslinker/NH\u2082 = {_ratio:.3f} \u2014 may be limiting. "
-                        f"Recommend \u2265 {_c_rec:.1f} mM for target p = 0.20"
-                    )
-                else:
-                    st.error(
-                        f"Crosslinker/NH\u2082 = {_ratio:.3f} \u2014 severely limiting! "
-                        f"Increase to at least {_c_rec:.1f} mM for target p = 0.20"
-                    )
-
-            _T_xlink_default = int(xl.T_crosslink_default - 273.15)
-            _t_xlink_default_h = max(1, int(xl.t_crosslink_default / 3600))
-            T_xlink_C = st.slider("Crosslinking Temperature (\u00b0C)", 0, 120,
-                                    min(max(_T_xlink_default, 0), 120), key="m1_T_xl")
-            t_xlink_h = st.slider("Crosslinking Time (hours)", 1, 48,
-                                    min(_t_xlink_default_h, 48), key="m1_t_xl")
-
-            if xl.kinetics_model == 'uv_dose':
-                uv_intensity = st.slider("UV Intensity (mW/cm\u00b2)", 1.0, 100.0, 20.0, step=1.0,
-                                          key="m1_uv")
-            else:
-                uv_intensity = 0.0
-
-            st.subheader("Optimization Targets")
-            if is_stirred:
-                target_d_mode = st.number_input("Target d_mode (um)", 10.0, 500.0, 100.0, step=10.0,
-                                                 key="m1_tgt_d", help="Modal diameter of microspheres")
-                target_d32 = target_d_mode
-                target_pore = st.number_input("Target Pore Size (nm)", 10, 500, 100, step=10, key="m1_tgt_pore")
-            else:
-                target_d32 = st.number_input("Target d32 (um)", 0.5, 50.0, 2.0, step=0.5, key="m1_tgt_d32")
-                target_d_mode = target_d32
-                target_pore = st.number_input("Target Pore Size (nm)", 10, 500, 80, step=10, key="m1_tgt_pore_leg")
-            target_G = st.number_input("Target G_DN (kPa)", 1.0, 500.0, 10.0, step=1.0, key="m1_tgt_G")
-
-            # Material Constants
-            with st.expander("Material Constants", expanded=False):
-                st.caption("For each constant: use literature or enter your own.")
-                _mc = st  # container for material constants
-
-                _kl = ALL_CONSTANTS["K_L"]
-                custom_K_L = _const_input(
-                    _mc, "K_L (Span-80 adsorption)", "K_L",
-                    _kl.value, "m\u00b3/mol", "Santini 2007", 0.01, 10.0, 0.05, "K_L",
-                )
-                _gi = ALL_CONSTANTS["Gamma_inf"]
-                custom_Gamma_inf = _const_input(
-                    _mc, "\u0393\u221e (max surface excess)", "Gamma_inf",
-                    _gi.value * 1e6, "\u00d710\u207b\u2076 mol/m\u00b2", "Santini 2007", 1.0, 10.0, 0.1,
-                    "Gamma_inf", "%.1f",
-                )
-                _ec = ALL_CONSTANTS["eta_intr_chit"]
-                custom_eta_chit = _const_input(
-                    _mc, "[\u03b7] chitosan", "eta_chit",
-                    _ec.value, "mL/g", "Rinaudo 1993", 100.0, 2000.0, 50.0,
-                    "eta_chit", "%.0f",
-                )
-                _c3 = ALL_CONSTANTS["breakage_C3"]
-                custom_C3 = _const_input(
-                    _mc, "C3 (viscous breakage)", "C3",
-                    _c3.value, "-", "Alopaeus 2002", 0.0, 1.0, 0.05,
-                    "C3", "%.2f",
-                )
-                _xl_eta = xl.eta_coupling_recommended
-                st.caption(f"Per-chemistry \u03b7 for {xl.name}: {_xl_eta:+.2f}")
-                custom_eta_coup = _const_input(
-                    _mc, "\u03b7 coupling (IPN)", "eta_coup",
-                    _xl_eta, "-", f"{xl.name} library", -0.5, 0.5, 0.05,
-                    "eta_coup", "%.2f",
-                )
-                eta_coup_source = st.session_state.get("src_eta_coup", "Literature")
+            # v9.0 M4: material constants moved into module (family-aware).
+            from emulsim.visualization.tabs.m1.material_constants import (
+                render_material_constants as _render_material_constants,
+            )
+            _mat_overrides = _render_material_constants(
+                family=_family,
+                surfactant=surf,
+                crosslinker=xl,
+                const_input=_const_input,
+                T_oil_C=T_oil_C,
+                c_span80_pct=c_span80_pct,
+            )
 
         # ── M1 Validation ────────────────────────────────────────────────────
         _m1_val = _validate_m1(
@@ -400,27 +521,11 @@ def render_tab_m1(
                 ),
             )
 
-        # Material constants overrides
-        _custom_props_overrides = {
-            "breakage_C3": custom_C3,
-            "eta_coupling": custom_eta_coup,
-            "eta_is_custom": (eta_coup_source == "Custom"),
-        }
+        # Material constants overrides (v9.0 M4: sourced from material_constants module)
+        _custom_props_overrides = dict(_mat_overrides)
         _custom_props_overrides['k_xlink_0'] = xl.k_xlink_0
         _custom_props_overrides['E_a_xlink'] = xl.E_a_xlink
         _custom_props_overrides['f_bridge'] = xl.f_bridge
-        _R_gas = 8.314
-        _T_ift = T_oil_C + 273.15
-        _c_mol_ift = c_span80_pct * 10.0 / surf.mw * 1000.0
-        _sigma_0_T = max(surf.sigma_0_paraffin - 1.0e-4 * (_T_ift - 293.15), 0.001)
-        _use_gamma = custom_Gamma_inf * 1e-6
-        _use_KL = custom_K_L
-        _sigma_calc = max(
-            _sigma_0_T - _R_gas * _T_ift * _use_gamma * np.log(1 + _use_KL * _c_mol_ift),
-            1e-4,
-        )
-        _custom_props_overrides['sigma'] = _sigma_calc
-        _custom_props_overrides['eta_intr_chit'] = custom_eta_chit
 
         # ── Run M1 Button ────────────────────────────────────────────────────
         st.divider()
@@ -442,6 +547,7 @@ def render_tab_m1(
                                              uv_intensity=uv_intensity)
                 except Exception as ex:
                     st.error(f"Simulation failed: {ex}")
+                    st.exception(ex)
                     st.stop()
                 elapsed = time.time() - t_start
                 progress.progress(100, text=f"M1 complete in {elapsed:.1f}s")

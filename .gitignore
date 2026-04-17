@@ -9,3 +9,6 @@ build/
 dist/
 release/
 installer/stage/
+# Local backup files — never commit
+*.v8bak
+*.bak

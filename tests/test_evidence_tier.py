@@ -111,6 +111,25 @@ class TestRunReport:
         assert rr.trust_level == "CAUTION"
         assert len(rr.trust_warnings) == 1
 
+    def test_min_tier_survives_reloaded_enum_class(self):
+        # Streamlit's app.py calls importlib.reload(emulsim.datatypes) so that
+        # code edits appear without restarting the server. After reload, the
+        # ModelEvidenceTier class object is new, but L2/L4 solver modules
+        # (not in the reload list) still hold manifests built against the old
+        # class. compute_min_tier must match by value, not by enum identity.
+        from enum import Enum
+        StaleTier = Enum(
+            "ModelEvidenceTier",
+            [(t.name, t.value) for t in ModelEvidenceTier],
+        )
+        assert StaleTier.SEMI_QUANTITATIVE != ModelEvidenceTier.SEMI_QUANTITATIVE
+        m = ModelManifest(
+            model_name="L2.stale",
+            evidence_tier=StaleTier.SEMI_QUANTITATIVE,
+        )
+        rr = RunReport(model_graph=[m])
+        assert rr.compute_min_tier() == ModelEvidenceTier.SEMI_QUANTITATIVE
+
 
 # ── Backward Compatibility ───────────────────────────────────────────────
 

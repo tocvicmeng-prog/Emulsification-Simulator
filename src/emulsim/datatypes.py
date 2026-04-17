@@ -910,9 +910,18 @@ class RunReport:
             return ModelEvidenceTier.UNSUPPORTED
         # Tier ordering: validated > calibrated > semi > qualitative > unsupported
         _ORDER = list(ModelEvidenceTier)
+        # Compare by .value (string), not identity, so manifests created
+        # against a stale class object (e.g. after importlib.reload of this
+        # module by the Streamlit app) still match the current enum members.
+        _order_values = [t.value for t in _ORDER]
         worst_idx = 0
         for m in self.model_graph:
-            idx = _ORDER.index(m.evidence_tier)
+            tier = m.evidence_tier
+            tier_value = getattr(tier, "value", tier)
+            try:
+                idx = _order_values.index(tier_value)
+            except ValueError:
+                idx = _order_values.index(ModelEvidenceTier.UNSUPPORTED.value)
             if idx > worst_idx:
                 worst_idx = idx
         return _ORDER[worst_idx]

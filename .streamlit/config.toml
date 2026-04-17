@@ -1,0 +1,37 @@
+# EmulSim Streamlit theme — applies the DESIGN.md decisions that Streamlit's
+# native theme system supports. The rest (fonts, semantic colors, density
+# refinements) is injected via CSS in src/emulsim/visualization/app.py.
+
+[theme]
+# Dark mode primary. Users can flip the top-right settings menu if they
+# need light mode for screenshots.
+base = "dark"
+
+# Slate-900 background, slate-800 surface (st calls it secondaryBackgroundColor)
+backgroundColor = "#0F172A"
+secondaryBackgroundColor = "#1E293B"
+
+# Primary text on slate-900 background
+textColor = "#F8FAFC"
+
+# Teal-400 accent — readable on slate-900, distinct from plotly default colors
+primaryColor = "#2DD4BF"
+
+# Geist Sans / Mono are loaded via CSS in app.py; Streamlit's `font` field
+# only accepts 'sans serif' | 'serif' | 'monospace' so we leave it default
+# and let the injected font-family rule win.
+font = "sans serif"
+
+[server]
+# Honour ~/.streamlit config for ports; no overrides here.
+
+[client]
+# "minimal" hides the Streamlit Cloud "Deploy" button from the top-right
+# toolbar. EmulSim is a local scientific instrument, not a cloud-deployed
+# SaaS — the Deploy affordance is noise and was overlapping the Manual
+# (PDF) download button in the upper-right corner. "minimal" keeps the
+# running-state indicator and the hamburger "Rerun" menu.
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
