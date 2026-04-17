@@ -1,5 +1,67 @@
 # Changelog
 
+## v8.3.4 — Per-user install by default (fixes Access Denied) (2026-04-17)
+
+Hotfix for a second install-time failure reported after v8.3.3:
+
+```
+[install] Creating virtual environment at .venv\
+Error: [WinError 5] Access is denied: 'C:\Program Files\EmulSim\.venv'
+[install] ERROR: venv creation failed.
+```
+
+### Root cause
+
+The v8.3.2 / v8.3.3 Inno Setup script used
+`DefaultDirName={autopf}\EmulSim` with
+`PrivilegesRequiredOverridesAllowed=dialog`. On a UAC-elevated
+install Inno Setup placed files into `C:\Program Files\EmulSim`,
+but the `[Run]` post-install step (`install.bat`) executes in the
+user's non-elevated context. Non-admin cannot create `.venv\`
+inside `C:\Program Files\...`, so venv creation fails.
+
+### Fix (Inno Setup script)
+
+- `DefaultDirName={userpf}\EmulSim` — per-user Program Files
+  (`%LOCALAPPDATA%\Programs\EmulSim`), always user-writable.
+- `PrivilegesRequiredOverridesAllowed=dialog` removed — user can no
+  longer accidentally elevate to a location where the post-install
+  step will fail.
+- `UsedUserAreasWarning=no` — suppresses the Inno warning that
+  would otherwise trigger for an all-user-area install script.
+
+### Fix (install.bat)
+
+- Venv-creation failure now prints an actionable diagnostic:
+  "directory not writable → uninstall and reinstall v8.3.4+ per-user,
+  or right-click install.bat → Run as administrator".
+- No more silent exit 3.
+
+### Migration note for existing admin installs
+
+If v8.3.2 or v8.3.3 was installed into `C:\Program Files\EmulSim`:
+
+1. Uninstall (Control Panel → Apps → EmulSim, or the Start-Menu
+   "Uninstall EmulSim" shortcut).
+2. Download `EmulSim-8.3.4-Setup.exe` from the GitHub Release.
+3. Double-click — it installs into `%LOCALAPPDATA%\Programs\EmulSim`
+   without UAC. The post-install step completes cleanly.
+
+### Version bumps
+
+- `pyproject.toml`, `src/emulsim/__init__.py`, installer script,
+  build helper: 8.3.3 → 8.3.4.
+
+### Artefacts
+
+- `release/EmulSim-8.3.4-Setup.exe` (2.54 MB)
+- `release/EmulSim-8.3.4-Windows-x64.zip` (563 KB)
+- `dist/emulsim-8.3.4-py3-none-any.whl`
+
+Wheel contents unchanged from v8.3.2.
+
+---
+
 ## v8.3.3 — Self-healing launch scripts (2026-04-17)
 
 Hotfix for a dead-end user experience on first run: if the installer's

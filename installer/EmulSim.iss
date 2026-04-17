@@ -1,9 +1,9 @@
-; EmulSim 8.3.3 -- Windows 11 x64 Inno Setup installer
+; EmulSim 8.3.4 -- Windows 11 x64 Inno Setup installer
 ; Build with: ISCC.exe installer\EmulSim.iss
-; Produces:  release\EmulSim-8.3.3-Setup.exe
+; Produces:  release\EmulSim-8.3.4-Setup.exe
 
 #define MyAppName       "EmulSim"
-#define MyAppVersion    "8.3.3"
+#define MyAppVersion    "8.3.4"
 #define MyAppPublisher  "Holocyte Pty Ltd"
 #define MyAppURL        "https://github.com/tocvicmeng-prog/Emulsification-Simulator"
 #define MyAppExeLauncher "launch_ui.bat"
@@ -17,7 +17,13 @@ AppPublisher={#MyAppPublisher}
 AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}/issues
 AppUpdatesURL={#MyAppURL}/releases
-DefaultDirName={autopf}\{#MyAppName}
+; Per-user install by default: {userpf} is the user's own "Program
+; Files" folder (%LOCALAPPDATA%\Programs). This is user-writable, so
+; the post-install `install.bat` can create .venv\ without admin.
+; Installing to admin Program Files would elevate Setup.exe but leave
+; the post-install step running as non-admin user, which fails with
+; Access Denied on .venv creation. Per-user avoids that entirely.
+DefaultDirName={userpf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=auto
 LicenseFile=LICENSE_AND_IP.txt
@@ -31,7 +37,7 @@ WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
-PrivilegesRequiredOverridesAllowed=dialog
+UsedUserAreasWarning=no
 UninstallDisplayIcon={app}\docs\User_Manual_First_Edition.pdf
 UninstallDisplayName={#MyAppName} {#MyAppVersion}
 MinVersion=10.0.17763
