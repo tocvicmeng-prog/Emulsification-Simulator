@@ -46,9 +46,21 @@ copy /y docs\user_manual\polysaccharide_microsphere_simulator_first_edition.md ^
 REM Bundled launcher + installer scripts from the release tree.
 for %%F in (install.bat launch_ui.bat launch_cli.bat uninstall.bat
             README.txt INSTALL.md RELEASE_NOTES.md) do (
-    copy /y release\EmulSim-8.3.6-Windows-x64\%%F installer\stage\ > nul
+    copy /y release\EmulSim-8.3.7-Windows-x64\%%F installer\stage\ > nul
 )
 copy /y LICENSE installer\stage\LICENSE.txt > nul
+
+REM Defensive: force CRLF line endings on all .bat files before
+REM bundling. A previous release shipped LF-terminated .bat files
+REM (sed -i on Git Bash strips CRLF), which breaks cmd.exe's
+REM multi-line for/if block parser with "`.` was unexpected" errors.
+python -c "from pathlib import Path; import sys;^
+ [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n'))^
+  for p in Path('installer/stage').glob('*.bat')];^
+ print('[build-installer] CRLF normalised on all staged .bat files')"
+if errorlevel 1 (
+    echo [build-installer] WARNING: CRLF normalisation failed.
+)
 
 echo [build-installer] 3/4  Locating ISCC.exe
 set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
@@ -66,6 +78,6 @@ echo [build-installer] 4/4  Compiling installer
 
 echo.
 echo [build-installer] DONE.
-echo Output: release\EmulSim-8.3.6-Setup.exe
+echo Output: release\EmulSim-8.3.7-Setup.exe
 endlocal
 exit /b 0

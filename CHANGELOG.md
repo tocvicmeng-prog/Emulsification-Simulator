@@ -1,5 +1,68 @@
 # Changelog
 
+## v8.3.7 — CRLF line endings on shipped .bat files (2026-04-18)
+
+Hotfix for a fatal cmd-parser error on install:
+
+```
+[EmulSim 8.3.6] Installer -- Windows 11 x64
+Python 3.14.3
+. was unexpected at this time.
+```
+
+### Root cause
+
+The `.bat` files in the v8.3.6 release tree had **Unix LF line
+endings** rather than Windows CRLF. A `sed -i` invocation during a
+prior version bump (running on Git-Bash) stripped CRLFs from the
+files. Windows `cmd.exe` tolerates LF in trivial single-line
+commands, but multi-line constructs — specifically
+
+```
+for /f "tokens=1,2 delims=." %%a in ("%PYVER%") do (
+    set "PYMAJ=%%a"
+    set "PYMIN=%%b"
+)
+```
+
+— get mis-parsed: cmd collapses the block into one logical line
+and then chokes on the literal `.` in `delims=.`, giving the
+cryptic `. was unexpected at this time` error. Install.bat exits
+before it can create `.venv`; all downstream launchers fail.
+
+### Fix
+
+- `release/.../*.bat` — every shipped `.bat` file is now explicitly
+  CRLF-terminated.
+- `installer/build_installer.bat` — CRLF normalisation step added
+  in the staging phase, so future bumps via sed/awk cannot recreate
+  this failure mode.
+
+### Workaround for users on v8.3.6 or earlier
+
+The install.bat's bytes-level work is reproducible by hand. From
+a Command Prompt at the install directory:
+
+```
+python -m venv .venv
+.venv\Scripts\python.exe -m pip install --upgrade pip wheel
+.venv\Scripts\python.exe -m pip install "wheels\emulsim-<ver>-py3-none-any.whl[ui,optimization]"
+.venv\Scripts\python.exe -m emulsim ui
+```
+
+That bypasses the buggy batch parser entirely.
+
+### Version bumps
+
+- `pyproject.toml`, `__init__.py`: 8.3.6 → 8.3.7.
+
+### Artefacts
+
+- `release/EmulSim-8.3.7-Setup.exe` (2.54 MB)
+- `release/EmulSim-8.3.7-Windows-x64.zip` (566 KB)
+
+---
+
 ## v8.3.6 — Import-probe launchers + auto-open browser (2026-04-17)
 
 ### Fixed
