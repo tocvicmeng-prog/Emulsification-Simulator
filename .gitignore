@@ -8,3 +8,4 @@ scientific_advisor_output.md
 build/
 dist/
 release/
+installer/stage/

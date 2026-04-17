@@ -1,5 +1,54 @@
 # Changelog
 
+## v8.3.2 — One-click Windows 11 installer (.exe) (2026-04-17)
+
+Ships a proper Windows installer wizard as
+`release/EmulSim-8.3.2-Setup.exe` (2.54 MB), attached to the
+existing v8.3.2 GitHub Release alongside the portable ZIP.
+
+### Added
+
+- `installer/EmulSim.iss` — Inno Setup 6 script defining the full
+  wizard:
+  1. **EULA page** (`LICENSE_AND_IP.txt`) declaring: intellectual
+     property rights belong to Holocyte Pty Ltd; software licensed
+     under GPL-3.0; canonical source at
+     `github.com/tocvicmeng-prog/Emulsification-Simulator`.
+  2. **Python presence check** with a clickable hyperlink to
+     `https://www.python.org/downloads/windows/` if Python 3.11+ is
+     not on PATH.
+  3. **File layout** — wheel, configs, docs, launcher batch files,
+     LICENSE, README, INSTALL, RELEASE_NOTES all extracted under a
+     single install directory.
+  4. **Shortcuts** — Start-Menu group with Web-UI, CLI, Manual
+     PDF, and Uninstall entries; optional desktop shortcut.
+  5. **Post-install hook** — runs the bundled `install.bat` which
+     creates a self-contained `.venv` and pip-installs the wheel
+     with `[ui,optimization]` extras, with a smoke-pipeline check.
+  6. **Uninstaller** — purges `.venv` before removing files.
+- `installer/LICENSE_AND_IP.txt` — the EULA text shown on the
+  installer's first page.
+- `installer/build_installer.bat` — four-step build helper
+  (wheel, stage, locate ISCC, compile).
+- `installer/README.md` — documentation of the installer build and
+  runtime behaviour.
+
+### Changed
+
+- `.gitignore` — now also excludes `installer/stage/` (transient
+  build directory rebuilt by `build_installer.bat`).
+
+### GitHub Release (v8.3.2)
+
+Two assets now attached:
+
+| Asset | Size | Audience |
+|---|---|---|
+| `EmulSim-8.3.2-Setup.exe` | 2.54 MB | End users (one-click wizard installer) |
+| `EmulSim-8.3.2-Windows-x64.zip` | 561 KB | Power users (portable, script-based install) |
+
+---
+
 ## v8.3.2 — Clean Windows 11 x64 install package (2026-04-17)
 
 Ships a self-contained, dev-artifact-free Windows 11 x64 install

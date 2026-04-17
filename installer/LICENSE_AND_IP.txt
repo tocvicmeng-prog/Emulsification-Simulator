@@ -1,0 +1,34 @@
+EMULSIM 8.3.2 — END USER LICENCE AGREEMENT
+
+INTELLECTUAL PROPERTY
+  The intellectual property rights in this software, including the
+  source code, documentation, and accompanying assets, belong to
+  Holocyte Pty Ltd.
+
+LICENCE
+  This software is distributed under the GNU General Public License,
+  version 3.0 (GPL-3.0). The full licence text is included with this
+  installer as the file "LICENSE.txt" and is also available at
+  https://www.gnu.org/licenses/gpl-3.0.en.html
+
+  By accepting this agreement you agree to the terms of the GPL-3.0.
+  The key user rights granted by GPL-3.0 include the freedom to run,
+  study, share, and modify the software. Redistributions and
+  derivative works must themselves be licensed under GPL-3.0 and must
+  make their source code available.
+
+SOURCE CODE
+  The latest source code (canonical upstream repository) is published
+  on GitHub at:
+      https://github.com/tocvicmeng-prog/Emulsification-Simulator
+
+  Each tagged release is available under the "Releases" tab.
+
+NO WARRANTY
+  This software is provided "as is" without warranty of any kind, to
+  the extent permitted by applicable law. See sections 15 and 16 of
+  the GPL-3.0 (LICENSE.txt) for the full disclaimer.
+
+  -------------------------------------------------------------------
+  To proceed with installation, click "I accept the agreement" below.
+  To cancel, click Cancel.
