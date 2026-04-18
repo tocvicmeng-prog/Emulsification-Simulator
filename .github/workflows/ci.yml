@@ -55,15 +55,19 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
           PYTHONUNBUFFERED: "1"
+        # torch is only in [optimization]; skip the optimization tests here.
+        # tests/test_optimization_smoke.py is the paired gate for [optimization]
+        # (anchors ADR-002) but needs torch — run it in a dedicated job later.
         run: |
           pytest -m "not slow" --timeout=60 -p no:cacheprovider \
             --ignore=tests/test_optimization.py \
             --ignore=tests/test_inverse_design_engine.py \
             --ignore=tests/test_inverse_design_objectives.py \
-            --ignore=tests/test_f4b_cvar.py
+            --ignore=tests/test_f4b_cvar.py \
+            --ignore=tests/test_optimization_smoke.py
 
   smoke:
-    name: Smoke gate (Py 3.12, no extras)
+    name: Smoke gate (Py 3.12, dev+ui)
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -71,11 +75,15 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install minimal
+      - name: Install dev + ui (matches installer)
         shell: bash
+        # The installer ships [ui], and emulsim.visualization imports plotly
+        # at __init__ time, so any test that touches the visualization package
+        # for collection requires [ui]. Skip [optimization] here — that stack
+        # is gated by tests/test_optimization_smoke.py + ADR-002.
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,ui]"
       - name: Smoke tests
         shell: bash
         env:
@@ -85,7 +93,8 @@ jobs:
             --ignore=tests/test_optimization.py \
             --ignore=tests/test_inverse_design_engine.py \
             --ignore=tests/test_inverse_design_objectives.py \
-            --ignore=tests/test_f4b_cvar.py
+            --ignore=tests/test_f4b_cvar.py \
+            --ignore=tests/test_optimization_smoke.py
 
   installer-smoke:
     name: Installer build smoke (Py 3.12)

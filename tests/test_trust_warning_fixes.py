@@ -19,8 +19,15 @@ import pytest
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.slow
 class TestM1AdaptiveExtension:
-    """Tests for Level 1 PBE solver adaptive convergence extension."""
+    """Tests for Level 1 PBE solver adaptive convergence extension.
+
+    Marked slow: each test calls PBESolver.solve() with t_emulsification of
+    300 s, which trips the same scipy BDF Jacobian-conditioning slow path
+    that affects the other PBE tests (tracked as v9.1.1 issue #2). The
+    fast suite covers PBE via tests/test_smoke.py with fast_smoke.toml.
+    """
 
     @pytest.fixture
     def fast_solver(self):
