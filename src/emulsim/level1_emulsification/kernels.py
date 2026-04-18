@@ -525,7 +525,6 @@ def coalescence_rate_dispatch(
         mu_c = 0.001
 
     d = np.ascontiguousarray(np.asarray(d, dtype=np.float64))
-    N = d.size
 
     # Node 14: JIT path for the 1-D pivot grid case (the only case the PBE
     # solver uses). The JIT matrix builder is ~5-10× faster than the

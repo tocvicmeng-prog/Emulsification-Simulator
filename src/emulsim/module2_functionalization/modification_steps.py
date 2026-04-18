@@ -1047,7 +1047,6 @@ def _solve_washing_step(
     R = surface_model.bead_radius
     D_eff = 1e-10  # ASSUMPTION: default diffusivity in gel [m2/s]
     t_wash = step.time
-    C_initial = step.reagent_concentration  # [mol/m3] of wash buffer (proxy for volume)
 
     if R > 0 and t_wash > 0:
         # Characteristic diffusion time: R^2 / (pi^2 * D_eff)

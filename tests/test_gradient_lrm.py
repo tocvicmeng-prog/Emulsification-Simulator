@@ -137,9 +137,13 @@ class TestHICSaltGradient:
         assert r_fixed.mass_balance_error < 0.15
 
     def test_hic_high_salt_binds_more(self, small_column):
-        """At constant high salt, HIC binds strongly vs zero salt."""
+        """At constant high salt, HIC binds strongly vs zero salt.
+
+        This test uses the same parameters that an HICIsotherm(q_max=80,
+        K_0=0.1, m_salt=0.01) would carry, but does the K_eff arithmetic
+        directly to keep the test independent of the isotherm class.
+        """
         import math
-        hic = HICIsotherm(q_max=80.0, K_0=0.1, m_salt=0.01)
 
         # High salt: K_eff = 0.1 * exp(0.01 * 500) = 0.1 * ~148 = ~14.8
         K_high = 0.1 * math.exp(0.01 * 500)

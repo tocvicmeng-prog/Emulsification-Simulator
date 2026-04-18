@@ -138,10 +138,8 @@ def test_caller_params_not_mutated_by_l1_calibration(smoke_params, tmp_path):
     the caller's ``params.emulsification.kernels`` must be byte-identical to
     its pre-call state.
     """
-    import copy
-    # Snapshot the caller's params state — kernels may be None or a pre-set
-    # KernelConfig; both cases must survive run_single unchanged.
-    caller_kernels_before = copy.deepcopy(smoke_params.emulsification.kernels)
+    # Snapshot the caller's C1 — kernels may be None or a pre-set KernelConfig;
+    # both cases must survive run_single unchanged.
     caller_C1_before = (
         smoke_params.emulsification.kernels.breakage_C1
         if smoke_params.emulsification.kernels is not None else None

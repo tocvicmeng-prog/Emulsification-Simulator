@@ -130,7 +130,7 @@ def render_tab_m3(tab_container) -> None:
 
                 if m3_app_mode == "Chromatography":
                     from emulsim.module3_performance import (
-                        LangmuirIsotherm, run_breakthrough,
+                        run_breakthrough,
                         CompetitiveLangmuirIsotherm, run_gradient_elution,
                     )
                     from emulsim.module3_performance.gradient import make_linear_gradient
@@ -152,7 +152,6 @@ def render_tab_m3(tab_container) -> None:
                     if not _col_val.blockers:
                         try:
                             if chrom_mode == "Breakthrough":
-                                isotherm = LangmuirIsotherm(q_max=q_max, K_L=K_L_m3)
                                 bt = run_breakthrough(
                                     column, microsphere=m2r,
                                     C_feed=C_feed_mol, flow_rate=flow_rate_mL / 60e6,

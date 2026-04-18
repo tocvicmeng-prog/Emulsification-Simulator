@@ -395,7 +395,6 @@ def solve_lrm(
     q_average = np.mean(q_all, axis=0)
 
     # ── Mass balance ──
-    A_cross = column.cross_section_area
     V_bed = column.bed_volume
 
     # Mass injected: integral of Q * C_feed over feed duration

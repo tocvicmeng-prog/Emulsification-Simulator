@@ -48,20 +48,9 @@ target-version = "py311"
 # CLAUDE.md (Streamlit re-mints the datatypes enum on every rerun).
 "src/emulsim/visualization/app.py" = ["E402", "E702", "F811"]
 "src/emulsim/visualization/pages/*.py" = ["E402"]
-"src/emulsim/visualization/tabs/tab_m1.py" = ["E402", "F841"]
-"src/emulsim/visualization/tabs/tab_m3.py" = ["F841"]
+"src/emulsim/visualization/tabs/tab_m1.py" = ["E402"]
 # config.py imports datatypes after configuring the module logger (intentional).
 "src/emulsim/config.py" = ["E402"]
 # plots_m2.py: `make_subplots` is imported for an optional codepath; ruff suggests
 # importlib.util.find_spec but that adds runtime cost for a static check.
 "src/emulsim/visualization/plots_m2.py" = ["F401"]
-# F841 in tests: variables held for clarity (debug, fixture setup readability).
-"tests/*.py" = ["F841"]
-# F841 in scientific solvers: intermediate quantities kept for traceability;
-# real dead-code candidates tracked as v9.1.1 cleanup.
-"src/emulsim/level1_emulsification/*.py" = ["F841"]
-"src/emulsim/level2_gelation/*.py" = ["F841"]
-"src/emulsim/module2_functionalization/*.py" = ["F841"]
-"src/emulsim/module3_performance/**/*.py" = ["F841"]
-"src/emulsim/optimization/*.py" = ["F841"]
-"src/emulsim/properties/*.py" = ["F841"]
