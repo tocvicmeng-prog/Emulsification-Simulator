@@ -239,8 +239,13 @@ class TestMassBalanceQuality:
         )
 
 
+@pytest.mark.slow
 class TestLRMMassBalance:
-    """LRM mass balance tests."""
+    """LRM mass balance tests.
+
+    Marked slow: run_lrm() uses scipy BDF and shares the Jacobian-conditioning
+    slow path tracked as v9.1.1 issue #2.
+    """
 
     def test_lrm_mass_balance(self):
         """Injected = eluted + bound + remaining, error < 2%."""
@@ -282,6 +287,7 @@ class TestLRMMassBalance:
         assert np.isfinite(result.mass_balance_error)
 
 
+@pytest.mark.slow
 class TestLRMBreakthroughShape:
     """Breakthrough curve shape tests."""
 
@@ -419,6 +425,7 @@ class TestUVBeerLambert:
 
 # ─── C.5: Orchestrator ───────────────────────────────────────────────
 
+@pytest.mark.slow
 class TestBreakthroughResult:
     """run_breakthrough integration tests."""
 
@@ -484,6 +491,7 @@ class TestBreakthroughResult:
 # ─── Node 5 (v6.1): M3 ModelManifest evidence wiring ──────────────────────
 
 
+@pytest.mark.slow
 class TestM3ModelManifest:
     """Verifies that ModelManifest fields are populated end-to-end through M3.
 
