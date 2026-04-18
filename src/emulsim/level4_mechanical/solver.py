@@ -428,7 +428,7 @@ def effective_youngs_modulus(G: float, nu: float = 0.45) -> float:
 
 
 def hertz_contact(E_star: float, R: float,
-                  delta_max: float = None,
+                  delta_max: float | None = None,
                   n_points: int = 100) -> tuple[np.ndarray, np.ndarray]:
     """Hertz contact model for sphere compression.
 
@@ -490,7 +490,7 @@ def solve_mechanical(params: SimulationParameters,
                      props: MaterialProperties,
                      gelation: GelationResult,
                      crosslinking: CrosslinkingResult,
-                     R_droplet: float = None,
+                     R_droplet: float | None = None,
                      eta_is_custom: bool = False) -> MechanicalResult:
     """Compute mechanical properties of the double-network microsphere.
 

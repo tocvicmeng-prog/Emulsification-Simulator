@@ -21,7 +21,7 @@ def flory_huggins_mu(phi: np.ndarray, T: float, chi: float,
 
     Delegates to :func:`emulsim.properties.thermodynamic.flory_huggins_derivative`.
     """
-    return _fh_derivative(phi, T, N_p=N_p, chi=chi, v0=v0)
+    return np.asarray(_fh_derivative(phi, T, N_p=N_p, chi=chi, v0=v0))
 
 
 def flory_huggins_d2f(phi: np.ndarray, T: float, chi: float,
@@ -30,7 +30,7 @@ def flory_huggins_d2f(phi: np.ndarray, T: float, chi: float,
 
     Delegates to :func:`emulsim.properties.thermodynamic.flory_huggins_second_derivative`.
     """
-    return _fh_second_derivative(phi, T, N_p=N_p, chi=chi, v0=v0)
+    return np.asarray(_fh_second_derivative(phi, T, N_p=N_p, chi=chi, v0=v0))
 
 
 def contractive_constant(phi_range: tuple, T: float, chi: float,

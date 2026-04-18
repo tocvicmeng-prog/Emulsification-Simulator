@@ -122,7 +122,7 @@ def _jit_breakage_coulaloglou(d, epsilon, sigma, rho_c, C1, C2):
 def breakage_rate_alopaeus(d: np.ndarray, epsilon: float, sigma: float,
                             rho_c: float, mu_d: float,
                             C1: float = 0.986, C2: float = 0.0115,
-                            C3: float = 0.0, nu_c: float = None) -> np.ndarray:
+                            C3: float = 0.0, nu_c: float | None = None) -> np.ndarray:
     """Alopaeus et al. (2002) breakage rate with viscosity correction [1/s].
 
     g(d) = C₁·(ε/ν_c)^(1/2)·exp(-C₂·σ/(ρ_c·ε^(2/3)·d^(5/3))
@@ -493,7 +493,7 @@ def coalescence_rate_dispatch(
     rho_c: float,
     config: KernelConfig,
     phi_d: float = 0.05,
-    mu_c: float = None,
+    mu_c: float | None = None,
 ) -> np.ndarray:
     """Build the coalescence rate matrix using the configured model.
 

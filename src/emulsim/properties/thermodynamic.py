@@ -30,9 +30,9 @@ def chi_flory_huggins(T: float, A: float = 150.0, B: float = 0.0) -> float:
     return A / T + B
 
 
-def flory_huggins_free_energy(phi: float, T: float, N_p: float = 100.0,
-                               chi: float = None, A: float = 150.0,
-                               B: float = 0.0, v0: float = 1.8e-29) -> float:
+def flory_huggins_free_energy(phi: float | np.ndarray, T: float, N_p: float = 100.0,
+                               chi: float | None = None, A: float = 150.0,
+                               B: float = 0.0, v0: float = 1.8e-29) -> float | np.ndarray:
     """Flory-Huggins free energy density [J/m³].
 
     f(φ) = (k_B·T/v₀)·[φ·ln(φ)/N_p + (1-φ)·ln(1-φ) + χ·φ·(1-φ)]
@@ -68,9 +68,9 @@ def flory_huggins_free_energy(phi: float, T: float, N_p: float = 100.0,
     return f
 
 
-def flory_huggins_derivative(phi: float, T: float, N_p: float = 100.0,
-                              chi: float = None, A: float = 150.0,
-                              B: float = 0.0, v0: float = 1.8e-29) -> float:
+def flory_huggins_derivative(phi: float | np.ndarray, T: float, N_p: float = 100.0,
+                              chi: float | None = None, A: float = 150.0,
+                              B: float = 0.0, v0: float = 1.8e-29) -> float | np.ndarray:
     """First derivative of Flory-Huggins free energy df/dφ [J/m³].
 
     f'(φ) = (k_B·T/v₀)·[ln(φ)/N_p + 1/N_p - ln(1-φ) - 1 + χ·(1 - 2φ)]
@@ -89,9 +89,9 @@ def flory_huggins_derivative(phi: float, T: float, N_p: float = 100.0,
     )
 
 
-def flory_huggins_second_derivative(phi: float, T: float, N_p: float = 100.0,
-                                     chi: float = None, A: float = 150.0,
-                                     B: float = 0.0, v0: float = 1.8e-29) -> float:
+def flory_huggins_second_derivative(phi: float | np.ndarray, T: float, N_p: float = 100.0,
+                                     chi: float | None = None, A: float = 150.0,
+                                     B: float = 0.0, v0: float = 1.8e-29) -> float | np.ndarray:
     """Second derivative of Flory-Huggins free energy d²f/dφ² [J/m³].
 
     f''(φ) = (k_B·T/v₀)·[1/(N_p·φ) + 1/(1-φ) - 2χ]

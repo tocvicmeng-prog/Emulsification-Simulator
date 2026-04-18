@@ -50,7 +50,7 @@ class PipelineOrchestrator:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def run_single(self, params: SimulationParameters,
-                   phi_d: float = None,
+                   phi_d: float | None = None,
                    l2_mode: str = 'empirical',
                    props_overrides: dict | None = None,
                    crosslinker_key: str = 'genipin',

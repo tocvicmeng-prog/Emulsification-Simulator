@@ -441,6 +441,13 @@ class PBESolver:
         - phi_d from caller or formulation volumes
         """
         emul = params.emulsification
+        # The stirred-vessel branch requires the full geometry bundle; callers
+        # that hit this code path always set them. Asserting narrows the
+        # Optional[...] types for mypy in the body below.
+        assert emul.vessel is not None, "stirred-vessel mode requires a vessel"
+        assert emul.stirrer is not None, "stirred-vessel mode requires a stirrer"
+        assert emul.heating is not None, "stirred-vessel mode requires a heating config"
+        assert emul.kernels is not None, "stirred-vessel mode requires a kernel config"
         vessel = emul.vessel
         stirrer = emul.stirrer
         heating = emul.heating

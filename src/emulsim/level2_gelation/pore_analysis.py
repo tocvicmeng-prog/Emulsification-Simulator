@@ -68,7 +68,7 @@ def characteristic_wavelength(phi: np.ndarray, r: np.ndarray) -> float:
 
 
 def chord_length_distribution(phi: np.ndarray, r: np.ndarray,
-                              threshold: float = None) -> np.ndarray:
+                              threshold: float | None = None) -> np.ndarray:
     """Compute chord lengths in the solvent-rich (pore) phase.
 
     Binarize the phi field at the threshold, then measure consecutive
@@ -114,7 +114,7 @@ def chord_length_distribution(phi: np.ndarray, r: np.ndarray,
 
 
 def compute_porosity(phi: np.ndarray, r: np.ndarray,
-                     threshold: float = None) -> float:
+                     threshold: float | None = None) -> float:
     """Compute porosity (volume fraction of pore space) in spherical geometry.
 
     Integrates the pore-phase volume using spherical shells.
@@ -214,7 +214,7 @@ def characteristic_wavelength_2d(phi_2d: np.ndarray, h: float) -> float:
 
 
 def chord_length_distribution_2d(phi_2d: np.ndarray, h: float,
-                                  threshold: float = None) -> np.ndarray:
+                                  threshold: float | None = None) -> np.ndarray:
     """Compute chord lengths from a 2D composition field.
 
     Scans all rows and all columns to collect pore-phase run lengths.
@@ -236,7 +236,7 @@ def chord_length_distribution_2d(phi_2d: np.ndarray, h: float,
     if threshold is None:
         threshold = 0.5 * (np.min(phi_2d) + np.max(phi_2d))
 
-    chords = []
+    chords: list[float] = []
 
     # Scan rows
     for row in phi_2d:
@@ -263,7 +263,7 @@ def _collect_chords_1d(is_pore: np.ndarray, h: float, chords: list) -> None:
         chords.append(current * h)
 
 
-def compute_porosity_2d(phi_2d: np.ndarray, threshold: float = None) -> float:
+def compute_porosity_2d(phi_2d: np.ndarray, threshold: float | None = None) -> float:
     """Compute porosity (area fraction of pore space) from 2D field.
 
     For a uniform grid, this is simply the fraction of grid points
