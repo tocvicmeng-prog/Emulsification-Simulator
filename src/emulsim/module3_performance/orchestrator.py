@@ -762,6 +762,9 @@ def run_gradient_elution(
     )
 
     # ── Solve ──
+    # BDF stays here: this is the gradient-elution path, where the binding
+    # equilibrium changes with time. LSODA gets stuck oscillating between
+    # stiff/non-stiff modes when the Jacobian shifts each step (v9.1.1 #2).
     sol = solve_ivp(
         rhs,
         t_span=(0.0, total_time),
