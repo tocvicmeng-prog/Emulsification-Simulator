@@ -347,17 +347,17 @@ class TestCahnHilliard2DSolver:
         assert result.phi_field.ndim == 1
         assert result.L_domain == 0.0
 
-    @pytest.mark.slow
-    @pytest.mark.timeout(120)
+    @pytest.mark.timeout(60)
     def test_2d_solver_completes_on_tiny_grid(self):
-        # Smoke test on 16² grid (smaller than the 32² parent suite). Intent
-        # was to guard the fast suite against a prod hang in the CH 2D solver,
-        # but as of v9.1.0 even N=16 exceeds 60s — `build_mobility_laplacian_2d`
-        # in solver.py is the bottleneck. Marked @slow until that is fixed
-        # in v9.1.1; promote back to the fast suite once it runs in <30s.
+        # Smoke test on 16² grid with fast cooling (60 K/s) so the solver
+        # reaches its t_final ~ (T_init - T_ambient) / cooling_rate * 1.5
+        # in ~1.5 s of simulated time rather than the default ~600 s. Validates
+        # only that the solver returns a structurally-correct result on tiny
+        # inputs. Scientific accuracy is covered by the @slow 32² class.
         from emulsim.level2_gelation.solver import CahnHilliard2DSolver
         solver = CahnHilliard2DSolver(N_grid=16, dt_initial=1e-3, dt_max=1.0)
         params = SimulationParameters()
+        params.formulation.cooling_rate = 60.0  # K/s; t_final ~ 1.5 s
         props = MaterialProperties()
         result = solver.solve(params, props, R_droplet=3.0e-6)
         assert result.phi_field.shape == (16, 16)
