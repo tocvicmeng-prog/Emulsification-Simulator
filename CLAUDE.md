@@ -28,3 +28,26 @@ gradients, entrance animations, etc.).
   on Windows will crash with `UnicodeEncodeError` under cp1252. Scripts
   that print paths MUST do `sys.stdout.reconfigure(encoding="utf-8")` first
   (see `docs/user_manual/build_pdf.py` for the canonical pattern).
+
+## v9.1.x decisions (read before changing the runtime stack)
+
+- **Python pinned to `>=3.11,<3.13`** (ADR-001). Newer Python triggers
+  scipy BDF + numba JIT cache issues. Don't widen the upper bound
+  without re-running the test suite on the target Python.
+- **Optimization stack pinned**: `botorch~=0.17.2`, `gpytorch~=1.15.2`,
+  `torch~=2.11.0` (ADR-002). The smoke test
+  `tests/test_optimization_smoke.py` exercises the duck-typed
+  `FastNondominatedPartitioning` call site — it has a
+  `# type: ignore[arg-type]` anchored to this pin range.
+- **Solver method matrix** for scipy `solve_ivp`:
+  - `module3_performance/catalysis/packed_bed.py` → LSODA (~700×
+    faster than BDF on the non-stiff PFR + Michaelis-Menten problem)
+  - `module3_performance/transport/lumped_rate.py::solve_lrm` → LSODA
+    when no gradient adapter, BDF when both `gradient_program` and
+    `equilibrium_adapter` are set (LSODA oscillates modes when the
+    binding equilibrium is time-varying)
+  - `module3_performance/orchestrator.py::run_gradient_elution` → BDF
+    (always gradient path)
+- **CI gates**: ruff must be 0; mypy is capped at `MYPY_MAX=32`
+  (regression-only — PRs that ADD type errors fail). Lower the cap
+  in `.github/workflows/ci.yml` as future cleanup lands.
