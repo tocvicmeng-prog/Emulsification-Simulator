@@ -24,9 +24,12 @@ from emulsim.module3_performance.gradient import (
     make_linear_gradient,
 )
 
-# All tests in this module exercise solve_lrm() which uses scipy BDF; same
-# Jacobian-conditioning slow path tracked as v9.1.1 issue #2.
+# All tests in this module exercise solve_lrm with a gradient program. LSODA
+# is great for breakthrough (constant equilibrium) but hangs when the binding
+# constant varies in time, so these stay on the BDF code path. Faster gradient
+# solving needs an analytical Jacobian — separate work.
 pytestmark = pytest.mark.slow
+
 
 
 # ─── Shared Fixtures ──────────────────────────────────────────────────────

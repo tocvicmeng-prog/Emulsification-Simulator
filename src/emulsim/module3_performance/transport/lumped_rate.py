@@ -363,11 +363,18 @@ def solve_lrm(
     t_eval = np.linspace(0.0, total_time, n_eval)
 
     # ── Solve ──
+    # Method choice (v9.1.1 issue #2): LSODA auto-switches between stiff/non-
+    # stiff and is ~10× faster than fixed BDF on the constant-equilibrium
+    # chromatography PDE. When a time-varying gradient program drives the
+    # equilibrium constant, the Jacobian shifts each step and LSODA gets
+    # stuck oscillating between modes — fall back to BDF in that case.
+    _use_adapter = gradient_program is not None and equilibrium_adapter is not None
+    method = "BDF" if _use_adapter else "LSODA"
     sol = solve_ivp(
         rhs,
         t_span=(0.0, total_time),
         y0=y0,
-        method="BDF",
+        method=method,
         t_eval=t_eval,
         rtol=rtol,
         atol=atol,

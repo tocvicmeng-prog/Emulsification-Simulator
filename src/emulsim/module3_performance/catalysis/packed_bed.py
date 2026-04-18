@@ -240,11 +240,17 @@ def solve_packed_bed(
         return np.concatenate([dSdt, dPdt])
 
     # ---- Solve -------------------------------------------------------------
+    # Method choice: LSODA auto-switches between stiff (BDF) and non-stiff
+    # (Adams) and runs ~700× faster than fixed BDF on this advection-
+    # dispersion-reaction problem (v9.1.1 issue #2 investigation, Apr 2026).
+    # The PFR + Michaelis-Menten + dispersion system is mostly non-stiff at
+    # the resolution used here; BDF was wasting work computing finite-
+    # difference Jacobians that LSODA only does on demand.
     sol = solve_ivp(
         rhs,
         (0.0, total_time),
         y0,
-        method="BDF",
+        method="LSODA",
         t_eval=t_eval,
         rtol=1e-6,
         atol=1e-9,
