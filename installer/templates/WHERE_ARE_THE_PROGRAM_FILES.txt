@@ -67,7 +67,7 @@ Open a Command Prompt and run:
 
 Expected output:
 
-    9.0.0 C:\Users\...\AppData\Local\Programs\EmulSim\.venv\Lib\site-packages\emulsim\__init__.py
+    9.1.1 C:\Users\...\AppData\Local\Programs\EmulSim\.venv\Lib\site-packages\emulsim\__init__.py
 
 If you see this, the program is installed.
 If you see ModuleNotFoundError, install.bat did not finish

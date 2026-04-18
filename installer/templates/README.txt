@@ -1,4 +1,4 @@
-EmulSim 9.0.0 -- Polysaccharide Microsphere Emulsification Simulator
+EmulSim 9.1.1 -- Polysaccharide Microsphere Emulsification Simulator
 Windows 11 x64 Release -- First Edition
 =====================================================================
 
@@ -24,7 +24,7 @@ WHAT IS IN THIS PACKAGE
   uninstall.bat            Remove the local .venv
   INSTALL.md               Detailed install and troubleshooting guide
   LICENSE.txt              Software license
-  RELEASE_NOTES.md         What's new in 9.0.0
+  RELEASE_NOTES.md         What's new in 9.1.1
   wheels/                  The emulsim Python wheel
   configs/                 Example TOML configurations
   docs/                    User manual (PDF + Markdown)

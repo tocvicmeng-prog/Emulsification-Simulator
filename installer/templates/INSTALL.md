@@ -1,4 +1,4 @@
-# EmulSim 9.0.0 — Windows 11 x64 Installation Guide
+# EmulSim 9.1.1 — Windows 11 x64 Installation Guide
 
 ## 1. System Requirements
 
@@ -65,7 +65,7 @@ Flags can be combined: `install.bat --no-opt --no-test`.
 Double-click `launch_ui.bat`. A command window opens and reports
 
 ```
-[EmulSim 9.0.0] Launching web UI at http://localhost:8501
+[EmulSim 9.1.1] Launching web UI at http://localhost:8501
 ```
 
 Your default browser should open automatically at that URL. Close
@@ -95,7 +95,7 @@ emulsim info
 .venv\Scripts\python.exe
 >>> import emulsim
 >>> emulsim.__version__
-'9.0.0'
+'9.1.1'
 >>> r = emulsim.run_pipeline()
 >>> r.emulsification.d32
 ```
@@ -107,7 +107,7 @@ the rest of the release tree (wheel, configs, docs) is left in place
 so you can reinstall later without re-downloading.
 
 If you also want to remove the release tree, just delete the
-`EmulSim-9.0.0-Windows-x64` folder. No other files are touched.
+`EmulSim-9.1.1-Windows-x64` folder. No other files are touched.
 
 ## 6. Troubleshooting
 
@@ -119,7 +119,7 @@ Python and start over.
 
 ### "Python 3.10 is below the required 3.11"
 
-EmulSim 9.0.0 requires Python 3.11 or newer. Install a supported
+EmulSim 9.1.1 requires Python 3.11 or newer. Install a supported
 version alongside your existing one; the installer picks up the
 highest version on PATH.
 

@@ -1,4 +1,4 @@
-EMULSIM 9.0.0 — END USER LICENCE AGREEMENT
+EMULSIM 9.1.1 — END USER LICENCE AGREEMENT
 
 INTELLECTUAL PROPERTY
   The intellectual property rights in this software, including the

@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------------
-REM EmulSim 9.0.0 -- Launch the Streamlit web UI (self-healing, diag-safe)
+REM EmulSim 9.1.1 -- Launch the Streamlit web UI (self-healing, diag-safe)
 REM Opens http://localhost:8501 in your default browser.
 REM Close the terminal window to stop the server.
 REM
@@ -24,7 +24,7 @@ if not exist ".venv\Scripts\python.exe" goto setup
 if errorlevel 1 goto setup
 
 :launch
-echo [EmulSim 9.0.0] Starting the web UI. Your default browser should open
+echo [EmulSim 9.1.1] Starting the web UI. Your default browser should open
 echo                 automatically at http://localhost:8501.
 echo                 Close this window to stop the server.
 echo.
@@ -53,7 +53,7 @@ endlocal
 exit /b %EXITCODE%
 
 :setup
-echo [EmulSim 9.0.0] Virtual environment not found at:
+echo [EmulSim 9.1.1] Virtual environment not found at:
 echo                 %CD%\.venv
 echo.
 echo This usually means the installer's post-install step was skipped

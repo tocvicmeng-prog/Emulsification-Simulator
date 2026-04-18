@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------------
-REM EmulSim 9.0.0 -- Uninstall
+REM EmulSim 9.1.1 -- Uninstall
 REM Removes the local .venv directory. Leaves installed Python, configs,
 REM manual, and the wheel archive alone so you can re-install later.
 REM ---------------------------------------------------------------------
@@ -8,7 +8,7 @@ REM ---------------------------------------------------------------------
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-echo [EmulSim 9.0.0] Uninstaller
+echo [EmulSim 9.1.1] Uninstaller
 echo.
 
 if not exist ".venv" (

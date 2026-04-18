@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------------
-REM EmulSim 9.0.0 -- Windows 11 x64 installer
+REM EmulSim 9.1.1 -- Windows 11 x64 installer
 REM
 REM Creates a self-contained Python virtual environment in .venv\ next to
 REM this script, installs the EmulSim wheel plus the UI and optimisation
@@ -20,7 +20,7 @@ setlocal EnableExtensions EnableDelayedExpansion
 
 cd /d "%~dp0"
 
-echo [EmulSim 9.0.0] Installer -- Windows 11 x64
+echo [EmulSim 9.1.1] Installer -- Windows 11 x64
 echo [install] Step 1: locating Python.
 echo.
 
@@ -167,7 +167,7 @@ echo [install]          Install is usable but the pipeline did not complete clea
 
 echo.
 echo =====================================================================
-echo [install] DONE. EmulSim 9.0.0 is installed.
+echo [install] DONE. EmulSim 9.1.1 is installed.
 echo.
 echo Program files were extracted from the wheel into:
 echo     %CD%\.venv\Lib\site-packages\emulsim\
@@ -199,7 +199,7 @@ echo.
 echo [install] ERROR: Python venv creation failed.
 echo           Install directory: %CD%
 echo           Common cause: non-writable directory, e.g. C:\Program Files.
-echo           Fix: uninstall, then re-install. v9.0.0 per-user install goes
+echo           Fix: uninstall, then re-install. v9.1.1 per-user install goes
 echo           into %%LOCALAPPDATA%%\Programs\EmulSim which needs no admin.
 echo           Alternative: right-click install.bat, Run as administrator.
 if "%NONINTERACTIVE%"=="" pause
