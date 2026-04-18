@@ -227,12 +227,15 @@ def _render_non_ac_family(*, tab_container, family, is_stirred_default, model_mo
     c3.metric("Porosity", f"{g.porosity:.2f}")
     c4.metric("G (modulus)", f"{m.G_DN/1000:.1f} kPa")
 
-    if getattr(e, "model_manifest", None):
-        st.caption(f"L1 model: `{e.model_manifest.model_name}` ({e.model_manifest.evidence_tier.value})")
-    if getattr(g, "model_manifest", None):
-        st.caption(f"L2 model: `{g.model_manifest.model_name}` ({g.model_manifest.evidence_tier.value})")
-    if getattr(m, "model_manifest", None):
-        st.caption(f"L4 model: `{m.model_manifest.model_name}` ({m.model_manifest.evidence_tier.value})")
+    e_mf = getattr(e, "model_manifest", None)
+    if e_mf is not None:
+        st.caption(f"L1 model: `{e_mf.model_name}` ({e_mf.evidence_tier.value})")
+    g_mf = getattr(g, "model_manifest", None)
+    if g_mf is not None:
+        st.caption(f"L2 model: `{g_mf.model_name}` ({g_mf.evidence_tier.value})")
+    m_mf = getattr(m, "model_manifest", None)
+    if m_mf is not None:
+        st.caption(f"L4 model: `{m_mf.model_name}` ({m_mf.evidence_tier.value})")
 
     # Save to session state so tabs M2/M3 can consume the result
     st.session_state["result"] = result
@@ -350,7 +353,7 @@ def render_tab_m1(
                                              format="%.3f", key="m1_conv_tol",
                                              help="Relative d32 variation threshold for steady state")
                     l1_max_ext = st.number_input("Max extensions", 0, 5, 2, key="m1_max_ext",
-                                                  help="Number of half-interval extensions if PBE not converged")
+                                                  help="Number of half-interval extensions if PBE not converged")  # type: ignore[assignment]
             else:
                 l1_t_max = 600.0
                 l1_conv_tol = 0.01

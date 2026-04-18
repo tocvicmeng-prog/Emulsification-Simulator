@@ -41,14 +41,21 @@ jobs:
         shell: bash
         run: ruff check src tests
 
-      - name: Mypy type check
+      - name: Mypy type check (regression baseline 32)
         shell: bash
-        # M3 fixed the audit-flagged clusters; remaining errors are tracked
-        # tech debt. Run with --no-incremental to avoid cache poisoning between
-        # matrix entries. Continue-on-error so type debt does not block the gate
-        # while M3 follow-ups are scheduled.
-        continue-on-error: true
-        run: mypy src/emulsim --ignore-missing-imports --no-incremental
+        # v9.1.1 issue #5 burned mypy down from 90 -> 32 errors. CI enforces
+        # the baseline as a regression cap: any PR that ADDS errors fails
+        # this step. As fixes land in follow-up PRs, lower MYPY_MAX. Once the
+        # count reaches single digits, drop the cap and require zero.
+        run: |
+          MYPY_MAX=32
+          mypy src/emulsim --ignore-missing-imports --no-incremental | tee mypy.log || true
+          n=$(grep -cE "^[^[:space:]].*: error:" mypy.log || echo 0)
+          echo "mypy errors: $n (cap: $MYPY_MAX)"
+          if [ "$n" -gt "$MYPY_MAX" ]; then
+            echo "::error::mypy regression: $n errors exceeds baseline cap of $MYPY_MAX"
+            exit 1
+          fi
 
       - name: Pytest (not slow)
         shell: bash
