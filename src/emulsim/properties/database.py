@@ -44,7 +44,6 @@ class PropertyDatabase:
         """
         # Calibrate: at T_ref=363.15K, mu=0.005 Pa·s
         # At 20 degC (293.15K), mu ~ 0.03 Pa·s (typical light paraffin)
-        R = 8.314
         T = max(T, 100.0)  # prevent division issues
         T_ref = 363.15
         mu_ref = self.props.mu_oil

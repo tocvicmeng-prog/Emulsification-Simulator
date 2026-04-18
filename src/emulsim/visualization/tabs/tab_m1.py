@@ -329,10 +329,8 @@ def render_tab_m1(
                 st.caption(f"Total: {total_mL} mL | phi_d = {phi_d:.2f}")
 
                 if "Beaker" in vessel_choice:
-                    heating_choice = "Flat Plate"
                     st.caption("Heating: flat-plate (150C -> 80C oil)")
                 else:
-                    heating_choice = "Hot Water Jacket"
                     st.caption("Heating: jacket (85C circulating water)")
             else:
                 rpm = st.slider("Rotor Speed (RPM)", 3000, 25000, 10000, step=500, key="m1_rpm_leg")

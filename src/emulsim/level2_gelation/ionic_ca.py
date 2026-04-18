@@ -205,7 +205,6 @@ def solve_ionic_ca_gelation(
         logger.warning("Ionic Ca gelation solver failed: %s", sol.message)
 
     y_final = sol.y[:, -1]
-    C_f = y_final[0:n_r]
     G_f = y_final[n_r:2 * n_r]
     X_f = y_final[2 * n_r:3 * n_r]
 
@@ -481,7 +480,6 @@ def solve_internal_gelation(
     L_f = float(max(y_final[0], 0.0))
     A_f = float(max(y_final[1], 0.0))
     S_f = float(max(y_final[2], 0.0))
-    C_f = np.maximum(y_final[3: 3 + n_r], 0.0)
     G_f = np.maximum(y_final[3 + n_r: 3 + 2 * n_r], 0.0)
     X_f = np.maximum(y_final[3 + 2 * n_r:], 0.0)
 

@@ -300,7 +300,6 @@ class OptimizationEngine:
 
     def _generate_initial_points(self) -> np.ndarray:
         """Generate Sobol quasi-random initial parameter vectors in search space."""
-        d = len(PARAM_NAMES)
         sobol = draw_sobol_samples(
             bounds=self.bounds,
             n=self.n_initial,
@@ -328,7 +327,6 @@ class OptimizationEngine:
             Override max_iterations.
         """
         max_iter = n_iterations or self.max_iterations
-        total_evals = self.n_initial + max_iter
 
         logger.info("Starting optimisation: %d initial + %d BO iterations",
                      self.n_initial, max_iter)
@@ -397,7 +395,6 @@ class OptimizationEngine:
                 x_next_phys = _from_search_space(x_next_ss)
             else:
                 # Optimise acquisition function (qEHVI)
-                X_norm = normalize(X_torch, self.bounds)
                 neg_Y = -Y_torch  # BoTorch maximises
 
                 partitioning = FastNondominatedPartitioning(

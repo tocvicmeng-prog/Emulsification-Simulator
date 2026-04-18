@@ -725,7 +725,6 @@ def run_gradient_elution(
 
     # Grid
     dz = L / n_z
-    z = np.linspace(dz / 2.0, L - dz / 2.0, n_z)
 
     # ── Build RHS (v6.0 H6: gradient-aware when adapter available) ──
     rhs = _build_gradient_lrm_rhs(

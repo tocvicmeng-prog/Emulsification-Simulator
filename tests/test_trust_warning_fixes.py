@@ -537,11 +537,10 @@ class TestM4PerChemistryEta:
     def test_eta_in_metadata_suppresses_w4_warning(self):
         """When network_metadata has eta_coupling_recommended, W4 (non-specific eta) is suppressed."""
         from emulsim.datatypes import (
-            NetworkTypeMetadata, CrosslinkingResult, MaterialProperties,
+            NetworkTypeMetadata, CrosslinkingResult,
         )
         import numpy as np
 
-        props = MaterialProperties()
         t = np.array([0.0, 3600.0])
         crosslinking = CrosslinkingResult(
             t_array=t,

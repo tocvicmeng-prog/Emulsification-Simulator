@@ -116,9 +116,6 @@ def check_steady_state(result: EmulsificationResult,
     n_check = max(1, n_steps // 10)
     d32_vals = []
     for k in range(-n_check, 0):
-        n_d_k = np.maximum(result.n_d_history[k] * (result.d_bins[1:] - result.d_bins[:-1]
-                           if len(result.d_bins) > len(result.n_d_history[k]) else
-                           np.ones_like(result.n_d_history[k])), 0.0)
         # Use raw n_d_history (already number density) to compute d32
         N_k = np.maximum(result.n_d_history[k], 0.0)
         d3 = np.sum(N_k * result.d_bins**3)
