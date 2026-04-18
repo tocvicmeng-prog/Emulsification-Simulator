@@ -1,5 +1,51 @@
 # Changelog
 
+## v9.1.1 — Backlog burndown (2026-04-19)
+
+Closes the five v9.1.1 issues filed at v9.1.0 release. No new features;
+performance, correctness, and CI hardening only. Fast suite goes from
+~283 → ~870 tests passing on Py 3.12 and CI now catches installer
+regressions on every PR.
+
+### Performance
+- `solve_packed_bed` and the constant-equilibrium chromatography LRM
+  path switched from scipy BDF to LSODA. ~700× speedup on the
+  test_eta_in_range workload (85 s → 0.12 s) — the BDF "Jacobian
+  conditioning" symptom was actually the wrong algorithm being forced
+  on a non-stiff problem. (PR #8, issue #2)
+- CH 2D solver smoke test runs at `cooling_rate=60 K/s` so the
+  integrator hits its t_final in ~1.5 s of simulated time (~2 s wall)
+  instead of the default ~600 s. Test promoted out of `@slow` and
+  into the fast-suite gate. (PR #7, issue #3)
+
+### Code quality
+- Ruff F841 cleanup: 17 unused-local-variable assignments deleted
+  (refactor orphans, no Streamlit widget side effects). Broad
+  per-file-ignores in pyproject.toml's `[tool.ruff.lint.per-file-ignores]`
+  removed. (PR #10, issue #4)
+- Mypy: 71 → 32 errors. Pattern fixes for `float = None` defaults,
+  `np.ndarray | float` annotations on Flory-Huggins functions, and
+  Optional-narrowing asserts in the level1_emulsification stirred-vessel
+  branch (-13 errors with one assert block). (PR #11, issue #5)
+
+### CI
+- `installer-smoke` job promoted from "build wheel and pip-install
+  verify" to "build the actual .exe via Inno Setup, silent install
+  to a temp dir, verify required files in the install tree." Catches
+  the .bat parser / CRLF / Access Denied class of regressions that
+  drove the v8.3.5 → v8.3.7 + v9.0 hotfix cascade. (PR #9, issue #6)
+- Mypy CI step now enforces a regression cap (`MYPY_MAX=32`). PRs
+  that ADD type errors fail; baseline lowers as future PRs fix more.
+  Drop the cap and require zero once the count is single-digit.
+
+### Solver method matrix
+- `module3_performance/catalysis/packed_bed.py`: LSODA
+- `module3_performance/transport/lumped_rate.py::solve_lrm`: LSODA
+  when no gradient adapter, BDF when `gradient_program` and
+  `equilibrium_adapter` are both set (LSODA gets stuck oscillating
+  modes when binding equilibrium varies in time)
+- `module3_performance/orchestrator.py::run_gradient_elution`: BDF kept
+
 ## v9.1.0 — Health audit hardening (2026-04-19)
 
 The v9.1 release is a health-driven hardening pass. It does not change
