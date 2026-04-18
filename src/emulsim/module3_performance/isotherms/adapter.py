@@ -10,7 +10,6 @@ v6.0-beta: ProcessState dataclass, HIC isotherm routing.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 
 import numpy as np
 

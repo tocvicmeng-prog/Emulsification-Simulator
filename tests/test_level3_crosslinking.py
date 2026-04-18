@@ -1,7 +1,6 @@
 """Tests for Level 3 crosslinking kinetics."""
 
 import numpy as np
-import pytest
 
 from emulsim.datatypes import MaterialProperties, SimulationParameters
 from emulsim.level3_crosslinking.solver import (

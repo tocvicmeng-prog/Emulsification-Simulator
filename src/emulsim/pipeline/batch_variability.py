@@ -247,7 +247,6 @@ def _run_l2_l4_at_R(
     inherited from base_run (so downstream consumers see the unchanged
     DSD) but whose L2/L3/L4 reflect the specified R_droplet.
     """
-    import copy as _copy
     from ..level2_gelation.solver import solve_gelation, solve_gelation_timing
     from ..level3_crosslinking.solver import solve_crosslinking
     from ..level4_mechanical.solver import solve_mechanical

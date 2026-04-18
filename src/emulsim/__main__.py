@@ -1,7 +1,6 @@
 """CLI entry point for the emulsification simulation."""
 
 import argparse
-import json
 import logging
 import sys
 from pathlib import Path
@@ -229,7 +228,6 @@ def _load_params(config_path):
 
 def _cmd_run(args):
     from .pipeline.orchestrator import PipelineOrchestrator
-    from .properties.database import PropertyDatabase
 
     params = _load_params(args.config)
 
@@ -480,7 +478,7 @@ def _cmd_ui(args):
     import subprocess
     app_path = Path(__file__).parent / "visualization" / "app.py"
     print(f"Launching EmulSim UI on port {args.port}...")
-    print(f"Your default browser should open automatically.")
+    print("Your default browser should open automatically.")
     print(f"If not, navigate to http://localhost:{args.port} manually.")
     print()
     # Streamlit default is to open the user's browser automatically.
@@ -580,7 +578,7 @@ def _cmd_dossier(args):
     written = dossier.export_json(out_path)
 
     print()
-    print(f"=== Process Dossier ===")
+    print("=== Process Dossier ===")
     print(f"  run_id:                {dossier.run_id}")
     print(f"  timestamp_utc:         {dossier.timestamp_utc}")
     print(f"  evidence_tier:         {full_result.run_report.min_evidence_tier}")
@@ -635,7 +633,7 @@ def _cmd_ingest(args):
     }
     written = write_calibration_json(entries, out_path, fit_metadata=fit_metadata)
     print()
-    print(f"=== AssayRecord Ingest ===")
+    print("=== AssayRecord Ingest ===")
     print(f"  module:               {args.module}")
     print(f"  records read:         {len(records)}")
     print(f"  calibration entries:  {len(entries)}")
@@ -644,8 +642,8 @@ def _cmd_ingest(args):
     print()
     print("Load with:")
     print(f"  store = CalibrationStore(); store.load_json({str(written)!r})")
-    print(f"  ctx = RunContext(calibration_store=store)")
-    print(f"  PipelineOrchestrator().run_single(params, run_context=ctx)")
+    print("  ctx = RunContext(calibration_store=store)")
+    print("  PipelineOrchestrator().run_single(params, run_context=ctx)")
     print()
 
 

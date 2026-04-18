@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..datatypes import BreakageModel, CoalescenceModel, KernelConfig
+from ..datatypes import KernelConfig
 
 # Node 14: optional Numba acceleration. Numba is in the ``[dev]`` extra, so
 # production installs may not have it. Detect once at import time and

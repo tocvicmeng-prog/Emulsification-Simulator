@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 
-from ..datatypes import HeatingConfig, HeatingStrategy, VesselGeometry
+from ..datatypes import HeatingConfig, VesselGeometry
 
 
 # ─── Constants ───────────────────────────────────────────────────────────

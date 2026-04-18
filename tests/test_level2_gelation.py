@@ -273,6 +273,7 @@ class TestPoreAnalysis2D:
 
 
 class TestCahnHilliard2DSolver:
+    @pytest.mark.slow
     def test_2d_solver_runs(self):
         """2D solver should complete without error on a small grid."""
         from emulsim.level2_gelation.solver import CahnHilliard2DSolver
@@ -283,6 +284,7 @@ class TestCahnHilliard2DSolver:
         assert result.phi_field.shape == (32, 32)
         assert result.r_grid.shape == (32,)
 
+    @pytest.mark.slow
     def test_2d_alpha_reaches_completion(self):
         """With standard cooling, gelation should be nearly complete."""
         from emulsim.level2_gelation.solver import CahnHilliard2DSolver
@@ -292,6 +294,7 @@ class TestCahnHilliard2DSolver:
         result = solver.solve(params, props, R_droplet=3.0e-6)
         assert result.alpha_final > 0.9
 
+    @pytest.mark.slow
     def test_2d_phi_within_bounds(self):
         """Composition must stay in [0, 1]."""
         from emulsim.level2_gelation.solver import CahnHilliard2DSolver
@@ -302,6 +305,7 @@ class TestCahnHilliard2DSolver:
         assert np.all(result.phi_field >= 0)
         assert np.all(result.phi_field <= 1)
 
+    @pytest.mark.slow
     def test_2d_porosity_in_range(self):
         from emulsim.level2_gelation.solver import CahnHilliard2DSolver
         solver = CahnHilliard2DSolver(N_grid=32, dt_initial=1e-3, dt_max=1.0)
@@ -310,6 +314,7 @@ class TestCahnHilliard2DSolver:
         result = solver.solve(params, props, R_droplet=3.0e-6)
         assert 0.0 <= result.porosity <= 1.0
 
+    @pytest.mark.slow
     def test_2d_result_has_domain_info(self):
         """2D result should include domain size and grid spacing."""
         from emulsim.level2_gelation.solver import CahnHilliard2DSolver
@@ -320,25 +325,43 @@ class TestCahnHilliard2DSolver:
         assert result.L_domain == pytest.approx(6.0e-6)
         assert result.grid_spacing > 0
 
-    def test_solve_gelation_uses_2d_by_default(self):
-        """The convenience function should use 2D solver by default."""
+    @pytest.mark.slow
+    def test_solve_gelation_ch_2d_mode(self):
+        """mode='ch_2d' selects the 2D phase-field solver."""
         from emulsim.level2_gelation.solver import solve_gelation
         params = SimulationParameters()
         params.solver.l2_n_grid = 32
         props = MaterialProperties()
-        result = solve_gelation(params, props, R_droplet=3.0e-6)
+        result = solve_gelation(params, props, R_droplet=3.0e-6, mode='ch_2d')
         assert result.phi_field.ndim == 2
         assert result.L_domain > 0
 
-    def test_solve_gelation_1d_fallback(self):
-        """The convenience function should support 1D fallback."""
+    @pytest.mark.slow
+    def test_solve_gelation_ch_1d_mode(self):
+        """mode='ch_1d' selects the legacy 1D radial solver."""
         from emulsim.level2_gelation.solver import solve_gelation
         params = SimulationParameters()
         params.solver.l2_n_r = 100
         props = MaterialProperties()
-        result = solve_gelation(params, props, R_droplet=3.0e-6, use_2d=False)
+        result = solve_gelation(params, props, R_droplet=3.0e-6, mode='ch_1d')
         assert result.phi_field.ndim == 1
         assert result.L_domain == 0.0
+
+    @pytest.mark.slow
+    @pytest.mark.timeout(120)
+    def test_2d_solver_completes_on_tiny_grid(self):
+        # Smoke test on 16² grid (smaller than the 32² parent suite). Intent
+        # was to guard the fast suite against a prod hang in the CH 2D solver,
+        # but as of v9.1.0 even N=16 exceeds 60s — `build_mobility_laplacian_2d`
+        # in solver.py is the bottleneck. Marked @slow until that is fixed
+        # in v9.1.1; promote back to the fast suite once it runs in <30s.
+        from emulsim.level2_gelation.solver import CahnHilliard2DSolver
+        solver = CahnHilliard2DSolver(N_grid=16, dt_initial=1e-3, dt_max=1.0)
+        params = SimulationParameters()
+        props = MaterialProperties()
+        result = solver.solve(params, props, R_droplet=3.0e-6)
+        assert result.phi_field.shape == (16, 16)
+        assert 0.0 <= result.porosity <= 1.0
 
 
 # ─── Node 8 (v6.1, F8): L2 alpha_final wired from gelation timing ─────────

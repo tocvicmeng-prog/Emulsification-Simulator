@@ -25,7 +25,6 @@ from emulsim.module2_functionalization.acs import (
 from emulsim.module2_functionalization.modification_steps import (
     ModificationStep,
     ModificationStepType,
-    ModificationResult,
     solve_modification_step,
 )
 from emulsim.module2_functionalization.orchestrator import (
@@ -37,11 +36,9 @@ from emulsim.module2_functionalization.reactions import (
 )
 from emulsim.module2_functionalization.reagent_profiles import (
     REAGENT_PROFILES,
-    ReagentProfile,
 )
 from emulsim.module2_functionalization.surface_area import (
     AccessibleSurfaceModel,
-    SurfaceAreaTier,
 )
 
 
@@ -657,7 +654,7 @@ def test_quench_95pct_conservation_regression():
 
     # remaining_activated should be ~0
     assert epox.remaining_activated < epox.activated_sites * 0.05, \
-        f"remaining_activated should be <5% of activated after 95%+ quench"
+        "remaining_activated should be <5% of activated after 95%+ quench"
 
     # blocked_sites should be ~= activated_sites
     assert epox.blocked_sites > 0.95 * epox.activated_sites * 0.99

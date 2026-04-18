@@ -16,14 +16,10 @@ Covers:
 
 from __future__ import annotations
 
-import math
 
-import numpy as np
 import pytest
 
 from emulsim.module2_functionalization.edc_nhs_kinetics import (
-    EdcNhsKinetics,
-    EdcNhsResult,
     available_amine_fraction,
     react_edc_nhs_two_step,
 )

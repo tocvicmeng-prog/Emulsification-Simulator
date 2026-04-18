@@ -16,7 +16,7 @@ import numpy as np
 
 from ..datatypes import ModelEvidenceTier, ModelManifest
 from .enkf import enkf_update
-from .schema import DigitalTwinTrace, Observation
+from .schema import DigitalTwinTrace
 
 
 @dataclass

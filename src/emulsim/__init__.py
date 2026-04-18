@@ -15,6 +15,21 @@ from .datatypes import (
 from .pipeline.orchestrator import PipelineOrchestrator
 from .properties.database import PropertyDatabase
 
+__all__ = [
+    "SimulationParameters",
+    "MaterialProperties",
+    "EmulsificationResult",
+    "GelationTimingResult",
+    "GelationResult",
+    "CrosslinkingResult",
+    "MechanicalResult",
+    "FullResult",
+    "PipelineOrchestrator",
+    "PropertyDatabase",
+    "run_pipeline",
+    "__version__",
+]
+
 
 def run_pipeline(params: SimulationParameters = None, **kwargs) -> FullResult:
     """Run the full L1-L4 simulation pipeline.

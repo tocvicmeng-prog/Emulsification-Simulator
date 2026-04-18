@@ -148,11 +148,15 @@ class TestHinzePredictions:
 
 
 class TestPBESolver:
-    @pytest.fixture
+    # Class-scoped: full PBE solve takes ~30-90s on Py 3.14+numba; share one
+    # solve across the 5 fast_result tests instead of re-running per test.
+    # Marked slow because even one solve exceeds the 5s "fast" budget.
+
+    @pytest.fixture(scope="class")
     def solver(self):
         return PBESolver(n_bins=30, d_min=0.5e-6, d_max=200e-6)
 
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def fast_result(self, solver):
         """Quick solve with reduced time for testing."""
         params = SimulationParameters()
@@ -160,20 +164,25 @@ class TestPBESolver:
         props = MaterialProperties(sigma=5e-3)
         return solver.solve(params, props)
 
+    @pytest.mark.slow
     def test_result_shapes(self, fast_result, solver):
         assert fast_result.d_bins.shape == (solver.n_bins,)
         assert fast_result.n_d.shape == (solver.n_bins,)
 
+    @pytest.mark.slow
     def test_non_negative_distribution(self, fast_result):
         assert check_non_negative(fast_result)
 
+    @pytest.mark.slow
     def test_d32_in_range(self, fast_result):
         passed, msg = check_physical_bounds(fast_result)
         assert passed, msg
 
+    @pytest.mark.slow
     def test_percentiles_monotonic(self, fast_result):
         assert fast_result.d10 <= fast_result.d50 <= fast_result.d90
 
+    @pytest.mark.slow
     def test_span_positive(self, fast_result):
         assert fast_result.span >= 0
 

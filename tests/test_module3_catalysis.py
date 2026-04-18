@@ -201,8 +201,15 @@ _BED_PARAMS = dict(
 )
 
 
+@pytest.mark.slow
 class TestPackedBedNoReaction:
-    """PFR with V_max = 0 — substrate should pass through unchanged."""
+    """PFR with V_max = 0 — substrate should pass through unchanged.
+
+    Marked slow: `solve_packed_bed` uses scipy BDF with ill-conditioned
+    Jacobians (overflow warnings surface during num_jac) and exceeds the
+    fast-suite timeout on both Py 3.12 and 3.14. Track as separate work
+    (RHS conditioning / Jacobian scaling) in v9.1.1.
+    """
 
     def test_no_reaction_passthrough(self):
         """With V_max=0, S_outlet should reach S_feed at steady state."""
@@ -219,6 +226,7 @@ class TestPackedBedNoReaction:
         assert result.conversion == pytest.approx(0.0, abs=0.02)
 
 
+@pytest.mark.slow
 class TestPackedBedFullConversion:
     """PFR with very high V_max — substrate should be consumed."""
 
@@ -234,6 +242,7 @@ class TestPackedBedFullConversion:
         assert result.P_outlet[-1] > 0.5 * _BED_PARAMS["S_feed"]
 
 
+@pytest.mark.slow
 class TestPackedBedMassBalance:
     """Mass balance: S_consumed + S_remaining = S_injected."""
 
@@ -248,6 +257,7 @@ class TestPackedBedMassBalance:
         assert result.mass_balance_error < 0.05
 
 
+@pytest.mark.slow
 class TestPackedBedDeactivation:
     """Enzyme deactivation should reduce conversion over time."""
 
@@ -280,6 +290,7 @@ class TestPackedBedDeactivation:
         assert result.activity_history[-1] > 0.0
 
 
+@pytest.mark.slow
 class TestPackedBedEffectiveness:
     """Effectiveness factor should be in valid range."""
 
@@ -297,6 +308,7 @@ class TestPackedBedEffectiveness:
         assert r_large.effectiveness_factor < r_small.effectiveness_factor
 
 
+@pytest.mark.slow
 class TestPackedBedResidenceTime:
     """Lower flow rate -> higher residence time -> higher conversion."""
 

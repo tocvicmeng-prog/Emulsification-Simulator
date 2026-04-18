@@ -7,7 +7,6 @@ from emulsim.properties.database import PropertyDatabase
 from emulsim.properties.interfacial import interfacial_tension_span80, sigma_bare
 from emulsim.properties.thermodynamic import (
     chi_flory_huggins,
-    flory_huggins_free_energy,
     flory_huggins_second_derivative,
     mesh_size_canal_peppas,
     spinodal_boundary,

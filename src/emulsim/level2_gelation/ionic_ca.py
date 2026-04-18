@@ -38,7 +38,6 @@ See `docs/f1a_alginate_protocol.md` §4.1 for the full derivation and
 from __future__ import annotations
 
 import logging
-import math
 from typing import Optional
 
 import numpy as np

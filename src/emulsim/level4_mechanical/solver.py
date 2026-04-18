@@ -20,7 +20,6 @@ from ..datatypes import (
     MechanicalResult,
     ModelEvidenceTier,
     ModelManifest,
-    ModelMode,
     SimulationParameters,
 )
 

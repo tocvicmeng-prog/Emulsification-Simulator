@@ -40,7 +40,6 @@ def _evidence_badge(result_obj) -> str:
 from emulsim.properties.database import PropertyDatabase
 from emulsim.pipeline.orchestrator import PipelineOrchestrator
 from emulsim.trust import assess_trust
-from emulsim.reagent_library import SURFACTANTS, CROSSLINKERS
 from emulsim.visualization.plots import (
     plot_droplet_size_distribution,
     plot_phase_field,
@@ -51,11 +50,6 @@ from emulsim.visualization.plots import (
     plot_modulus_comparison,
 )
 from emulsim.visualization.ui_validators import validate_m1_inputs as _validate_m1
-from emulsim.literature_constants import ALL_CONSTANTS
-from emulsim.level3_crosslinking.solver import (
-    available_amine_concentration,
-    recommended_crosslinker_concentration,
-)
 
 
 def _render_non_ac_family(*, tab_container, family, is_stirred_default, model_mode_enum, _smgr) -> None:

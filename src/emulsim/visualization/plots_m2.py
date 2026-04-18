@@ -17,8 +17,7 @@ except ImportError:
     _PLOTLY_AVAILABLE = False
 
 if TYPE_CHECKING:
-    from emulsim.module2_functionalization.modification_steps import ModificationResult
-    from emulsim.module2_functionalization.surface_area import AccessibleSurfaceModel
+    pass
 
 
 def plot_acs_waterfall(

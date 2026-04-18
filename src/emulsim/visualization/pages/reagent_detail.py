@@ -150,13 +150,13 @@ if doc.reagent_table:
 
 # Procedure
 st.subheader("Procedure")
-for step in doc.procedure_steps:
+for proc_step in doc.procedure_steps:
     step_md = (
-        f"**{step.step_number}. {step.action}**  \n"
-        f"*Duration:* {step.duration} | *Temperature:* {step.temperature}"
+        f"**{proc_step.step_number}. {proc_step.action}**  \n"
+        f"*Duration:* {proc_step.duration} | *Temperature:* {proc_step.temperature}"
     )
-    if step.notes:
-        step_md += f"  \n*Note:* {step.notes}"
+    if proc_step.notes:
+        step_md += f"  \n*Note:* {proc_step.notes}"
     st.markdown(step_md)
 
 # QC targets

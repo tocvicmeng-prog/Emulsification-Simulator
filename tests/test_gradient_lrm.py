@@ -21,7 +21,7 @@ from emulsim.module3_performance.isotherms.adapter import EquilibriumAdapter
 from emulsim.module3_performance.process_state import ProcessState
 from emulsim.module3_performance.transport.lumped_rate import solve_lrm
 from emulsim.module3_performance.gradient import (
-    GradientProgram, make_linear_gradient,
+    make_linear_gradient,
 )
 
 

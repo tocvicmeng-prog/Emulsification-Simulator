@@ -10,7 +10,7 @@ Phase E: run_gradient_elution — multi-component gradient chromatography with
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 import numpy as np
@@ -20,12 +20,12 @@ from ..datatypes import ModelEvidenceTier, ModelManifest
 from .hydrodynamics import ColumnGeometry
 from .isotherms.langmuir import LangmuirIsotherm
 from .isotherms.competitive_langmuir import CompetitiveLangmuirIsotherm
-from .transport.lumped_rate import solve_lrm, LRMResult
+from .transport.lumped_rate import solve_lrm
 from .detection.uv import compute_uv_signal, apply_detector_broadening
 from .gradient import GradientProgram
 
 if TYPE_CHECKING:
-    from emulsim.module2_functionalization.orchestrator import FunctionalMicrosphere
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -795,7 +795,10 @@ def run_gradient_elution(
         q_avg[i] = np.mean(q_all_i, axis=0)
 
     # ── Gradient profile at output times ──
-    gradient_profile = gradient.value_at_time(time)
+    # value_at_time returns float | ndarray; time is always ndarray here so the
+    # result is ndarray, but the union confuses mypy at the GradientElutionResult
+    # call site below. asarray narrows it without a runtime cost.
+    gradient_profile = np.asarray(gradient.value_at_time(time))
 
     # ── UV signal (summed over components) ──
     if extinction_coeffs is None:

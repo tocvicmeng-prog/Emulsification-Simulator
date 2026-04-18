@@ -892,7 +892,7 @@ def solve_crosslinking(params: SimulationParameters,
                     rd_result.model_manifest = ModelManifest(
                         model_name=f"L3.Crosslink.{xl.kinetics_model}",
                         evidence_tier=ModelEvidenceTier.SEMI_QUANTITATIVE,
-                        assumptions=[f"solver_family=amine_covalent", f"kinetics={xl.kinetics_model}"],
+                        assumptions=["solver_family=amine_covalent", f"kinetics={xl.kinetics_model}"],
                         diagnostics={"thiele_modulus": Phi, "p_final": rd_result.p_final},
                     )
                     # v6.1: populate diagnostics for RD branch (Codex fix 2)

@@ -12,3 +12,6 @@ installer/stage/
 # Local backup files — never commit
 *.v8bak
 *.bak
+
+# Local virtualenvs
+.venv*/

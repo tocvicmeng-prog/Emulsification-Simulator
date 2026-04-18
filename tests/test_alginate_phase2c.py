@@ -12,8 +12,6 @@ Plus Phase 2c wiring:
 
 from __future__ import annotations
 
-import json
-import math
 
 import numpy as np
 import pytest

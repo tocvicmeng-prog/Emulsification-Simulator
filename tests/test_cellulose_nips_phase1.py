@@ -16,7 +16,6 @@ subset — orchestrator dispatch / TOML integration land in Phase 2):
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from emulsim.datatypes import (

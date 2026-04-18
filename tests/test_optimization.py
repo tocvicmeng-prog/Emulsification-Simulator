@@ -9,7 +9,6 @@ from emulsim.optimization.objectives import (
     PARAM_BOUNDS,
     PARAM_NAMES,
     LOG_SCALE_INDICES,
-    compute_objectives,
 )
 
 
@@ -140,9 +139,7 @@ class TestNode6TrustPenalty:
     def test_qualitative_tier_excluded_from_pareto(self):
         """A QUALITATIVE_TREND candidate's max objective exceeds REF_POINT (5.0)."""
         from emulsim.datatypes import (
-            FullResult, EmulsificationResult, GelationResult,
-            CrosslinkingResult, MechanicalResult, ModelEvidenceTier,
-            ModelManifest, RunReport, SimulationParameters,
+            ModelEvidenceTier,
         )
         from emulsim.optimization.objectives import compute_objectives_trust_aware
 

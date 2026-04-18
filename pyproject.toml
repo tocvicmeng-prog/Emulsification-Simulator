@@ -4,9 +4,9 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "emulsim"
-version = "9.0.0"
+version = "9.1.0"
 description = "Multi-scale simulation of polysaccharide microsphere preparation (emulsification + gelation + crosslinking + mechanical)"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "numpy>=1.26",
     "scipy>=1.12",
@@ -16,10 +16,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-optimization = ["botorch>=0.11", "gpytorch>=1.11", "torch>=2.1"]
+# Pinned 2026-04-19 per ADR-002 (M4 v9.1.0). Verified runtime stack: torch
+# 2.11.0+cpu / botorch 0.17.2 / gpytorch 1.15.2 on Py 3.12. Allow patch updates
+# only; minor bumps require re-verifying FastNondominatedPartitioning duck-typing.
+optimization = ["botorch~=0.17.2", "gpytorch~=1.15.2", "torch~=2.11.0"]
 interactive = ["plotly>=5.18", "jupyter"]
 ui = ["streamlit>=1.30", "plotly>=5.18"]
-dev = ["pytest>=7.4", "hypothesis>=6.90", "rich>=13.0", "numba>=0.59"]
+dev = ["pytest>=7.4", "pytest-timeout>=2.3", "hypothesis>=6.90", "rich>=13.0", "numba>=0.59"]
 all = ["emulsim[optimization,interactive,dev]"]
 
 [project.scripts]
@@ -30,8 +33,35 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --timeout=120"
 markers = [
     "smoke: minimum-viable end-to-end pipeline run via configs/fast_smoke.toml; must finish under 30s",
     "slow: tests that take >5s individually (CH 2D solver, Hypothesis property tests, full optimisation)",
 ]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint.per-file-ignores]
+# Streamlit reload pattern requires importlib.reload after path setup; the
+# semicolon-style multi-statement imports are deliberate and documented in
+# CLAUDE.md (Streamlit re-mints the datatypes enum on every rerun).
+"src/emulsim/visualization/app.py" = ["E402", "E702", "F811"]
+"src/emulsim/visualization/pages/*.py" = ["E402"]
+"src/emulsim/visualization/tabs/tab_m1.py" = ["E402", "F841"]
+"src/emulsim/visualization/tabs/tab_m3.py" = ["F841"]
+# config.py imports datatypes after configuring the module logger (intentional).
+"src/emulsim/config.py" = ["E402"]
+# plots_m2.py: `make_subplots` is imported for an optional codepath; ruff suggests
+# importlib.util.find_spec but that adds runtime cost for a static check.
+"src/emulsim/visualization/plots_m2.py" = ["F401"]
+# F841 in tests: variables held for clarity (debug, fixture setup readability).
+"tests/*.py" = ["F841"]
+# F841 in scientific solvers: intermediate quantities kept for traceability;
+# real dead-code candidates tracked as v9.1.1 cleanup.
+"src/emulsim/level1_emulsification/*.py" = ["F841"]
+"src/emulsim/level2_gelation/*.py" = ["F841"]
+"src/emulsim/module2_functionalization/*.py" = ["F841"]
+"src/emulsim/module3_performance/**/*.py" = ["F841"]
+"src/emulsim/optimization/*.py" = ["F841"]
+"src/emulsim/properties/*.py" = ["F841"]

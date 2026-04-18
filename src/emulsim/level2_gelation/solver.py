@@ -21,7 +21,7 @@ from .spatial import (
     create_radial_grid, build_laplacian_matrix,
     create_2d_grid, build_laplacian_2d, build_mobility_laplacian_2d,
 )
-from .free_energy import flory_huggins_mu, flory_huggins_d2f, contractive_constant
+from .free_energy import flory_huggins_mu, contractive_constant
 from .gelation import avrami_gelation, gelation_rate_constant, cooling_temperature, mobility
 from .pore_analysis import (
     characteristic_wavelength, chord_length_distribution, compute_porosity,

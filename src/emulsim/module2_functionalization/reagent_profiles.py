@@ -21,7 +21,7 @@ Literature values sourced from the Scientific Advisor report.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from .acs import ACSSiteType

@@ -26,16 +26,12 @@ import logging
 
 from .energy import (
     emulsion_density,
-    gap_shear_rate,
     max_dissipation,
     average_dissipation,
-    power_draw,
     impeller_reynolds_number,
     power_number_corrected,
 )
 from .kernels import (
-    breakage_rate_alopaeus,
-    coalescence_rate_ct,
     breakage_rate_dispatch,
     coalescence_rate_dispatch,
 )

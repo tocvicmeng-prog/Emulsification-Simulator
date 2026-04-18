@@ -4,12 +4,9 @@ import pytest
 import numpy as np
 
 from emulsim.datatypes import (
-    EmulsificationParameters,
-    FormulationParameters,
     MaterialProperties,
     MixerGeometry,
     SimulationParameters,
-    SolverSettings,
 )
 
 
