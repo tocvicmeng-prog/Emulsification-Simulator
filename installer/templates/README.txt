@@ -4,8 +4,9 @@ Windows 11 x64 Release -- First Edition
 
 QUICK START
 
-  1. Install Python 3.11, 3.12, or 3.13 from
+  1. Install Python 3.11 or 3.12 from
      https://www.python.org/downloads/windows/
+     (Python 3.13+ is not yet supported -- see ADR-001 for why.)
      Make sure "Add python.exe to PATH" is ticked.
 
   2. Double-click  install.bat
@@ -32,7 +33,7 @@ WHAT IS IN THIS PACKAGE
 SYSTEM REQUIREMENTS
 
   * Windows 11 x64 (Windows 10 x64 also supported)
-  * Python 3.11, 3.12, or 3.13
+  * Python 3.11 or 3.12 (3.13+ currently unsupported)
   * 2 GB of free disk space for the .venv after install
   * 8 GB RAM recommended (4 GB minimum)
   * Internet connection during first install (downloads deps)

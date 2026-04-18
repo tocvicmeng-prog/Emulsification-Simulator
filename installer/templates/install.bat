@@ -35,8 +35,9 @@ set "PY=python"
 where %PY% >nul 2>&1
 if errorlevel 1 (
     echo [install] ERROR: 'python' not found on PATH.
-    echo          Install Python 3.11+ from
+    echo          Install Python 3.11 or 3.12 from
     echo          https://www.python.org/downloads/windows/
+    echo          (3.13+ is not yet supported -- see ADR-001)
     echo          Tick "Add python.exe to PATH" during setup,
     echo          then re-run this installer.
     pause
@@ -78,13 +79,25 @@ if not defined PYMAJ goto bad_python
 if not defined PYMIN goto bad_python
 if !PYMAJ! lss 3 goto bad_python
 if !PYMAJ! equ 3 if !PYMIN! lss 11 goto bad_python
+REM v9.1.x: pyproject pins requires-python = ">=3.11,<3.13". Reject 3.13+
+REM and any major-version >= 4 so the wheel install does not fail later
+REM with a confusing pip error. See docs/decisions/ADR-001.
+if !PYMAJ! gtr 3 goto bad_python_too_new
+if !PYMAJ! equ 3 if !PYMIN! geq 13 goto bad_python_too_new
 goto pyok
 
 :bad_python
 echo [install] ERROR: Python !PYVER! is below the required 3.11.
-echo          Install Python 3.11, 3.12, or 3.13 from python.org.
+echo          Install Python 3.11 or 3.12 from python.org.
 pause
 exit /b 2
+
+:bad_python_too_new
+echo [install] ERROR: Python !PYVER! is above the supported 3.12.
+echo          EmulSim requires Python ^>=3.11 and ^<3.13 (ADR-001).
+echo          Install Python 3.11 or 3.12 from python.org and re-run.
+pause
+exit /b 3
 
 :pyok
 echo [install] Python check passed.

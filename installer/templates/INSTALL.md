@@ -5,7 +5,7 @@
 | Item | Supported |
 |---|---|
 | Operating System | Windows 11 x64 (primary); Windows 10 x64 (supported) |
-| Python | 3.11, 3.12, 3.13 (Python 3.10 and earlier will refuse) |
+| Python | 3.11 or 3.12 (pinned in pyproject.toml: `>=3.11,<3.13`; Python 3.10 and earlier are refused, Python 3.13+ is currently unsupported) |
 | Disk | ~2 GB free for `.venv` after install |
 | RAM | 8 GB recommended (4 GB minimum) |
 | Internet | Required during first install (downloads scientific Python deps) |
@@ -13,7 +13,8 @@
 ## 2. Prerequisite: Install Python
 
 1. Go to <https://www.python.org/downloads/windows/>.
-2. Download the latest Python 3.11.x, 3.12.x, or 3.13.x **64-bit** installer.
+2. Download the latest Python 3.11.x or 3.12.x **64-bit** installer.
+   (Python 3.13+ is not yet supported; see ADR-001.)
 3. Run the installer.
 4. **Tick the box "Add python.exe to PATH"** before clicking Install.
 5. After install completes, open a new Command Prompt and run
@@ -28,7 +29,7 @@ and will exit with an error directing you to re-install.
 
 Double-click `install.bat`. The installer will:
 
-1. Verify Python 3.11+ is available.
+1. Verify a supported Python (3.11 or 3.12) is on PATH.
 2. Create a local virtual environment at `.venv\` inside this folder.
 3. Install the EmulSim wheel with the **UI** and **optimisation** extras
    (numpy, scipy, matplotlib, streamlit, plotly, PyTorch, BoTorch).
@@ -117,11 +118,13 @@ You did not tick the "Add python.exe to PATH" checkbox. Re-run the
 Python installer, choose "Modify", and tick the box — or uninstall
 Python and start over.
 
-### "Python 3.10 is below the required 3.11"
+### "Python 3.10 is below the required 3.11" / "Python 3.13 is above the supported range"
 
-EmulSim 9.1.1 requires Python 3.11 or newer. Install a supported
-version alongside your existing one; the installer picks up the
-highest version on PATH.
+EmulSim 9.1.1 requires Python **3.11 or 3.12** (pinned by `requires-python =
+">=3.11,<3.13"` in pyproject.toml; see `docs/decisions/ADR-001-python-version-policy.md`
+for the why). Install a supported version alongside your existing one. If
+multiple versions are on PATH the installer picks the first one — verify with
+`python --version` before running install.bat.
 
 ### "pip install failed" during install.bat
 
