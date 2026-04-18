@@ -24,14 +24,12 @@ import json
 import pytest
 
 from emulsim.datatypes import (
-    MaterialProperties,
     ModelEvidenceTier,
     PolymerFamily,
     SimulationParameters,
 )
 from emulsim.properties.plga_defaults import (
     PLGA_GRADE_PRESETS,
-    apply_preset,
 )
 
 

@@ -21,7 +21,6 @@ import pytest
 
 from emulsim.datatypes import (
     BreakageModel,
-    CoalescenceModel,
     EmulsificationParameters,
     FormulationParameters,
     HeatingConfig,
@@ -29,7 +28,6 @@ from emulsim.datatypes import (
     KernelConfig,
     MixerGeometry,
     SimulationParameters,
-    SolverSettings,
     StirrerGeometry,
     StirrerType,
     VesselGeometry,
@@ -182,10 +180,14 @@ class TestKernelConfig:
         assert k.coalescence_exponent == 2
 
     def test_for_rotor_stator_legacy(self):
+        # F1 fix (2026-04-17) enabled phi_d_correction + exponent=2 on the
+        # legacy preset to match for_rotor_stator_small; see KernelConfig
+        # docstring for the high-RPM nonphysical-d32 rationale.
         k = KernelConfig.for_rotor_stator_legacy()
         assert k.breakage_model == BreakageModel.ALOPAEUS
         assert k.breakage_C1 == pytest.approx(0.986)
-        assert k.phi_d_correction is False
+        assert k.phi_d_correction is True
+        assert k.coalescence_exponent == 2
 
     def test_for_rotor_stator_small(self):
         k = KernelConfig.for_rotor_stator_small()

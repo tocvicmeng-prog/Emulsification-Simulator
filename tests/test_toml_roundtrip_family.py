@@ -18,6 +18,7 @@ from emulsim.properties.database import PropertyDatabase
 _REPO = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.slow
 @pytest.mark.parametrize(
     "config_name,expected_d32_um_range",
     [

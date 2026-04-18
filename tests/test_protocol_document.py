@@ -12,11 +12,9 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 
 from emulsim.protocols.protocol_document import (
     ProtocolDocument,
-    ProtocolStep,
     ReagentRequirement,
 )
 

@@ -14,11 +14,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
 import pytest
 
 from emulsim.config import load_config
-from emulsim.pipeline.batch_variability import BatchResult, QuantileRun, run_batch
+from emulsim.pipeline.batch_variability import BatchResult, run_batch
 
 
 @pytest.fixture(scope="module")

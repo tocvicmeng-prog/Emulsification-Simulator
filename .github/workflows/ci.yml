@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs when a newer commit lands on the same branch.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quick:
+    name: Quick (lint + types + fast tests)
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install package + dev/ui extras
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ui]"
+          pip install ruff mypy
+
+      - name: Ruff lint
+        shell: bash
+        run: ruff check src tests
+
+      - name: Mypy type check
+        shell: bash
+        # M3 fixed the audit-flagged clusters; remaining errors are tracked
+        # tech debt. Run with --no-incremental to avoid cache poisoning between
+        # matrix entries. Continue-on-error so type debt does not block the gate
+        # while M3 follow-ups are scheduled.
+        continue-on-error: true
+        run: mypy src/emulsim --ignore-missing-imports --no-incremental
+
+      - name: Pytest (not slow)
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+          PYTHONUNBUFFERED: "1"
+        # torch is only in [optimization]; skip the optimization tests here.
+        # tests/test_optimization_smoke.py is the paired gate for [optimization]
+        # (anchors ADR-002) but needs torch — run it in a dedicated job later.
+        run: |
+          pytest -m "not slow" --timeout=60 -p no:cacheprovider \
+            --ignore=tests/test_optimization.py \
+            --ignore=tests/test_inverse_design_engine.py \
+            --ignore=tests/test_inverse_design_objectives.py \
+            --ignore=tests/test_f4b_cvar.py \
+            --ignore=tests/test_optimization_smoke.py
+
+  smoke:
+    name: Smoke gate (Py 3.12, dev+ui)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dev + ui (matches installer)
+        shell: bash
+        # The installer ships [ui], and emulsim.visualization imports plotly
+        # at __init__ time, so any test that touches the visualization package
+        # for collection requires [ui]. Skip [optimization] here — that stack
+        # is gated by tests/test_optimization_smoke.py + ADR-002.
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,ui]"
+      - name: Smoke tests
+        shell: bash
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          pytest -m smoke --timeout=60 -p no:cacheprovider \
+            --ignore=tests/test_optimization.py \
+            --ignore=tests/test_inverse_design_engine.py \
+            --ignore=tests/test_inverse_design_objectives.py \
+            --ignore=tests/test_f4b_cvar.py \
+            --ignore=tests/test_optimization_smoke.py
+
+  installer-smoke:
+    name: Installer build smoke (Py 3.12)
+    runs-on: windows-latest
+    # Architect M2 + risk R1: installer regressions caused the v8.3.5/6/7 +
+    # v9.0 hotfix cascade. This job builds the wheel + sdist on a clean
+    # runner so packaging defects surface before tag-time. Promotion to a
+    # full silent-install + launch-assert is tracked for v9.1.1.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build wheel + sdist
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+      - name: List artifacts
+        shell: bash
+        run: ls -la dist
+      - name: Verify wheel installs cleanly
+        shell: bash
+        run: |
+          python -m venv .check_venv
+          .check_venv/Scripts/python -m pip install --upgrade pip
+          .check_venv/Scripts/python -m pip install dist/*.whl
+          .check_venv/Scripts/python -c "import emulsim; print('emulsim', emulsim.__version__)"

@@ -39,7 +39,6 @@ from ..datatypes import (
 from ..pipeline.orchestrator import PipelineOrchestrator
 from ..properties.database import PropertyDatabase
 from .objectives import (
-    PARAM_BOUNDS,
     PARAM_NAMES,
     LOG_SCALE_INDICES,
     LOG_SCALE_INDICES_SV,
@@ -55,7 +54,7 @@ logger = logging.getLogger(__name__)
 # Reference point for hypervolume (worst acceptable objectives)
 REF_POINT = torch.tensor([5.0, 5.0, 3.0], dtype=torch.double)
 
-tkwargs = {"dtype": torch.double}
+_DTYPE = torch.double
 
 
 def _log_indices_for_mode(mode: str = "rotor_stator_legacy") -> list[int]:
@@ -88,7 +87,7 @@ def _get_search_bounds(mode: str = "rotor_stator_legacy",
     for i in _log_indices_for_mode(mode):
         bounds[i, 0] = np.log10(bounds[i, 0])
         bounds[i, 1] = np.log10(bounds[i, 1])
-    return torch.tensor(bounds.T, **tkwargs)  # shape (2, d)
+    return torch.tensor(bounds.T, dtype=_DTYPE)  # shape (2, d)
 
 
 def _x_to_params(x: np.ndarray, template: SimulationParameters) -> SimulationParameters:
@@ -210,7 +209,7 @@ class OptimizationEngine:
         else:
             n_obj = len(target_spec.active_dims())
             self._n_obj = n_obj
-            self._ref_point = torch.tensor([5.0] * n_obj, **tkwargs)
+            self._ref_point = torch.tensor([5.0] * n_obj, dtype=_DTYPE)
 
         self.orchestrator = PipelineOrchestrator(db=db, output_dir=self.output_dir / "runs")
         self.template_params = template_params or SimulationParameters()
@@ -368,8 +367,8 @@ class OptimizationEngine:
         logger.info("Phase 2: Bayesian Optimisation (%d iterations)", max_iter)
 
         for iteration in range(max_iter):
-            X_torch = torch.tensor(np.array(self.X_observed), **tkwargs)
-            Y_torch = torch.tensor(np.array(self.Y_observed), **tkwargs)
+            X_torch = torch.tensor(np.array(self.X_observed), dtype=_DTYPE)
+            Y_torch = torch.tensor(np.array(self.Y_observed), dtype=_DTYPE)
             # Replace NaN/Inf with penalty values
             nan_mask = ~torch.isfinite(Y_torch)
             if nan_mask.any():
@@ -408,15 +407,18 @@ class OptimizationEngine:
                 acqf = qLogExpectedHypervolumeImprovement(
                     model=model,
                     ref_point=(-self._ref_point).tolist(),
-                    partitioning=partitioning,
+                    # FastNondominatedPartitioning duck-types as the expected
+                    # NondominatedPartitioning at runtime (verified against
+                    # botorch 0.17.2). The stub demands the abstract base.
+                    partitioning=partitioning,  # type: ignore[arg-type]
                     sampler=None,
                 )
 
                 # Find next candidate
                 d = self.bounds.shape[1]
                 standard_bounds = torch.stack([
-                    torch.zeros(d, **tkwargs),
-                    torch.ones(d, **tkwargs),
+                    torch.zeros(d, dtype=_DTYPE),
+                    torch.ones(d, dtype=_DTYPE),
                 ])
                 candidates, _ = optimize_acqf(
                     acq_function=acqf,
@@ -462,7 +464,7 @@ class OptimizationEngine:
         # Find Pareto front, filtering out infeasible (penalised) points.
         # Penalised points have all objectives > 5.0; exclude them before
         # computing non-dominated set so the front only contains feasible designs.
-        Y_torch = torch.tensor(Y_all, **tkwargs)
+        Y_torch = torch.tensor(Y_all, dtype=_DTYPE)
         feasible_mask = (Y_torch.max(dim=-1).values <= 5.0)
         if feasible_mask.any():
             Y_feasible = Y_torch[feasible_mask]

@@ -10,7 +10,6 @@ Covers:
 
 from __future__ import annotations
 
-import pytest
 
 from emulsim.protocols.mechanism_data import (
     MECHANISM_REGISTRY,

@@ -19,8 +19,15 @@ import pytest
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+@pytest.mark.slow
 class TestM1AdaptiveExtension:
-    """Tests for Level 1 PBE solver adaptive convergence extension."""
+    """Tests for Level 1 PBE solver adaptive convergence extension.
+
+    Marked slow: each test calls PBESolver.solve() with t_emulsification of
+    300 s, which trips the same scipy BDF Jacobian-conditioning slow path
+    that affects the other PBE tests (tracked as v9.1.1 issue #2). The
+    fast suite covers PBE via tests/test_smoke.py with fast_smoke.toml.
+    """
 
     @pytest.fixture
     def fast_solver(self):
@@ -47,7 +54,6 @@ class TestM1AdaptiveExtension:
 
     def test_default_config_converges_or_extends(self, fast_solver):
         """With t=300 s and default settings, solver either converges or extends."""
-        from emulsim.datatypes import MaterialProperties
         params = self._make_params(t_emul=300.0)
         props = self._make_props()
         result = fast_solver.solve(params, props)
@@ -498,7 +504,7 @@ class TestM4PerChemistryEta:
 
     def test_select_modulus_uses_per_chem_eta(self):
         """select_modulus_model reads eta from network_metadata.eta_coupling_recommended."""
-        from emulsim.level4_mechanical.solver import select_modulus_model, double_network_modulus
+        from emulsim.level4_mechanical.solver import select_modulus_model
         from emulsim.datatypes import NetworkTypeMetadata
 
         G_agarose, G_xlink = 50000.0, 5000.0

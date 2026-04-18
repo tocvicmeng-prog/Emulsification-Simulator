@@ -22,7 +22,7 @@ from .modification_steps import (
     ModificationStepType,
     solve_modification_step,
 )
-from .reagent_profiles import REAGENT_PROFILES, ReagentProfile
+from .reagent_profiles import REAGENT_PROFILES
 from .surface_area import AccessibleSurfaceModel
 
 from typing import Optional

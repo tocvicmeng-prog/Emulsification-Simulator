@@ -18,7 +18,7 @@ from typing import Union
 
 import numpy as np
 
-from ..datatypes import MixerGeometry, StirrerGeometry, StirrerType
+from ..datatypes import MixerGeometry, StirrerGeometry
 
 # Type alias for any geometry object accepted by the generic functions.
 Geometry = Union[MixerGeometry, StirrerGeometry]

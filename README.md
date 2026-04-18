@@ -1,5 +1,7 @@
 # EmulSim
 
+[![CI](https://github.com/tocvicmeng-prog/Emulsification-Simulator/actions/workflows/ci.yml/badge.svg)](https://github.com/tocvicmeng-prog/Emulsification-Simulator/actions/workflows/ci.yml)
+
 Multi-scale simulation of emulsification for macroporous double-network
 polysaccharide hydrogel microsphere preparation.
 

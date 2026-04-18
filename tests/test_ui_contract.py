@@ -8,7 +8,6 @@ Covers all 4 new modules:
   - ui_units:          all conversion and formatting functions
 """
 
-import math
 import pytest
 
 from emulsim.visualization.ui_model_metadata import (
@@ -18,14 +17,12 @@ from emulsim.visualization.ui_model_metadata import (
     M1_D50_META,
     M1_PORE_META,
     M2_ACS_META,
-    M3_BREAKTHROUGH_META,
     M3_GRADIENT_META,
     M3_MASS_BALANCE_META,
 )
 from emulsim.module2_functionalization.modification_steps import ModificationStepType
 from emulsim.visualization.ui_validators import _M2_SUPPORTED_STEP_TYPES
 from emulsim.visualization.ui_validators import (
-    ValidationResult,
     validate_m1_inputs,
     validate_m2_inputs,
     validate_m3_chromatography,

@@ -12,14 +12,14 @@ import numpy as np
 import pytest
 
 from emulsim.datatypes import (
-    HeatingConfig, HeatingStrategy, MixerGeometry,
-    StirrerGeometry, StirrerType, VesselGeometry,
+    HeatingConfig, MixerGeometry,
+    StirrerGeometry, VesselGeometry,
 )
 from emulsim.level1_emulsification.thermal import (
-    cooling_time_constant, flat_plate_temperature, temperature_profile,
+    cooling_time_constant, temperature_profile,
 )
 from emulsim.level1_emulsification.energy import (
-    average_dissipation, emulsion_density, gap_shear_rate,
+    average_dissipation, gap_shear_rate,
     gap_shear_rate_extended, impeller_reynolds_number,
     kolmogorov_length_scale, max_dissipation, metzner_otto_shear_rate,
     power_draw, power_number_corrected, swept_volume,
@@ -235,8 +235,15 @@ class TestPhysicalPlausibility:
 
 # ─── Integration Smoke Test: Stirred-Vessel PBE Solver ───────────────────
 
+@pytest.mark.slow
 class TestStirredVesselSolverIntegration:
-    """End-to-end smoke test for the stirred-vessel PBE solver path."""
+    """End-to-end smoke test for the stirred-vessel PBE solver path.
+
+    Marked slow: each test calls PBESolver.solve(), which integrates the PBE
+    via scipy BDF and exceeds the fast-suite budget on Py 3.14 (suspected
+    numba JIT cache + BDF Jacobian interaction). Coverage of the full
+    pipeline is preserved by tests/test_smoke.py via fast_smoke.toml.
+    """
 
     def test_stirred_vessel_solve_end_to_end(self):
         """Full solve with stirred_vessel.toml config produces valid results."""

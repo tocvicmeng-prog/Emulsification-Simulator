@@ -21,8 +21,12 @@ from emulsim.module3_performance.isotherms.adapter import EquilibriumAdapter
 from emulsim.module3_performance.process_state import ProcessState
 from emulsim.module3_performance.transport.lumped_rate import solve_lrm
 from emulsim.module3_performance.gradient import (
-    GradientProgram, make_linear_gradient,
+    make_linear_gradient,
 )
+
+# All tests in this module exercise solve_lrm() which uses scipy BDF; same
+# Jacobian-conditioning slow path tracked as v9.1.1 issue #2.
+pytestmark = pytest.mark.slow
 
 
 # ─── Shared Fixtures ──────────────────────────────────────────────────────

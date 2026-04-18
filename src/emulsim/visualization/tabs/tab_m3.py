@@ -173,7 +173,6 @@ def render_tab_m3(tab_container) -> None:
                                 comp_iso = CompetitiveLangmuirIsotherm(
                                     q_max=np.array([q_max]),
                                     K_L=np.array([K_L_m3]),
-                                    component_names=["Protein"],
                                 )
                                 ge = run_gradient_elution(
                                     column,

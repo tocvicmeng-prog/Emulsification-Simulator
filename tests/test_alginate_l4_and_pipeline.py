@@ -10,7 +10,6 @@ Closes protocol §6 tests 6, 7, 11:
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from emulsim.datatypes import (

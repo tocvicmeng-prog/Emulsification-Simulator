@@ -11,7 +11,6 @@ import numpy as np
 import pytest
 
 from emulsim.level1_emulsification.validation import (
-    DimensionlessGroups,
     compute_dimensionless_groups,
 )
 

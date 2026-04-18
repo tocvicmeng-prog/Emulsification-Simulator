@@ -1,5 +1,84 @@
 # Changelog
 
+## v9.1.0 — Health audit hardening (2026-04-19)
+
+The v9.1 release is a health-driven hardening pass. It does not change
+simulator behaviour; it strengthens the test feedback loop, pins the
+runtime stack, and adds CI so the next regression surfaces in a PR
+rather than as an installer hotfix.
+
+### Added
+- `pytest-timeout>=2.3` in `[dev]`; `--timeout=120` in default addopts
+  so a hanging test now fails loudly within two minutes.
+- `docs/decisions/ADR-001-python-version-policy.md` — pin to
+  `>=3.11,<3.13` with verified before/after numbers.
+- `docs/decisions/ADR-002-optimization-stack-pin.md` — pin
+  `torch~=2.11.0 / botorch~=0.17.2 / gpytorch~=1.15.2`.
+- `tests/test_optimization_smoke.py` — runtime gate for the botorch
+  partitioning duck-typing (anchors ADR-002).
+- `.github/workflows/ci.yml` — three jobs: `quick` (3.11 + 3.12 matrix
+  with ruff + mypy + fast pytest), `smoke` (minimal install, smoke
+  marker), `installer-smoke` (wheel build + clean-venv install verify).
+  Addresses the v8.3.5 → v8.3.7 + v9.0 hotfix cascade.
+- New 16² Cahn-Hilliard 2D smoke test (currently `@slow` pending the
+  `build_mobility_laplacian_2d` perf bug — tracked for v9.1.1).
+- `[tool.ruff]` per-file-ignores in `pyproject.toml` for the
+  documented Streamlit reload pattern and the config-logger ordering.
+
+### Fixed
+- `tests/test_data_layer.py::TestKernelConfig::test_for_rotor_stator_legacy`
+  — assertion was stale post-F1 fix (2026-04-17). Test now matches the
+  source-of-truth `phi_d_correction=True, coalescence_exponent=2`.
+- `tests/test_level2_gelation.py::TestCahnHilliard2DSolver::test_solve_gelation_1d_fallback`
+  — converted to the new `mode='ch_1d'` API (was passing the removed
+  `use_2d=` kwarg).
+- `src/emulsim/visualization/pages/reagent_detail.py` — renamed loop
+  variable to break a `ProtocolStep` / `ReactionStep` cross-wire that
+  surfaced as 4 mypy errors at lines 153–156.
+- `src/emulsim/module3_performance/orchestrator.py:798` — narrowed the
+  `gradient.value_at_time(time)` union with `np.asarray` so the
+  `GradientElutionResult.gradient_profile` assignment type-checks.
+- `src/emulsim/visualization/tabs/tab_m3.py:173` — dropped the
+  unsupported `component_names=` kwarg from `CompetitiveLangmuirIsotherm`.
+
+### Changed
+- `src/emulsim/optimization/engine.py` — replaced the `**tkwargs` dict
+  unpacking with explicit `dtype=_DTYPE` at all eight call sites. This
+  clears ~50 mypy stub errors without changing runtime behaviour.
+- `pyproject.toml` `[optimization]` — `botorch>=0.11 / gpytorch>=1.11
+  / torch>=2.1` → `botorch~=0.17.2 / gpytorch~=1.15.2 / torch~=2.11.0`
+  (ADR-002).
+- `pyproject.toml` `[project]` — `requires-python = ">=3.11"` →
+  `">=3.11,<3.13"` (ADR-001).
+- Added `__all__` to `src/emulsim/__init__.py` and
+  `src/emulsim/visualization/__init__.py` to make re-exports explicit
+  rather than letting ruff F401 flag them.
+- Bulk auto-cleaned 105 ruff F401/F541 violations (unused imports,
+  f-strings without placeholders) across 30+ source files. No
+  behaviour change; smoke tests pass before and after.
+- `@pytest.mark.slow` added to: `TestCahnHilliard2DSolver` (6 tests),
+  `TestPBESolver` fast_result tests (5 tests, fixture promoted to
+  `scope="class"`), `TestStirredVesselSolverIntegration` (3 tests),
+  five `TestPackedBed*` classes in `test_module3_catalysis.py`,
+  parametrized `test_toml_config_loads_and_runs`. Each marker carries
+  a comment explaining the runtime cost.
+
+### Known issues (v9.1.1)
+- `solve_packed_bed` and L1 PBE-via-default.toml hit ill-conditioned
+  scipy BDF Jacobians (overflow warnings in `num_jac`) and exceed the
+  60 s timeout. Marked `@slow` for now; root cause is RHS scaling.
+- `build_mobility_laplacian_2d` (CH 2D) is too slow even on a 16²
+  grid. Independent of Python version. Smoke test exists but is `@slow`.
+- 17 `F841` unused-local-variable instances in scientific solvers and
+  Streamlit tab code. Per-file-ignored for now; domain-by-domain
+  triage planned.
+- 72 mypy errors remain across `level1_emulsification/solver.py`,
+  `protocols/mechanism_data.py`, `level2_gelation/pore_analysis.py`,
+  and others. Outside M3 (audit-flagged) scope.
+- Promote the CI `installer-smoke` job from wheel-build-only to a
+  full silent-install + launch-assert against the actual `.exe`
+  installer.
+
 ## v8.3.7 — CRLF line endings on shipped .bat files (2026-04-18)
 
 Hotfix for a fatal cmd-parser error on install:

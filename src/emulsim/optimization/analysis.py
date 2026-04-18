@@ -5,13 +5,13 @@ from __future__ import annotations
 import numpy as np
 
 from ..datatypes import OptimizationState
-from .objectives import PARAM_NAMES, PARAM_BOUNDS, LOG_SCALE_INDICES
+from .objectives import LOG_SCALE_INDICES
 
 
 def pareto_summary(state: OptimizationState) -> str:
     """Generate a text summary of the Pareto front."""
     lines = [
-        f"Optimisation Summary",
+        "Optimisation Summary",
         f"  Total evaluations: {len(state.X_observed)}",
         f"  Pareto-optimal points: {len(state.pareto_X)}",
         f"  Final hypervolume: {state.hypervolume:.4f}",

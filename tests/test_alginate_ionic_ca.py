@@ -15,11 +15,9 @@ integration) are deferred to F1-a Phase 2b.
 
 from __future__ import annotations
 
-import numpy as np
 import pytest
 
 from emulsim.datatypes import (
-    FormulationParameters,
     GelationResult,
     MaterialProperties,
     ModelEvidenceTier,

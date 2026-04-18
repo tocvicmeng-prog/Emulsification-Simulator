@@ -20,7 +20,6 @@ requires_user_calibration unless K_competitor is provided.
 from __future__ import annotations
 
 import logging
-import math
 from dataclasses import dataclass
 
 import numpy as np
