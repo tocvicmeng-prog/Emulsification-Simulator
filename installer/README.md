@@ -48,8 +48,11 @@ Output: `release\EmulSim-<version>-Setup.exe` (≈ 2.5 MB).
    IP, GPL-3.0, GitHub source URL). User must click
    *I accept the agreement* to continue.
 2. **README page** — shows the quickstart `README.txt`.
-3. **Install location** — default `%ProgramFiles%\EmulSim` (or
-   per-user scope if the machine does not grant elevation).
+3. **Install location** — default `%LOCALAPPDATA%\Programs\EmulSim`
+   (per-user). Picked deliberately so the post-install `install.bat`
+   step can create `.venv\` without requiring admin elevation; an
+   admin-scoped Program Files install would make the post-install
+   step fail with Access Denied on venv creation.
 4. **Shortcuts options** — Start-Menu group (default), optional
    desktop shortcut.
 5. **Python presence check** — if Python 3.11+ is not on `PATH`,

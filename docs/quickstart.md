@@ -3,8 +3,8 @@
 ## Installation
 
 ```bash
-git clone https://github.com/tocvicmeng-prog/emulsification-similation-for-microspheres-preparation.git
-cd emulsification-similation-for-microspheres-preparation
+git clone https://github.com/tocvicmeng-prog/Emulsification-Simulator.git
+cd Emulsification-Simulator
 pip install -e .
 ```
 
