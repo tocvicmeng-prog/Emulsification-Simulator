@@ -13,10 +13,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-# All tests in this module exercise solve_lrm() which uses scipy BDF; same
-# Jacobian-conditioning slow path tracked as v9.1.1 issue #2.
-pytestmark = pytest.mark.slow
-
 from emulsim.module3_performance.hydrodynamics import ColumnGeometry
 from emulsim.module3_performance.isotherms.langmuir import LangmuirIsotherm
 from emulsim.module3_performance.isotherms.hic import HICIsotherm
@@ -27,6 +23,10 @@ from emulsim.module3_performance.transport.lumped_rate import solve_lrm
 from emulsim.module3_performance.gradient import (
     make_linear_gradient,
 )
+
+# All tests in this module exercise solve_lrm() which uses scipy BDF; same
+# Jacobian-conditioning slow path tracked as v9.1.1 issue #2.
+pytestmark = pytest.mark.slow
 
 
 # ─── Shared Fixtures ──────────────────────────────────────────────────────
