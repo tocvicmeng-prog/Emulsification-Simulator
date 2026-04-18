@@ -38,7 +38,7 @@ echo [EmulSim 9.1.1] Virtual environment not found at:
 echo                 %CD%\.venv
 echo.
 echo The installer's post-install step appears not to have completed.
-echo (Most common cause: Python 3.11+ was not on PATH at install time.)
+echo (Most common cause: a supported Python (3.11 or 3.12) was not on PATH at install time.)
 echo.
 
 where python >nul 2>&1

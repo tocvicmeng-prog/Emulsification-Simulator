@@ -41,7 +41,7 @@ if not "%EXITCODE%"=="0" (
     echo Common causes and fixes:
     echo   - Port 8501 already in use: close the other app and retry.
     echo   - Dependency import error: re-run install.bat to reinstall.
-    echo   - Python version incompatibility: ensure Python 3.11-3.13.
+    echo   - Python version incompatibility: ensure Python 3.11 or 3.12.
     echo.
     echo For manual diagnosis, open a Command Prompt and run:
     echo   cd /d "%%LOCALAPPDATA%%\Programs\EmulSim"
@@ -57,8 +57,8 @@ echo [EmulSim 9.1.1] Virtual environment not found at:
 echo                 %CD%\.venv
 echo.
 echo This usually means the installer's post-install step was skipped
-echo or could not complete (typically because Python 3.11+ was not on
-echo PATH when the installer ran).
+echo or could not complete (typically because a supported Python (3.11 or 3.12)
+echo was not on PATH when the installer ran).
 echo.
 
 where python >nul 2>&1
