@@ -97,26 +97,78 @@ jobs:
             --ignore=tests/test_optimization_smoke.py
 
   installer-smoke:
-    name: Installer build smoke (Py 3.12)
+    name: Installer build + silent install (Py 3.12)
     runs-on: windows-latest
+    timeout-minutes: 15
     # Architect M2 + risk R1: installer regressions caused the v8.3.5/6/7 +
-    # v9.0 hotfix cascade. This job builds the wheel + sdist on a clean
-    # runner so packaging defects surface before tag-time. Promotion to a
-    # full silent-install + launch-assert is tracked for v9.1.1.
+    # v9.0 hotfix cascade. v9.1.1 #6 promotes this from wheel-build-only to:
+    #   1. Build the actual .exe via Inno Setup (catches .iss + script defects)
+    #   2. Silently install to a temp directory (catches .bat parser, CRLF,
+    #      Access Denied, file-permission regressions)
+    #   3. Inspect the install tree for required files (catches "looks fine
+    #      but missing a launcher" regressions)
+    # NOT yet covered: launching the UI process and asserting browser-open.
+    # That requires a Streamlit headless launcher and is left for a follow-up.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Build wheel + sdist
-        shell: bash
+      - name: Install Inno Setup
+        shell: pwsh
+        # windows-latest images currently ship Inno Setup 6 at the standard
+        # location, but install via Chocolatey defensively in case the image
+        # changes. choco is pre-installed on windows-latest.
         run: |
-          python -m pip install --upgrade pip build
-          python -m build
-      - name: List artifacts
+          if (-not (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+          }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /? | Select-Object -First 1
+      - name: Build the .exe installer
+        shell: cmd
+        run: installer\build_installer.bat
+      - name: List release output
         shell: bash
-        run: ls -la dist
-      - name: Verify wheel installs cleanly
+        run: ls -la release/
+      - name: Silent install to temp dir
+        shell: pwsh
+        # /SILENT runs without GUI; /SUPPRESSMSGBOXES auto-answers prompts.
+        # /DIR overrides the user-pick install location. /LOG captures the
+        # install log so any failure is post-mortem-debuggable in CI logs.
+        run: |
+          $exe = Get-ChildItem release\EmulSim-*-Setup.exe | Select-Object -First 1
+          if (-not $exe) { throw "No installer .exe produced" }
+          $installDir = "$env:RUNNER_TEMP\emulsim-install"
+          $logFile = "$env:RUNNER_TEMP\install.log"
+          Write-Host "Installing $($exe.Name) to $installDir ..."
+          $proc = Start-Process -FilePath $exe.FullName `
+            -ArgumentList "/SILENT","/SUPPRESSMSGBOXES","/DIR=$installDir","/LOG=$logFile" `
+            -PassThru -Wait
+          Write-Host "Installer exit code: $($proc.ExitCode)"
+          if ($proc.ExitCode -ne 0) {
+            Write-Host "--- Install log ---"
+            if (Test-Path $logFile) { Get-Content $logFile }
+            throw "Silent install failed with code $($proc.ExitCode)"
+          }
+      - name: Verify install tree
+        shell: pwsh
+        run: |
+          $installDir = "$env:RUNNER_TEMP\emulsim-install"
+          $required = @(
+            "install.bat", "launch_ui.bat", "launch_cli.bat", "uninstall.bat",
+            "README.txt", "LICENSE.txt"
+          )
+          $missing = @()
+          foreach ($f in $required) {
+            $p = Join-Path $installDir $f
+            if (-not (Test-Path $p)) { $missing += $f } else { Write-Host "OK $f" }
+          }
+          if ($missing.Count -gt 0) { throw "Missing files: $($missing -join ', ')" }
+          # Wheel must be present for the per-user install step
+          $wheel = Get-ChildItem (Join-Path $installDir "wheels") -Filter "emulsim-*.whl"
+          if (-not $wheel) { throw "No wheel found in install tree" }
+          Write-Host "Found wheel: $($wheel.Name)"
+      - name: Verify wheel installs cleanly (legacy gate)
         shell: bash
         run: |
           python -m venv .check_venv

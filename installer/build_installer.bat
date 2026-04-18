@@ -84,6 +84,6 @@ echo [build-installer] 4/4  Compiling installer
 
 echo.
 echo [build-installer] DONE.
-echo Output: release\EmulSim-9.0.0-Setup.exe
+echo Output: release\EmulSim-9.1.0-Setup.exe
 endlocal
 exit /b 0
