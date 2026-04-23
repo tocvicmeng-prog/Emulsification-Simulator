@@ -270,6 +270,52 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
         reversible=True,
         eta_coupling_recommended=-0.05,
     ),
+    # ── 5b. Sodium Trimetaphosphate (STMP) ────────────────────────────────
+    "stmp": CrosslinkerProfile(
+        name="Sodium Trimetaphosphate (STMP, Na3P3O9)",
+        cas="7785-84-4",
+        mechanism="hydroxyl",
+        # STMP is the cyclic trimetaphosphate (DO NOT confuse with sodium
+        # tripolyphosphate STPP / Na5P3O10 / CAS 7758-29-4, which is the
+        # "tpp" entry above — STPP is an IONIC crosslinker at acidic pH;
+        # STMP is a COVALENT crosslinker at alkaline pH via phosphate
+        # diester formation between adjacent agarose -OH groups, plus a
+        # slower phosphoramide (P-N) side-reaction with chitosan -NH2.
+        #
+        # Kinetic constants calibrated to Lim & Seib (1993) Cereal Chem.
+        # 70:137 — starch phosphorylation achieves ~50 % conversion in
+        # 2 h at pH 11.5, 60 degC. Back-fitted Arrhenius: k(60C) ~ 1e-4
+        # m3/(mol*s), Ea ~ 75 kJ/mol (ring-opening barrier).
+        k_xlink_0=5.0e5,
+        E_a_xlink=75000.0,
+        # f_bridge: STMP forms both phosphate monoesters (pendant, no
+        # bridge) and phosphate diesters (bridge). Kasemsuwan & Jane
+        # (1996) Cereal Chem. 73:702: diester yield ~45-50 % of consumed
+        # STMP at typical reaction conditions.
+        f_bridge=0.45,
+        T_crosslink_default=333.15,  # 60 degC (Phase B activation)
+        t_crosslink_default=9000.0,  # 2.5 h (Phase A load 0.5 h + Phase B 2 h)
+        kinetics_model="second_order",
+        suitability=7,
+        notes=(
+            "Food-grade (E452), triggerable covalent crosslinker reacting "
+            "with BOTH agarose -OH (dominant, phosphate diester) and "
+            "chitosan -NH2 (secondary, phosphoramide). Two-phase protocol "
+            "enables homogeneous crosslinking: Phase A soak at pH 7, 4 degC "
+            "for STMP loading (no reaction); Phase B at pH 11, 60 degC for "
+            "activation. Thiele modulus at activation ~0.35 for 250 um "
+            "bead radius -- homogeneous for R < 500 um; expect mild "
+            "core-shell for R > 500 um. CAP T at 70 degC safe (90 degC "
+            "hard limit -- agarose network hydrolysis above that). See "
+            "Appendix J.1.7 for the full wet-lab protocol. NOT TO BE "
+            "CONFUSED with sodium tripolyphosphate (STPP, 'tpp' key). "
+            "Cost: ~USD 0.02/g. Evidence: SEMI_QUANTITATIVE for OH "
+            "pathway, QUALITATIVE_TREND for NH2 side-reaction."
+        ),
+        solver_family="hydroxyl_covalent",
+        network_target="mixed",
+        eta_coupling_recommended=0.08,
+    ),
     # ── 6. Epichlorohydrin ────────────────────────────────────────────────
     "epichlorohydrin": CrosslinkerProfile(
         name="Epichlorohydrin (ECH)",

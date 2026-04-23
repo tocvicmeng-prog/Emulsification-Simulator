@@ -350,6 +350,7 @@ squishy).
 | PEGDA + UV | PEG interpenetrating network | SEMI_QUANTITATIVE |
 | Citric acid | Heat-cure ester bonds | QUALITATIVE_TREND |
 | Divinyl Sulfone (DVS) | Agarose -OH | SEMI_QUANTITATIVE |
+| Sodium Trimetaphosphate (STMP) | Agarose-chitosan dual network (food-grade, triggerable) | SEMI_QUANTITATIVE |
 
 **Key warning on EDC/NHS:** this chemistry requires surface COOH
 groups. Pure chitosan / pure agarose have essentially none. If you

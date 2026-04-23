@@ -1031,9 +1031,9 @@ def test_fmc_biotin_stoich_2_5():
 
 
 def test_profile_count():
-    """Canonical profile count — v5.9: 52 total."""
-    assert len(REAGENT_PROFILES) == 52, \
-        f"Expected 52 profiles, got {len(REAGENT_PROFILES)}"
+    """Canonical profile count — 53 total (v5.9: 52, +1 for stmp_secondary)."""
+    assert len(REAGENT_PROFILES) == 53, \
+        f"Expected 53 profiles, got {len(REAGENT_PROFILES)}"
 
 
 # ═════════════════════════════════════════════════════════════════════════

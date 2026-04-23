@@ -1,5 +1,61 @@
 # Changelog
 
+## v9.1.2 — STMP (Sodium Trimetaphosphate) crosslinker (2026-04-24)
+
+Adds Sodium Trimetaphosphate (STMP, Na₃P₃O₉, CAS 7785-84-4) as a new
+crosslinker in both L3 primary and M2 secondary surfaces. Scientific
+basis: SA-EMULSIM-XL-002 Rev 0.1 (first-principles audit of the
+triggerable cold-load / hot-alkaline-activate protocol). No
+architectural changes — STMP reuses the existing `mechanism="hydroxyl"`
+dispatch path (same as ECH, DVS, citric acid).
+
+### New crosslinker
+
+- **Primary (L3):** `CROSSLINKERS["stmp"]`. Food-grade (E452), covalent,
+  triggerable. Reacts with agarose -OH (dominant, phosphate diester)
+  and chitosan -NH₂ (secondary, phosphoramide). Kinetic parameters
+  calibrated to Lim & Seib (1993) starch phosphorylation: k₀=5.0×10⁵,
+  Eₐ=75 kJ/mol, f_bridge=0.45. `solver_family="hydroxyl_covalent"`,
+  `network_target="mixed"`, suitability 7/10.
+- **Secondary (M2):** `REAGENT_PROFILES["stmp_secondary"]`. First
+  HYDROXYL-targeted secondary crosslinker in the library. Introduces
+  new `chemistry_class="phosphorylation_alkaline"` free-form string.
+
+### UI
+
+- Pre-run info panel when STMP is selected in the M1 crosslinker
+  dropdown: reminder that STMP (CAS 7785-84-4, cyclic trimer, covalent
+  alkaline) is not the same as TPP/STPP (CAS 7758-29-4, linear, ionic
+  acidic). Points to Appendix J.1.7.
+- Post-run warning in the L3 sub-tab when `d50/2 > 500 µm` with STMP
+  selected: flags that the Thiele-modulus homogeneity window has been
+  exceeded and a skin-core crosslink gradient is expected.
+
+### Documentation
+
+- User manual §8 crosslinker table: one new row for STMP.
+- Appendix J §J.1.7: full wet-lab protocol card (three-phase
+  cold-load / hot-alkaline-activate / quench-and-wash procedure,
+  QC acceptance criteria, troubleshooting including the bead-size
+  caveat, safety, and references). 102 lines matching the voice of
+  J.1.4 (DVS) and J.1.6 (Tresyl).
+
+### Tests
+
+- `tests/test_stmp_integration.py` (new, 16 tests): profile presence,
+  CAS-vs-STPP disambiguation, kinetic parameter bounds, end-to-end
+  L3 dispatch through `_solve_second_order_hydroxyl`, M2
+  SECONDARY_CROSSLINKING routing, representative bead radii.
+- `tests/test_module2_workflows.py`: profile count fixture bumped
+  52 → 53 for the new `stmp_secondary` entry.
+
+### Version hygiene
+
+- `pyproject.toml` 9.1.1 → 9.1.2
+- `src/emulsim/__init__.py` caught up from stale 9.0.0 → 9.1.2
+- `installer/templates/*` (install.bat, launch_*.bat, INSTALL.md,
+  README.txt, RELEASE_NOTES.md) all synchronised to 9.1.2
+
 ## v9.1.1 — Backlog burndown (2026-04-19)
 
 Closes the five v9.1.1 issues filed at v9.1.0 release. No new features;
