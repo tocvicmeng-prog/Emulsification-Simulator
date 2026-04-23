@@ -62,6 +62,12 @@ def render_crosslinking_section(
     xl_sel_key = xl_keys[xl_names.index(xl_sel_name)]
     xl = CROSSLINKERS[xl_sel_key]
     st.caption(f"{xl.mechanism} | k\u2080={xl.k_xlink_0:.1e} | Score: {xl.suitability}/10")
+    if xl_sel_key == "stmp":
+        st.info(
+            "STMP: food-grade triggerable crosslinker. Homogeneous for bead "
+            "radius d50/2 < 500 \u00b5m (Thiele modulus < 1). See Appendix J.1.7 "
+            "for the two-phase wet-lab protocol. **Not the same as TPP (STPP).**"
+        )
 
     c_genipin_mM = st.slider(
         "Crosslinker Concentration (mM)", 0.5, 500.0, 10.0, step=0.5, key="m1_c_xl",

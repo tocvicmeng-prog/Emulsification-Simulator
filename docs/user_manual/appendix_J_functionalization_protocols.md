@@ -493,6 +493,127 @@ Nilsson K, Mosbach K (1984) *Meth. Enzymol.* 104:56. Hermanson (2013) Ch. 15.3.3
 
 ---
 
+### J.1.7  Hydroxyl Activation — STMP (Sodium Trimetaphosphate, triggerable dual-network)
+
+**Purpose:** Crosslink **both** agarose hydroxyls (dominant, phosphate diester)
+and chitosan primary amines (secondary, phosphoramide) in the *same* bead, in a
+thermally- and pH-triggerable two-phase reaction. Phase A loads STMP into the
+pre-gelled bead at 4 °C / pH 7 (no reaction). Phase B raises to 60 °C / pH 11
+and the ring-opened trimetaphosphate crosslinks the polymer networks. The
+two-phase design gives a uniform radial crosslink profile (Thiele modulus ~0.35
+for a 250 µm bead radius) — the "dip in acid TPP" ionic-gelation approach gives
+a skin-core structure instead.
+
+**Do not confuse STMP with STPP.** Sodium **Tri**metaphosphate (STMP,
+Na₃P₃O₉, CAS **7785-84-4**) is the *cyclic* trimer used here — covalent,
+alkaline pH, triggerable. Sodium **Tripolyphosphate** (STPP, Na₅P₃O₁₀, CAS
+7758-29-4) is the *linear* ionic crosslinker in EmulSim's `tpp` entry —
+different chemistry, different pH window, reversible. Check the CAS on every
+reagent bottle before you weigh anything.
+
+**Evidence tier:** SEMI_QUANTITATIVE for the agarose-OH phosphate diester path
+(well-established in starch/cellulose phosphorylation literature);
+QUALITATIVE_TREND for the chitosan-NH₂ phosphoramide side-reaction (fewer
+replicates in agarose-chitosan systems specifically).
+
+**EmulSim keys:** `stmp` (L3 primary crosslinker); `stmp_secondary` (M2
+secondary crosslinker). Both map to `mechanism="hydroxyl"` and route through
+the existing hydroxyl-covalent second-order solver.
+
+**Based on:** Lim & Seib (*Cereal Chem.* 1993, 70:137); Kasemsuwan & Jane
+(*Cereal Chem.* 1996, 73:702); Lack et al. (*Carbohydr. Res.* 2004, 339:2391);
+Seal (*Biomaterials* 1996, 17:1869); Salata et al. (*Int. J. Biol. Macromol.*
+2015, 81:1009); SA-EMULSIM-XL-002 Rev 0.1.
+
+#### Safety
+
+- GHS pictograms: exclamation mark (mild irritant). Food-grade additive E452.
+- H-codes: H315 (skin irritation), H319 (eye irritation). No acute-toxicity
+  or carcinogenicity codes.
+- PPE: single nitrile gloves, safety glasses, lab coat. Bench work is fine;
+  fume hood not required for STMP itself, but Phase B uses NaOH/Na₂CO₃
+  (corrosive) — wear a face shield when pipetting the pH 11 buffer hot.
+- Waste: aqueous-neutral after quenching with HCl. Dispose as non-halogenated
+  aqueous waste. The quenched solution contains orthophosphate — if your
+  institution caps phosphate discharge, collect for chemical waste instead.
+
+#### What you need (per 10 mL wet gel)
+
+| Reagent | Amount | CAS | Storage |
+|---|---|---|---|
+| Sodium trimetaphosphate (Na₃P₃O₉) | 200 mg | 7785-84-4 | RT, dry |
+| 0.1 M HEPES pH 7.0 | 20 mL | 7365-45-9 | 4 °C (freshly prepared) |
+| 0.5 M Na₂CO₃ + 0.5 M NaOH pH 11.0 | 15 mL | 497-19-8 / 1310-73-2 | RT (freshly prepared, ≤ 4 h) |
+| 0.1 M HCl (ice-cold) | 20 mL | 7647-01-0 | 4 °C |
+| 10 mM EDTA pH 8 (wash) | 15 mL | 60-00-4 | RT |
+
+#### Procedure
+
+1. PPE on. Bench work.
+2. Drain 10 mL wet gel on a sintered funnel, wash with 3 × 20 mL water.
+3. **Phase A — cold loading.** Transfer gel into a 50 mL tube. Add 10 mL
+   cold 0.1 M HEPES pH 7.0 and dissolve 200 mg STMP in the tube
+   (final 2 % w/v). Rotate end-over-end at 4 °C, 30 min. Expected state:
+   STMP is uniformly distributed throughout the bead volume; negligible
+   reaction has occurred (pH 7, 4 °C).
+4. Drain quickly on the sintered funnel. Do **not** wash at this stage —
+   washing removes the uniformly-loaded STMP.
+5. **Phase B — hot alkaline activation.** Pre-warm 15 mL 0.5 M Na₂CO₃ +
+   0.5 M NaOH pH 11.0 buffer to 60 °C in a water bath. Transfer gel into
+   the warm buffer. Rotate end-over-end in a 60 °C incubator, 2 h.
+   Exact time matters — over-activation produces a brittle gel.
+6. **Phase C — quench + wash.** Transfer gel into 20 mL ice-cold 0.1 M HCl
+   on the sintered funnel (drops local pH to ~4, terminates phosphoramide
+   formation). Wait 2 min. Then wash: 10 × 20 mL water (drain between each);
+   3 × 20 mL 10 mM EDTA pH 8 (strips phosphate-chelated metals); 5 × 20 mL
+   water. Drain damp.
+7. Gel is now phosphate-diester crosslinked. Store in 20 % ethanol / 0.1 M
+   NaCl pH 7 at 4 °C. Use within 3 months.
+
+#### Quality control
+
+- Bulk phosphorus (ICP-OES after acid digestion of a dried 10 mg aliquot):
+  1.5–3.5 mmol P / g dry matrix (≈ 5–10 % crosslink conversion).
+- FTIR (ATR, dried powder): P=O stretch at 1230 cm⁻¹ and P-O-C ester band
+  at 990 cm⁻¹ both present.
+- Equilibrium swelling (water, 24 h): ratio drops 20–40 % vs. uncrosslinked
+  control from the same lot.
+- Storage modulus (DMA, 1 Hz, swollen bead): 2–5× increase vs. control.
+
+#### Troubleshooting
+
+- **Skin-core structure (brittle outer shell, soft centre):** bead radius
+  too large for the Phase B time. STMP is homogeneous for `d50/2 < 500 µm`
+  (Thiele modulus < 1). If your L1 output shows d50/2 > 500 µm, either
+  reduce bead size (raise rpm or add surfactant in L1) or shorten Phase B
+  to 60 min and compensate with a second STMP cycle.
+- **Gel melts / liquefies during Phase B:** temperature exceeded 80 °C
+  or pH exceeded 12. Agarose double-helix is hydrolysed above these
+  thresholds. Re-run with thermometer-verified 60 °C and a freshly
+  pH-calibrated buffer. Do not exceed 70 °C without a pilot-scale
+  validation of your specific matrix.
+- **No measurable crosslinking (FTIR P-bands absent):** Phase A was
+  too long (≥ 2 h) and the STMP reacted at pH 7 before transfer; or
+  Phase B buffer drifted below pH 10. Freshly prepare both buffers on
+  the day of use and keep Phase A at or below 30 min.
+- **Downstream IMAC column loses metal:** unwashed phosphate residues
+  chelate the loading ion. Extend the EDTA wash to 5 × 20 mL before
+  metal charging.
+- **The M1 UI shows `STMP homogeneity window exceeded` warning after
+  the run:** d50/2 > 500 µm; see the skin-core entry above. The
+  simulation result is still valid; the warning flags that the
+  homogeneity assumption behind the kinetic fit may not hold.
+
+#### References
+
+Lim S, Seib PA (1993) *Cereal Chem.* 70:137. Kasemsuwan T, Jane J (1996)
+*Cereal Chem.* 73:702. Lack S, Dulong V, Picton L, Le Cerf D, Condamine E
+(2004) *Carbohydr. Res.* 339:2391. Seal BL (1996) *Biomaterials* 17:1869.
+Salata GC, Kim JH, Chen C-H, McClements DJ (2015) *Int. J. Biol. Macromol.*
+81:1009. Van Wazer JR (1958) *Phosphorus and its Compounds*, vol. I.
+
+---
+
 ## J.2 Ligand Coupling
 
 Attach a small-molecule ligand (dye, inhibitor, cofactor, peptide) to the

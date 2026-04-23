@@ -272,6 +272,56 @@ REAGENT_PROFILES: dict[str, ReagentProfile] = {
         ),
     ),
 
+    # ── 4b. Sodium Trimetaphosphate (STMP) secondary crosslinking ─────
+    # STMP (Na3P3O9, CAS 7785-84-4) is the cyclic trimetaphosphate (NOT
+    # the linear tripolyphosphate STPP / CAS 7758-29-4). Under alkaline
+    # conditions (pH 10-12, T 40-70 degC), it ring-opens and crosslinks
+    # agarose -OH groups via phosphate diesters (dominant) with a slower
+    # phosphoramide side-reaction on chitosan -NH2. Triggerable protocol
+    # (cold/neutral load, hot/alkaline activate) permits homogeneous
+    # crosslinking of pre-gelled beads; see Appendix J.1.7 for the full
+    # wet-lab procedure.
+    #
+    # Kinetic parameters calibrated to Lim & Seib (1993) Cereal Chem.
+    # 70:137: k(60 degC, pH 11) ~ 1e-4 m^3/(mol*s); Ea ~ 75 kJ/mol.
+    # Stoichiometry 0.5 = 1 STMP bridges 2 -OH.
+    "stmp_secondary": ReagentProfile(
+        name="Sodium Trimetaphosphate (STMP, secondary crosslinking)",
+        cas="7785-84-4",
+        reaction_type="crosslinking",
+        target_acs=ACSSiteType.HYDROXYL,
+        product_acs=None,
+        k_forward=1e-4,          # [m^3/(mol*s)] at T_ref = 60 degC
+        E_a=75000.0,             # [J/mol] ring-opening barrier
+        stoichiometry=0.5,       # 1 STMP bridges 2 -OH (diester crosslink)
+        hydrolysis_rate=1e-5,    # [1/s] at pH 11, 60 degC (Van Wazer 1958)
+        ph_optimum=11.0,
+        temperature_default=333.15,  # 60 degC (Phase B activation)
+        time_default=9000.0,         # 2.5 h (0.5 h Phase A + 2 h Phase B)
+        functional_mode="crosslinker",
+        chemistry_class="phosphorylation_alkaline",
+        ph_min=10.0,
+        ph_max=11.5,
+        temperature_min=277.15,      # 4 degC (Phase A loading)
+        temperature_max=343.15,      # 70 degC (safe cap; 90 degC hard limit)
+        confidence_tier="semi_quantitative",
+        calibration_source=(
+            "Lim & Seib (1993) Cereal Chem. 70:137 starch phosphorylation; "
+            "Kasemsuwan & Jane (1996) Cereal Chem. 73:702 diester yield; "
+            "Lack et al. (2004) Carbohydr. Res. 339:2391 hyaluronan."
+        ),
+        notes=(
+            "Food-grade (E452) triggerable covalent crosslinker. First "
+            "HYDROXYL-targeted secondary crosslinker in the library. "
+            "Two-phase protocol: cold/neutral loading (4 degC, pH 7) then "
+            "hot/alkaline activation (60 degC, pH 11). Thiele-modulus "
+            "homogeneous for bead radius < 500 um. Co-reacts with "
+            "chitosan -NH2 via phosphoramide (QUALITATIVE_TREND, not "
+            "separately modelled here). Distinguish from 'tpp' (STPP, "
+            "ionic, acidic pH). See Appendix J.1.7."
+        ),
+    ),
+
     # ─── Phase 2 Expansion — Ligand Coupling (4) ──────────────────────
 
     # ── 5. DEAE coupling ──────────────────────────────────────────────

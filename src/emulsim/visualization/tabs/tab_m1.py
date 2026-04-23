@@ -688,6 +688,15 @@ def render_tab_m1(
                 _l3_badge = _evidence_badge(x)
                 if _l3_badge:
                     st.caption(_l3_badge)
+                # STMP homogeneity window (see Appendix J.1.7): Thiele ~1 at R=500 um
+                if _xl_sel_key == "stmp" and (e.d50 / 2.0) > 500e-6:
+                    st.warning(
+                        f"STMP homogeneity window exceeded: bead radius "
+                        f"d50/2 = {e.d50 / 2.0 * 1e6:.0f} µm > 500 µm. "
+                        f"Expect a skin-core crosslink gradient. Either reduce bead "
+                        f"size (raise rpm or surfactant) or shorten Phase B activation. "
+                        f"See Appendix J.1.7 troubleshooting."
+                    )
 
             with sub5:
                 st.subheader("Level 4: Mechanical Properties")

@@ -1,13 +1,74 @@
-# EmulSim 9.1.1 — Release Notes
+# EmulSim 9.1.2 — Release Notes
 
-**Release date:** 2026-04-19
+**Release date:** 2026-04-24
 **Platform:** Windows 11 x64 (Windows 10 x64 supported down to build 17763)
 **Edition:** First Edition + Appendix J — Functionalisation Wet-Lab Protocols
 **Licence:** GPL-3.0 — intellectual property: Holocyte Pty Ltd
 **Upstream:** https://github.com/tocvicmeng-prog/Emulsification-Simulator
 **Latest source code:** download from the "Releases" tab on GitHub
 
-## What's new in v9.1.1
+## What's new in v9.1.2
+
+A single-feature release. Adds **Sodium Trimetaphosphate (STMP, Na₃P₃O₉,
+CAS 7785-84-4)** as a new crosslinker, with a first-principles
+scientific audit, a triggerable two-phase wet-lab protocol, and
+homogeneity guardrails built into the UI.
+
+### Why STMP matters
+
+STMP fills a genuine gap in the crosslinker library: a **food-grade,
+covalent, dual-network, triggerable** crosslinker. Existing options
+trade off against each other — TPP (ionic, reversible, chitosan-only),
+genipin (covalent, slow, chitosan-only), ECH/DVS (covalent, toxic,
+agarose-only). STMP crosslinks **both** networks (phosphate diester on
+agarose -OH, phosphoramide on chitosan -NH₂) in the same bead, in a
+single triggerable reaction.
+
+**Do not confuse STMP with STPP.** Sodium *Tri*metaphosphate (STMP,
+Na₃P₃O₉, CAS 7785-84-4) is the *cyclic* trimer used here — covalent,
+alkaline pH, triggerable. Sodium *Tripolyphosphate* (STPP, Na₅P₃O₁₀,
+CAS 7758-29-4) is the *linear* ionic crosslinker already in EmulSim's
+`tpp` entry — different chemistry entirely. Always check the CAS on
+every reagent bottle.
+
+### Scientific basis
+
+- Dual reactivity: phosphate diester with agarose -OH (dominant,
+  SEMI_QUANTITATIVE evidence tier); phosphoramide with chitosan -NH₂
+  (secondary, QUALITATIVE_TREND).
+- Triggerable two-phase protocol: Phase A cold/neutral (4 °C, pH 7,
+  30 min) loads STMP into the pre-gelled bead with ~zero reaction;
+  Phase B hot/alkaline (60 °C, pH 11, 2 h) opens the trimetaphosphate
+  ring and forms crosslinks.
+- Thiele-modulus analysis: homogeneous crosslinking for bead radius
+  < 500 µm (φ < 1). For R > 500 µm the M1 UI raises a warning and the
+  Appendix J troubleshooting section suggests either a smaller bead
+  or a shorter Phase B.
+- Kinetic parameters calibrated to Lim & Seib (1993) starch
+  phosphorylation: k₀ = 5.0×10⁵ m³/(mol·s), Eₐ = 75 kJ/mol,
+  f_bridge = 0.45.
+
+### What you get
+
+- New primary (L3) crosslinker `stmp` and secondary (M2) crosslinker
+  `stmp_secondary`, both visible in the `AGAROSE_CHITOSAN` family UI.
+- A 102-line Appendix J.1.7 protocol card: materials, safety, the
+  three-phase procedure, QC acceptance criteria (ICP-OES P content,
+  FTIR P=O and P-O-C bands, swelling and modulus changes), and
+  troubleshooting.
+- UI guardrails for the homogeneity window and the STMP/STPP
+  disambiguation.
+
+### Under the hood
+
+- Zero new solver code paths. STMP reuses the existing
+  `mechanism="hydroxyl"` dispatch (same as ECH, DVS, citric acid).
+- 16 new integration tests (`tests/test_stmp_integration.py`) cover
+  profile presence, kinetic parameter bounds, end-to-end L3 dispatch,
+  and M2 orchestrator validation.
+- ruff 0 findings. mypy 32 errors (at the regression cap; zero added).
+
+## What was in v9.1.1 ("Backlog burndown")
 
 A backlog burndown release. No new simulator features; the work is in
 performance, code quality, and continuous integration so future
