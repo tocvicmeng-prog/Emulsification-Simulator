@@ -534,10 +534,13 @@ alkaline pH, triggerable. Sodium **Tripolyphosphate** (STPP, Na₅P₃O₁₀, C
 different chemistry, different pH window, reversible. Check the CAS on every
 reagent bottle before you weigh anything.
 
-**Evidence tier:** SEMI_QUANTITATIVE for the agarose-OH phosphate diester path
-(well-established in starch/cellulose phosphorylation literature);
-QUALITATIVE_TREND for the chitosan-NH₂ phosphoramide side-reaction (fewer
-replicates in agarose-chitosan systems specifically).
+**Evidence tier:** SEMI_QUANTITATIVE for **both** the agarose-OH phosphate
+diester path (well-established in starch/cellulose phosphorylation
+literature) and, as of v9.2.2, the chitosan-NH₂ phosphoramide side-reaction
+(rate constants calibrated to Seal 1996 + Salata 2015, with the parallel
+NH₂ ODE track wired into the L3 solver). The simulator now reports the
+two contributions to the chitosan-network modulus separately in
+`CrosslinkingResult.G_chit_diester` and `G_chit_phosphoramide`.
 
 **EmulSim keys:** `stmp` (L3 primary crosslinker); `stmp_secondary` (M2
 secondary crosslinker). Both map to `mechanism="hydroxyl"` and route through

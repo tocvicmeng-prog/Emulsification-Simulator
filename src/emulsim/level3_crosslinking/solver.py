@@ -572,10 +572,78 @@ def _solve_second_order_hydroxyl(params, props, xl, R_droplet, porosity):
 
     # Use agarose repeat unit MW for Mc calculation
     M_repeat = 306.0  # g/mol, agarose disaccharide
-    return _build_result_arrays(
+    result = _build_result_arrays(
         sol.t, sol.y[0], c_agarose, T, props.DDA, M_repeat,
         OH_total, fb,
     )
+
+    # v9.2.2: parallel NH2 phosphoramide track (STMP). See SA-EMULSIM-XL-002
+    # Rev 0.1 and reagent_library.NH2CoReaction docstring for the physics.
+    # This track runs as an independent second-order ODE using chitosan-NH2
+    # as the reactive pool and the crosslinker's NH2CoReaction parameters.
+    # Its contribution to the chitosan-network modulus is added to the
+    # primary OH-track result. Backward-compatible: when xl.nh2_co_reaction
+    # is None the fields remain 0.0 and the single-track result is unchanged.
+    nh2_co = getattr(xl, "nh2_co_reaction", None) if xl else None
+    if nh2_co is not None:
+        c_chitosan = params.formulation.c_chitosan
+        DDA = props.DDA
+        M_GlcN = props.M_GlcN
+        NH2_total = max(available_amine_concentration(c_chitosan, DDA, M_GlcN), 0.0)
+
+        k_nh2 = arrhenius_rate_constant(T, max(nh2_co.k0_nh2, 0.0), nh2_co.E_a_nh2)
+        fb_nh2 = max(nh2_co.f_bridge_nh2, 0.0)
+
+        # Second-order ODE with chitosan-NH2 as the reactive pool. We use a
+        # separate crosslinker pool for this track; the assumption is that
+        # STMP is in effective excess relative to each track individually
+        # (typical Phase B: 65 mM STMP vs ~100 mM NH2 and ~1000 mM OH -- NH2
+        # and OH tracks deplete STMP nearly independently at low conversion).
+        # If future bench data shows stronger coupling, a single coupled ODE
+        # with [X_OH, X_NH2, G_shared, OH, NH2] can replace this.
+        y0_nh2 = np.array([0.0, c_crosslinker, NH2_total])
+        sol_nh2 = solve_ivp(
+            crosslinking_odes, t_span, y0_nh2,
+            args=(k_nh2, NH2_total),
+            method=params.solver.l3_method,
+            rtol=params.solver.l3_rtol,
+            atol=params.solver.l3_atol,
+            t_eval=t_eval,
+        )
+        if not sol_nh2.success:
+            logger.warning("Phosphoramide ODE solver did not converge: %s", sol_nh2.message)
+
+        # Build chitosan-side modulus contribution using chitosan parameters.
+        # _build_result_arrays scales by (c_polymer, M_repeat, DDA, reactive
+        # _total, f_bridge). For the NH2 track: c_polymer=c_chitosan (kg/m3),
+        # M_repeat=M_GlcN (g/mol), reactive_total=NH2_total.
+        phosphoramide_result = _build_result_arrays(
+            sol_nh2.t, sol_nh2.y[0], c_chitosan, T, DDA, M_GlcN,
+            NH2_total, fb_nh2,
+        )
+
+        # Sum the two contributions: G_chit_total array/final = diester + phosphoramide.
+        # Preserve the existing G_chitosan_array / G_chitosan_final as the TOTAL
+        # (backward compatible for downstream consumers); expose the split on
+        # the new diagnostic fields.
+        result.G_chit_diester = float(result.G_chitosan_final)
+        result.G_chit_phosphoramide = float(phosphoramide_result.G_chitosan_final)
+        result.G_chitosan_array = result.G_chitosan_array + phosphoramide_result.G_chitosan_array
+        result.G_chitosan_final = result.G_chit_diester + result.G_chit_phosphoramide
+        # NH2 conversion fraction = consumed_NH2 / initial_NH2. consumed_NH2
+        # = 2 * X_NH2 (stoichiometry: 1 bridge consumes 2 NH2).
+        if NH2_total > 0:
+            X_nh2_final = float(sol_nh2.y[0][-1])
+            result.p_final_nh2 = min(2.0 * X_nh2_final / NH2_total, 1.0)
+
+        logger.info(
+            "L3 dual-track: STMP OH-diester G=%.1f Pa + NH2-phosphoramide "
+            "G=%.1f Pa -> total G_chit=%.1f Pa (p_NH2=%.3f)",
+            result.G_chit_diester, result.G_chit_phosphoramide,
+            result.G_chitosan_final, result.p_final_nh2,
+        )
+
+    return result
 
 
 def _solve_uv_dose(params, props, xl, uv_intensity, R_droplet, porosity):

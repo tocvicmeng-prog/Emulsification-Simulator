@@ -1,6 +1,6 @@
 @echo off
 REM ---------------------------------------------------------------------
-REM EmulSim 9.2.1 -- Open a Command Prompt with emulsim on PATH (self-heal)
+REM EmulSim 9.2.2 -- Open a Command Prompt with emulsim on PATH (self-heal)
 REM Drops into an interactive cmd.exe with the .venv activated, so you
 REM can run emulsim subcommands directly:
 REM     emulsim run configs\default.toml
@@ -26,7 +26,7 @@ if not exist ".venv\Scripts\python.exe"  goto setup
 if errorlevel 1 goto setup
 
 :launch
-echo [EmulSim 9.2.1] Command-line shell. Type 'exit' to close.
+echo [EmulSim 9.2.2] Command-line shell. Type 'exit' to close.
 echo                 Example: emulsim run configs\default.toml
 echo.
 cmd /k ".venv\Scripts\activate.bat && cd /d %~dp0"
@@ -34,7 +34,7 @@ endlocal
 exit /b %ERRORLEVEL%
 
 :setup
-echo [EmulSim 9.2.1] Virtual environment not found at:
+echo [EmulSim 9.2.2] Virtual environment not found at:
 echo                 %CD%\.venv
 echo.
 echo The installer's post-install step appears not to have completed.

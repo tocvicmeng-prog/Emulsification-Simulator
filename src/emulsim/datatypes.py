@@ -1046,6 +1046,11 @@ class CrosslinkingResult:
     regime: str = "unknown"             # "reaction_limited", "borderline", "diffusion_limited", "unknown"
     stoichiometric_ceiling: float = 1.0 # [-] max conversion given reagent/reactive-group ratio
     residual_reactive_groups: float = 0.0  # [mol/m3] unreacted -NH2 or -OH after crosslinking
+    # v9.2.2: split diagnostics for dual-track crosslinkers (STMP).
+    # Remain 0.0 for single-track crosslinkers (genipin, glutaraldehyde, ECH, DVS).
+    G_chit_diester: float = 0.0           # [Pa] contribution from agarose-OH phosphate diesters
+    G_chit_phosphoramide: float = 0.0     # [Pa] contribution from chitosan-NH2 phosphoramides
+    p_final_nh2: float = 0.0              # [-] NH2 conversion fraction (STMP dual-track)
 
 
 @dataclass
