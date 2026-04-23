@@ -1165,4 +1165,591 @@ CalibrationStore via the F5 pattern.
 
 ---
 
+---
+
+### A.4  Codebase Scientific Review (2026-03-26)
+
+Source: `docs/03_scientific_review.md`. Full review of `src/emulsim/` at v3.0
+plus docs 01 and 02. Preserved here: formula-level verifications and the four
+FAIL findings (all subsequently addressed). Statistical / numerical-rigour
+observations that reference long-shipped code states are omitted.
+
+**Overall score at v3.0:** 61/100 (physical model fidelity 60, mathematical
+correctness 65, numerical reliability 75, output accuracy 45, experimental
+utility 50). "Suitable for qualitative parameter screening and trend
+prediction but not ready for quantitative prediction of laboratory
+experiments without addressing critical issues."
+
+**FAIL findings (each now resolved):**
+
+1. **L3 ODE stoichiometry bug.** Each genipin crosslink should consume 2
+   amines (one on each chain); the v3.0 code consumed only 1. This
+   underestimated amine consumption by 2× and created internal inconsistency
+   between ODE dynamics and property calculations. Fixed in v3+.
+
+2. **Alopaeus C3 term dimensional inconsistency.** The v3.0 viscous
+   resistance exponent decomposition produced a non-dimensionless exponential
+   argument (units s/m instead of dimensionless). The original Alopaeus
+   viscous group is `μ_d / sqrt(ρ_c · σ · d)` (correctly dimensionless);
+   the v3.0 code decomposed this differently across the ε and d dependences,
+   producing the wrong physics. Since C3 defaulted to 0.0, the bug was
+   dormant but blocked use of the viscous correction.
+
+3. **Genipin k₀ calibration off by 5×.** With `k₀ = 1.33×10⁴ m³/(mol·s)` the
+   calculated `k(37 °C) ≈ 0.024 L/(mol·s)`, while the architecture intent
+   was `5×10⁻³ L/(mol·s)`. Correct `k₀ ≈ 2810 m³/(mol·s)` was needed.
+
+4. **Pore size prediction 10-50× below literature.** The v3.0 CH simulation
+   predicted ~8 nm pore size for 4.2% agarose; literature values are
+   50–500 nm depending on concentration (Pernodet 1997 AFM). Root causes:
+   (a) binary polymer-solvent model cannot capture ternary polymer-polymer
+   phase separation (Finding 2 of A.1); (b) grid resolution insufficient
+   for resolving 60–100 nm features at 128×128 / L=2 µm (h = 15.6 nm,
+   Nyquist λ = 31 nm); (c) Flory-Huggins / κ_CH parameters needed
+   recalibration.
+
+**Verified-CORRECT formulae (preserved as audit anchors for future changes):**
+
+- **Flory-Huggins free energy** (Rubinstein & Colby 2003):
+  `f(φ) = (kB·T/v₀) · [φ·ln(φ)/N_p + (1-φ)·ln(1-φ) + χ·φ·(1-φ)]`
+  with correct first and second derivatives. `v₀ = 1.8×10⁻²⁹ m³` matches a
+  water-molecule volume.
+- **Avrami gelation** (Aymard 2001): `α = 1 - exp(-(k·t)^n)`, `n ∈ [2, 3]`
+  for agarose.
+- **Canal-Peppas mesh size** (Canal & Peppas 1989):
+  `ξ = 0.071 · ν₂ˢ^(-1/3) · √M_c` [nm, with M_c in g/mol]; coefficient 0.071
+  bundles bond length, characteristic ratio, repeat-unit M_w for
+  polysaccharide backbones.
+- **Mark-Houwink for chitosan** (Zhao 2020): `[η] = 0.07 · M_w^0.72` mL/g.
+  Verified: M_w = 120,000 g/mol → [η] = 391 mL/g, matches architecture doc.
+- **Szyszkowski-Langmuir IFT** (Szyszkowski 1908; Langmuir 1917):
+  `σ = σ₀(T) - R·T·Γ_∞·ln(1 + K_L·c_mol)`. At 90 °C, 2% w/v Span-80, with
+  Γ_∞ = 3.5×10⁻⁶ mol/m², K_L = 0.75 m³/mol: σ ≈ 5 mN/m — matches literature
+  for Span-80-stabilized W/O emulsions. **Note:** K_L = 0.75 (not the
+  earlier K_L = 200 from the TOML data file — the 200 value would drive σ
+  to unphysically near-zero).
+- **Eyre convex-concave splitting** (Eyre 1998): unconditionally
+  gradient-stable for Cahn-Hilliard. v3.0 implementation correctly computed
+  contractive constant with 20% safety margin.
+- **Rubber elasticity:** `G = ν_e · kB · T` where ν_e is crosslink number
+  density [1/m³]. v3.0 code correctly converted X [mol/m³] via Avogadro's
+  number: `G = (X · N_A) · kB · T = X · R · T`, dimensionally consistent.
+
+**Kernel/regime analysis (preserved):**
+
+At default 10,000 RPM, audit-computed:
+- `P = N_p · ρ · N³ · D⁵ = 1.5 · 850 · 166.67³ · 0.025⁵ = 0.576 W`
+- `ε_avg = P / (ρ · V) = 1,355 m²/s³`, `ε_max = 50 · ε_avg = 67,750 m²/s³`
+- Kolmogorov scale: `η_K = (ν_c³/ε)^0.25 ≈ 23 µm`
+- Classical Hinze prediction: `d_max ≈ 6.2 µm`
+
+Since target d32 ≈ 6 µm < η_K = 23 µm, droplets are in the **sub-Kolmogorov
+viscous regime**. This confirms selection of the Alopaeus viscous breakage
+kernel over Coulaloglou-Tavlarides inertial kernel for the 2-µm target
+regime. With μ_d ≈ 0.01 Pa·s (post-shear-thinning from 1 Pa·s), viscosity
+number `Vi = μ_d / sqrt(ρ_c · σ · d_max) ≈ 1.98`; the Calabrese viscous
+correction factor `(1 + 1.38·Vi)^0.6 ≈ 2.3` — would shift d_max to ~14 µm
+when enabled. PBE dynamics (breakage-coalescence balance) pull d32 below
+d_max.
+
+---
+
+### A.5  Second Audit (2026-04-11) — new v6-era findings
+
+Source: `docs/08_audit_report_2026-04-11.md`. Re-audit after initial
+remediation of v3 issues. Preserved here: the findings that were NEW
+relative to doc 3 (A.4), plus the two-tier architectural framing that
+influenced the current `evidence_tier` system. Findings that overlap
+A.1/A.4 are not repeated.
+
+**New HIGH-severity findings (v6-era):**
+
+1. **L3 diffusion-limited fallback silently applies wrong chemistry.** When
+   droplets exceed a Thiele-modulus threshold, `solve_crosslinking()` fell
+   back to `_solve_reaction_diffusion()` which used `props.k_xlink_0`,
+   `props.E_a_xlink`, and `c_genipin` regardless of the selected crosslinker
+   profile, and always tagged the result as `amine_covalent`. With
+   T = 353 K, R_droplet = 500 µm, three chemically distinct crosslinkers
+   (DVS, PEGDA+UV, TPP) all returned identical `p_final = 0.94176` with
+   `amine_covalent` metadata. This made large-droplet non-amine chemistry
+   predictions physically wrong in a silent way. **Resolution:** chemistry
+   dispatch now gates the PDE branch; unsupported chemistries in
+   diffusion-limited regime produce explicit QUALITATIVE_TREND warnings
+   rather than silent genipin substitution.
+
+2. **Mechanistic L2 operationally sidelined.** The 2D CH solver rebuilt the
+   mobility-weighted sparse operator on every timestep and solved a fresh
+   16,384 × 16,384 sparse system each step (no LU caching). Full pipeline
+   with `l2_mode='ch_2d'` at n_grid=32 did not finish within 300 s. Only
+   `ternary_solver` ran faster (8.4 s) by using explicit Euler on a periodic
+   square patch — weaker geometric fidelity but tractable. **Current
+   state:** ternary CH for cellulose NIPS (shipped v8.1-beta) uses BDF with
+   clipped log-arguments; binary CH for agarose-chitosan retains the
+   research-mode label.
+
+3. **Default L1 RPM trend non-monotonic (v6 version of A.1 Finding 5):**
+
+   | RPM | d32 (µm) |
+   |---|---|
+   | 3000 | 2.573 |
+   | 6000 | 1.627 |
+   | 10000 | 2.810 |
+   | 15000 | 3.703 |
+   | 25000 | 4.350 |
+
+   Trend reverses above 6,000 RPM. PBE-output regression tests were absent;
+   only `hinze_dmax()` was tested.
+
+**Two-tier architectural framing (preserved; influenced current code):**
+
+The recommended split into **Production Engineering Tier** (calibrated
+empirical, stable, experiment-ranking use) vs **Mechanistic Research Tier**
+(ternary phase-field, strict trust gates, mechanism studies) is the
+direct ancestor of the current `RunReport.evidence_tier` taxonomy and the
+Bayesian optimizer's `QUALITATIVE_TREND`-exclusion default. The two tiers
+map onto current code as:
+
+- Production: empirical L2 + polymer-family M1 dispatch + per-family L3
+  solvers + phenomenological L4 + evidence_tier labelling ≤ SEMI_QUANTITATIVE
+- Research: ternary CH solver (cellulose; alginate-ionic-Ca; PLGA-solvent-
+  evap) + calibrated L1 kernels + EDC/NHS mechanistic (Node 31) +
+  digital-twin EnKF replay (F2 Phase 1).
+
+**v6-era recommended priority order (partially shipped):**
+
+1. Fix L3 chemistry dispatch in diffusion-limited mode. ✓ shipped
+2. Recalibrate L1 monotonic RPM behaviour. Partial — requires Study A
+   wet-lab DSD data.
+3. Reframe default L2 as calibrated empirical output. ✓ shipped (manifest +
+   evidence_tier label).
+4. Add validation datasets and regression tests for d32(RPM), pore vs
+   cooling rate, modulus vs crosslinker loading. Partial — scaffold in
+   `data/validation/`; actual datasets require wet-lab.
+5. Upgrade uncertainty and optimization to respect validation bounds.
+   ✓ shipped (UnifiedUncertaintyEngine + trust-aware optimizer).
+6. Invest in ternary mechanistic L2 as long-term research model. ✓ shipped
+   (cellulose NIPS ternary; agarose-chitosan remains binary).
+
+---
+
+### A.6  EDC/NHS Mechanistic Model — scientific brief (Node 31)
+
+Source: `docs/node31_edc_nhs_scientific_brief.md` (2026-04-17). Load-bearing
+per /scientific-advisor verdict. Preserved in full because the mechanism
+derivation, rate-constant table with literature provenance, and pH
+sub-model are not captured at this level of detail in source code comments.
+Implementation now lives in
+`src/emulsim/module2_functionalization/edc_nhs_kinetics.py`.
+
+#### A.6.1  Scope correction
+
+The original orchestrator brief asked for a "mechanistic EDC/NHS solver for
+L3 (structural crosslinking)". A first-principles check redirected the
+scope: EDC/NHS is **not** a structural crosslinker for native chitosan +
+agarose. EDC activates a carboxyl group (–COOH) via O-acylisourea; NHS
+stabilises it as an NHS ester; the ester couples to a primary amine (–NH₂)
+to yield an amide bond. Native chitosan + agarose carry –NH₂ and –OH only;
+there is nothing for EDC to activate.
+
+**Resolution:** Node 31 promoted the Module 2 `edc_nhs_activation` profile
+from single-step `ranking_only` to a two-step `semi_quantitative` mechanism.
+The L3 `michaelis_menten` branch logs a warning and downgrades to
+QUALITATIVE_TREND when dispatched without M2 carboxyl-introduction context.
+The same kinetic core transplants 1:1 into L3 for pre-carboxylated matrices
+(e.g. succinylated chitosan supplied as pre-functionalised input).
+
+#### A.6.2  Four-step mechanism (Hermanson *Bioconjugate Techniques* 3rd ed., Ch. 4)
+
+```
+Step 1 — EDC activation (pH-dependent; optimum pH 4.5–5.5)
+    R–COOH + EDC  →  R–C(=O)–O–C(=N⁺H–R₁)–NHR₂    (O-acylisourea)
+                                               rate constant k₁
+
+Step 2a — NHS stabilisation (productive; irreversible)
+    O-acylisourea + NHS  →  R–C(=O)–O–NHS + EDU
+                                               rate constant k₂
+
+Step 2b — Hydrolysis of O-acylisourea (non-productive)
+    O-acylisourea + H₂O  →  R–COOH + EDU
+                                               rate constant k_h1
+                                               (t½ ≈ 10–20 min at pH 5)
+
+Step 3 — NHS ester hydrolysis (non-productive)
+    R–C(=O)–O–NHS + H₂O  →  R–COOH + NHS
+                                               rate constant k_h2
+                                               (t½ ≈ 4–5 h at pH 7)
+
+Step 4 — Amine coupling (productive; second-order)
+    R–C(=O)–O–NHS + R'–NH₂  →  R–C(=O)–NH–R' + NHS
+                                               rate constant k₃
+```
+
+EDU = N-ethyl urea. The "Michaelis-Menten" label in the legacy L3 CROSSLINKERS
+library is a loose description of Step 1 saturation when [EDC]/[COOH] is
+high — not literal enzyme kinetics.
+
+#### A.6.3  ODE system (four state variables + free-species conservation)
+
+```
+Let
+    C(t)  = surface COOH (mol/m³ bed)
+    A(t)  = O-acylisourea intermediate
+    E(t)  = NHS ester
+    P(t)  = amide product (crosslink / coupling)
+
+dC/dt = -k₁·[EDC]_free·C + k_h1·A + k_h2·E
+dA/dt = +k₁·[EDC]_free·C - k₂·[NHS]_free·A - k_h1·A
+dE/dt = +k₂·[NHS]_free·A - k_h2·E - k₃·[NH₂]·E
+dP/dt = +k₃·[NH₂]·E
+
+d[EDC]_free/dt = -k₁·[EDC]_free·C
+d[NHS]_free/dt = -k₂·[NHS]_free·A + k₃·[NH₂]·E
+d[NH₂]/dt      = -k₃·[NH₂]·E     (when coupling to surface COOH)
+```
+
+**Quasi-steady-state reduction** (A rapid): `A_ss = (k₁·[EDC]_free·C) /
+(k₂·[NHS]_free + k_h1)`. This reduces the stiff system to two timescales
+(C decay and E evolution) and is numerically well-behaved for scipy BDF.
+
+#### A.6.4  Parameter table (literature values, 298 K unless noted)
+
+| Symbol | Meaning | Value | Units | Source |
+|---|---|---|---|---|
+| k₁ | EDC + COOH activation | 0.005–0.05 | M⁻¹ s⁻¹ | Nakajima & Ikada 1995, *Bioconj. Chem.* 6:123 (pH 5.5) |
+| k_h1 | O-acylisourea hydrolysis | 1×10⁻³ | s⁻¹ | Hermanson 2013 Ch.4; t½ ≈ 10–20 min at pH 5 |
+| k₂ | NHS stabilisation | 0.1–1.0 | M⁻¹ s⁻¹ | Wang et al. 2011 *Langmuir* 27:12058 |
+| k_h2 | NHS ester hydrolysis | 3×10⁻⁵ (pH 7), 1×10⁻³ (pH 8.5) | s⁻¹ | Cline & Hanna 1988 *JOC* 53:3583 |
+| k₃ | NHS ester + NH₂ aminolysis | 1–10 | M⁻¹ s⁻¹ | Hermanson 2013; faster at higher pH via [NH₂]/[NH₃⁺] speciation |
+| E_a,1 | Arrhenius E_a for k₁ | ~40 | kJ/mol | Estimated from Wang 2011 (4–25 °C) |
+| E_a,h1 | E_a for O-acylisourea hydrolysis | ~60 | kJ/mol | Typical for aqueous hydrolysis 50–70 kJ/mol |
+| E_a,h2 | E_a for NHS ester hydrolysis | ~55 | kJ/mol | Cline & Hanna 1988 |
+| E_a,3 | E_a for aminolysis | ~50 | kJ/mol | Typical nucleophilic acyl substitution |
+| pKa(R–NH₃⁺) | Chitosan amine | 6.3–6.5 | — | Strand et al. 2001 *Biomacromolecules* 2:1310 |
+
+**pH sub-model.** Effective amine concentration:
+`[NH₂]_eff(pH) = [NH₂]_total / (1 + 10^(pKa − pH))`.
+This captures the competing effects — higher pH accelerates aminolysis but
+also accelerates k_h2 (NHS ester hydrolysis). Net yield exhibits a broad
+plateau around pH 7–8 that emerges naturally from the ODE system.
+
+**Calibration tier guidance.** Literature values are sufficient for
+order-of-magnitude prediction → ship at `SEMI_QUANTITATIVE` tier. Study A
+wet-lab should fit `k₁·[COOH-active-fraction]` (via EDC consumption) and
+`k₃·[NH₂-accessible-fraction]` (via aminolysis yield); posteriors absorbed
+through `CalibrationStore` promote to `QUANTITATIVE`.
+
+**Risk register (preserved):**
+- [LOW] Literature k₁ values span ~10× across buffers. Mitigation: default
+  to pH-5.5 MES-buffer value; propagate via unified UQ engine.
+- [LOW] QSS on A assumes `k₂[NHS] + k_h1 » k₁[EDC]`. Holds for typical
+  protocols ([NHS] ≈ 5–10 mM, [EDC] ≈ 2–5 mM); runtime check guards this.
+- [MED] Surface vs bulk distinction. Rate constants above are
+  homogeneous-solution values. Surface-bound COOH on a hydrogel microsphere
+  is diffusion-limited to EDC in bulk solvent; handled via existing
+  Thiele-modulus machinery.
+
+#### A.6.5  L3 → L4 interface mapping (preserved)
+
+For EDC/NHS:
+- `p_final = P_ss / [COOH]₀`: ratio of product amide to initial carboxyl.
+- `crosslink_density = P_ss` (when amide bridges are elastically active).
+  For ligand coupling (M2 use case), this field is not consumed by L4.
+- `f_bridge_effective`: empirical factor ~0.2–0.5 for surface-coupled EDC
+  reactions, lower for bulk. Kept as a profile parameter per the existing
+  crosslinker pattern.
+
+#### A.6.6  References
+
+1. Hermanson, G. T. *Bioconjugate Techniques*, 3rd ed. Academic Press, 2013. Ch. 4 "Zero-Length Crosslinkers".
+2. Nakajima, N. & Ikada, Y. *Bioconj. Chem.* 6(1):123–130 (1995).
+3. Wang, C., Yan, Q., Liu, H.-B., Zhou, X.-H., Xiao, S.-J. *Langmuir* 27:12058–12068 (2011).
+4. Cline, G. W. & Hanna, S. B. *J. Org. Chem.* 53:3583–3586 (1988).
+5. Strand, S. P., Tømmeraas, K., Vårum, K. M., Østgaard, K. *Biomacromolecules* 2:1310–1314 (2001).
+6. Sehgal, D. & Vijay, I. K. *Anal. Biochem.* 218:87–91 (1994).
+
+---
+
+### A.7  Crosslinker Library — scientific provenance (SA-EMULSIM-XL-001)
+
+Source: `docs/SA-EMULSIM-XL-001_Crosslinker_Evaluation.md` Rev 1.0
+(2026-04-16). Load-bearing per /scientific-advisor verdict. Preserved in
+full: 12 new primary + 8 new secondary crosslinker candidates with
+parameters, mechanisms, suitability tiers, references, and a compatibility
+matrix. This is the scientific justification for any future addition to
+the crosslinker library (STMP v9.1.2 derived from a companion document
+SA-EMULSIM-XL-002, preserved externally in the v9.2.2 CHANGELOG entry).
+
+#### A.7.1  Baseline library (v6.0-era, pre-STMP)
+
+Level 3 primary crosslinkers shipped at v6.0 (STMP added v9.1.2):
+Genipin (suit. 8), Glutaraldehyde (5), EDC/NHS (3, promoted via Node 31),
+PEGDA+UV (4), TPP (4), Epichlorohydrin (7), DVS (9, industry std for
+Sepharose), Citric Acid (5). Module 2 secondary: genipin_secondary,
+glutaraldehyde_secondary.
+
+#### A.7.2  New primary candidates — amine-reactive (chitosan NH₂)
+
+**A1.1 Squaric Acid Diethyl Ester (SADE, CAS 5765-44-6) — Suit. 7/10**
+Mechanism: amine-squaramide formation (1,2-addition of –NH₂ to squarate
+ester). Conditions: pH 7–9, 25–37 °C, 12–24 h.
+k_fwd ≈ 1×10⁻⁶ m³/(mol·s), E_a ≈ 50 kJ/mol, f_bridge = 0.55, kinetics
+second_order, family amine_covalent. Non-toxic; pH-stable squaramide bonds
+(no hydrolysis pH 2–12); bifunctional inter-chain bridges; mild conditions
+compatible with agarose integrity. Slow kinetics, expensive (~USD 10–20/g).
+Refs: Tietze 1991 *Chem. Ber.* 124:1215; Storer 2011 *Angew. Chem.* 50:5899.
+
+**A1.2 Dialdehyde Starch (DAS, CAS 9044-38-6) — Suit. 5/10**
+Mechanism: Schiff base between aldehyde and chitosan –NH₂. pH 5–7,
+25–40 °C, 2–6 h. k_fwd ≈ 5×10⁻⁶ m³/(mol·s), E_a ≈ 35 kJ/mol, f_bridge =
+0.35. Biocompatible, biodegradable, cheap (~USD 0.05/g); macromolecular
+bridges with conformational flexibility; reducible to stable secondary
+amines by NaBH₄. Schiff bases reversible at pH < 4. Variable DS causes
+batch variability. Refs: Mu 2020 *Int. J. Biol. Macromol.* 150:462;
+Woo 2015 *Eur. Polym. J.* 63:1.
+
+**A1.3 Formaldehyde (CAS 50-00-0) — Suit. 3/10**
+Mechanism: methylene bridge (–CH₂–) via Mannich-type. pH 7–8, 25 °C, 1–4 h.
+k_fwd ≈ 1×10⁻⁴ m³/(mol·s), E_a ≈ 35 kJ/mol, f_bridge = 0.60. Extremely fast
+and cheap. **IARC Group 1 carcinogen.** Short 1-carbon bridge = brittle.
+Regulatory concern. Research use only. Refs: Metz 2004 *Bioconj. Chem.*
+15:1456; Migneault 2004 *BioTechniques* 37:790.
+
+**A1.4 Tannic Acid (CAS 1401-55-4) — Suit. 4/10**
+Polyphenol-amine complexation + oxidative covalent crosslinking. pH 7–8,
+25 °C, 1–6 h. k_fwd ≈ 2×10⁻⁵ m³/(mol·s), E_a ≈ 30 kJ/mol, f_bridge = 0.30.
+Natural, non-toxic, multi-point crosslinking. **High non-specific protein
+binding** (problematic for chromatography). Brown coloration.
+Refs: Zhang 2019 *ACS AMI* 11:37424; Shin 2019 *Biomacromolecules* 20:2023.
+
+#### A.7.3  New primary candidates — hydroxyl-reactive (agarose OH)
+
+**A2.1 1,4-Butanediol Diglycidyl Ether (BDGE, CAS 2425-79-8) — Suit. 8/10**
+Bis-epoxide ring-opening with –OH under alkaline conditions. pH 11–13
+(0.1–0.5 M NaOH), 25–50 °C, 4–16 h. k_fwd ≈ 1.2×10⁻⁵ m³/(mol·s) at pH 12,
+E_a ≈ 60 kJ/mol, f_bridge = 0.55, network target mixed. Industry-proven
+for Sepharose; 18-Å spacer arm (vs ~5 Å for ECH) → more flexible
+crosslinks. Ether bridges hydrolytically stable pH 1–14. Crosslinks both
+agarose –OH and chitosan –NH₂. Alkaline requirement; more expensive than
+ECH (~USD 0.50/g). **Already in M2 profiles as `bdge_activation`.** Refs:
+Sundberg & Porath 1974 *J. Chromatogr.* 90:87; Hermanson 1992
+*Immobilized Affinity Ligand Techniques*.
+
+**A2.2 Allyl Glycidyl Ether (AGE, CAS 106-92-3) + UV post-cure — Suit. 6/10**
+Two-step: (1) alkaline epoxide opening with –OH, (2) UV radical
+polymerization of pendant allyl groups. Step 1: pH 11–12, 25 °C, 4–8 h
+(k ≈ 1×10⁻⁵ m³/(mol·s)). Step 2: UV 365 nm, 10–15 min with photoinitiator.
+f_bridge = 0.40. Novel "two_step_hybrid" solver family. Temporal control
+(functionalize-then-crosslink-on-demand). Allyl-allyl coupling irreversible,
+hydrolytically stable. Used in allyl-Sepharose. Two-chemistry protocol
+complexity; UV penetration limited. Refs: Porath & Axen 1976 *Methods
+Enzymol.* 44:19; Gellerstedt & Gatenholm 1999 *Cellulose* 6:103.
+
+#### A.7.4  New primary candidates — enzymatic (require phenolic substrate)
+
+**A3.1 Tyrosinase (CAS 9002-10-2) — Suit. 4/10**
+Oxidation of tyrosine/phenol → o-quinone → Michael addition with chitosan
+–NH₂. pH 6–7, 25–37 °C, 2–6 h, aerobic. k_fwd ≈ 1×10⁻⁷ m³/(mol·s),
+E_a ≈ 40 kJ/mol, f_bridge = 0.20. Michaelis-Menten kinetics. New
+"enzymatic_oxidative" family. Mild, no toxic residuals. **Requires
+phenolic substrate — pure agarose/chitosan have no phenol groups.**
+Refs: Chen 2002 *Biomacromolecules* 3:456; Anghileri 2007 *J. Biotechnol.*
+127:508.
+
+**A3.2 Laccase (CAS 80498-15-3) — Suit. 3/10**
+Phenol oxidation → radical coupling. pH 4–6, 25–50 °C, 1–4 h, aerobic.
+k_fwd ≈ 5×10⁻⁷ m³/(mol·s), E_a ≈ 35 kJ/mol, f_bridge = 0.15. Same
+substrate limitation as tyrosinase. Refs: Rocasalbas 2013 *Carbohydr.
+Polym.* 92:989; Hossain & Bhatt 2020 *Biotechnol. Adv.* 44:107630.
+
+**A3.3 Microbial Transglutaminase (mTG, CAS 80146-85-6) — Suit. 2/10**
+Acyl transfer between glutamine γ-carboxamide and lysine ε-amine →
+isopeptide. pH 6–7, 37 °C, 0.5–4 h. k_fwd ≈ 2×10⁻⁶ m³/(mol·s), f_bridge =
+0.60 (highly specific). New "enzymatic_acyl_transfer" family. **Requires
+glutamine AND lysine — chitosan has amines but NO glutamine.** Included
+for completeness only. Refs: Yokoyama 2004 *Appl. Microbiol. Biotechnol.*
+64:447; Lim 2020 *Food Hydrocoll.* 108:106020.
+
+#### A.7.5  New primary candidates — photo-crosslinkers (independent IPN)
+
+**A4.1 PEGDMA MW 750 (CAS 25852-47-5) — Suit. 5/10**
+Direct drop-in replacement for PEGDA. UV 365 nm, 10 mW/cm², 15 min with
+Irgacure 2959. k_xlink_0 ≈ 400 m³/(mol·s), E_a ≈ 20 kJ/mol, f_bridge =
+0.55. Methacrylate α-methyl group → ~20–30% higher steric shielding of
+ester bonds → marginally better hydrolytic stability vs NaOH CIP. Slightly
+slower cure. Refs: Lin & Anseth 2009 *Pharm. Res.* 26:631.
+
+**A4.2 PEG-Norbornene / DTT Thiol-Ene (CAS PEG-NB 1800415-02-4; DTT 3483-12-3) — Suit. 6/10**
+UV-initiated step-growth thiol-ene (radical + thiol → thioether). UV
+365 nm, 10 mW/cm², 10 min with LAP photoinitiator (CAS 85073-19-4).
+k_xlink_0 ≈ 2×10³ m³/(mol·s), E_a ≈ 15 kJ/mol, f_bridge = 0.70. Requires
+new uv_thiol_ene kinetics model (step-growth differs from chain-growth
+PEGDA). **Thioether crosslinks non-hydrolysable — immune to NaOH CIP**
+(critical advantage). Step-growth gives narrower mesh-size distribution.
+LAP more efficient at 365 nm than Irgacure 2959 and less cytotoxic. Two
+components require stoichiometric control; DTT air-oxidation limits
+shelf life; cost ~65× PEGDA. Refs: Fairbanks 2009 *Biomaterials* 30:6702;
+Lin 2011 *Biomaterials* 32:9685.
+
+**A4.3 4-Arm PEG-Acrylate MW 2000 (CAS 163183-00-4) — Suit. 4/10**
+UV radical (chain-growth, branched). UV 365 nm, 10 mW/cm², 12 min with
+Irgacure 2959. k_xlink_0 ≈ 1×10³ m³/(mol·s), E_a ≈ 20 kJ/mol, f_bridge =
+0.65 (4 crosslink points per molecule). Branched architecture distributes
+stress → reduced crack nucleation → fatigue improvement. At 3% w/v: mesh
+too open (ξ ≈ 25–50 nm); requires 4–5% w/v. Cost ~50× PEGDA. Extended
+3 h infusion time. Refs: Zustiak & Leach 2010 *Biomacromolecules* 11:1348.
+
+#### A.7.6  New primary candidates — click / thermoreversible
+
+**A5.1 Diels-Alder (Furan-Maleimide) — Suit. 3/10**
+[4+2] cycloaddition between furan-functionalized polymer and bismaleimide.
+60–80 °C, pH 5–7, 6–24 h. **Retro-Diels-Alder at >90 °C — conflicts with
+90 °C emulsification** in EmulSim's standard workflow. k_fwd ≈ 1×10⁻⁶
+m³/(mol·s) at 65 °C, E_a ≈ 65 kJ/mol, f_bridge = 0.45. New
+"click_thermoreversible" family. Thermally reversible — potential for
+self-healing microspheres — but incompatible with current fabrication.
+Refs: Gandini 2013 *Prog. Polym. Sci.* 38:1; Wei 2013 *Soft Matter* 9:2083.
+
+#### A.7.7  New primary candidates — hydroxyl / mixed (additional)
+
+**A6.1 Sodium Periodate In-Situ Dialdehyde (CAS 7790-28-5) — Suit. 5/10**
+Two-step: (1) periodate cleaves agarose vicinal diols → dialdehyde agarose,
+(2) Schiff base with chitosan –NH₂. pH 4–5 for oxidation; pH 7–8, 25 °C,
+4–12 h total for Schiff base. Schiff-base k_fwd ≈ 5×10⁻⁶ m³/(mol·s),
+E_a ≈ 40 kJ/mol, f_bridge = 0.35. New "in_situ_oxidative" family.
+**Creates direct covalent bridges BETWEEN agarose and chitosan networks
+(true IPN coupling).** No external crosslinker molecule remains. Periodate
+partially degrades agarose backbone — careful oxidation control needed.
+Refs: Kristiansen 1998 *Carbohydr. Res.* 311:55; Fan 2001 *Polym. Int.*
+50:67.
+
+**A6.2 Glycerol Diglycidyl Ether (GDE, CAS 27043-36-3) — Suit. 7/10**
+Bis-epoxide, same family as BDGE. pH 11–12, 25–40 °C, 4–8 h. k_fwd ≈
+1×10⁻⁵ m³/(mol·s), E_a ≈ 58 kJ/mol, f_bridge = 0.50. Hydrophilic glycerol
+spacer → maintains gel hydrophilicity better than BDGE (butanediol).
+Shorter than BDGE (~10 Å vs ~18 Å) → tighter crosslinks for smaller-pore
+applications. Lower toxicity than ECH. Refs: Oshima 2011 *React. Funct.
+Polym.* 71:840; Mayer 2020 *Carbohydr. Polym.* 228:115350.
+
+#### A.7.8  New secondary candidates — Module 2 reinforcement
+
+**B2.1 Glyoxal (CAS 107-22-2) — Suit. 5/10**
+Schiff base with chitosan –NH₂; milder than glutaraldehyde. pH 7–8,
+25–40 °C, 2–8 h. k_fwd ≈ 5×10⁻⁶ m³/(mol·s), E_a ≈ 38 kJ/mol,
+stoichiometry = 0.5 (1 glyoxal per 2 –NH₂). LD₅₀ oral ~3,300 mg/kg (vs
+~100 for glutaraldehyde). Yellow-brown coloration. Schiff bases require
+NaBH₄ for permanent stability. Refs: Migneault 2004; Paulino 2011
+*Carbohydr. Polym.* 84:1286.
+
+**B2.2 Sodium Alginate + CaCl₂ (egg-box ionic) — Suit. 3/10**
+Extremely fast (k_fwd ≈ 1×10⁸ m³/(mol·s), essentially instantaneous
+ionic). Food-grade, creates a third hydrogel network (triple IPN). Ionic
+crosslinks **reversible** — sensitive to chelators (EDTA, citrate) and
+high-salt chromatography buffers. Alginate adds anionic surface charge
+→ non-specific electrostatic binding. Refs: Lee & Mooney 2012 *Prog.
+Polym. Sci.* 37:106; Draget 1997 *Int. J. Biol. Macromol.* 21:47.
+
+**B2.3 Vanillin (CAS 121-33-5) — Suit. 4/10**
+Mono-aldehyde Schiff base with chitosan. pH 5–7, 25–40 °C, 2–12 h,
+ethanol co-solvent optional. k_fwd ≈ 1×10⁻⁵ m³/(mol·s), E_a ≈ 35 kJ/mol.
+Natural, food-grade (GRAS), cheap (~USD 0.10/g). Mono-aldehyde cannot
+directly bridge two amines like glutaraldehyde; crosslinking via
+radical/quinone-methide intermediates. Schiff base reversible at acid.
+Refs: Beppu 1999 *Polym. Eng. Sci.* 39:1643; Marin 2014 *Carbohydr.
+Polym.* 104:227.
+
+**B2.4 Calcium Phosphate Biomineralization (hydroxyapatite, CAS 12167-74-7) — Suit. 2/10**
+In-situ precipitation via alternating CaCl₂ and Na₂HPO₄ soaking. pH 7–9,
+37 °C, 2–24 h per cycle. Diffusion-controlled, not kinetically rate-limited.
+Rigid mineral phase → dramatically increased compressive modulus.
+**Reduces pore size and permeability — incompatible with chromatography
+protein access.** Tissue-engineering niche only. Refs: Hutchens 2006
+*Biomaterials* 27:4661; Madhumathi 2009 *J. Mater. Sci. Mater. Med.*
+20:1251.
+
+**B2.5 Horseradish Peroxidase + H₂O₂ (CAS HRP 9003-99-0) — Suit. 4/10**
+H₂O₂-mediated oxidative coupling of tyramine → dityrosine. pH 7–7.5,
+25–37 °C, 1–30 min (seconds to minutes). k_fwd ≈ 1×10⁻⁴ m³/(mol·s).
+**Requires tyramine-functionalized polymer** (chitosan-tyramine
+conjugates must be pre-synthesized). HRP + excess H₂O₂ can oxidize the gel
+over time. Refs: Jin 2007 *Biomaterials* 28:2791; Lee 2014 *Soft Matter*
+10:6276.
+
+#### A.7.9  Gap analysis — chemistry classes not currently represented
+
+| Gap | Class | Scientific value | Priority |
+|---|---|---|---|
+| C1 | Schiff base / reductive amination (explicit model) | Would enable reversible → irreversible crosslink conversion modelling | Medium |
+| C2 | Enzymatic (oxidative: tyrosinase, laccase, HRP) | Green-chemistry paradigm; MM kinetics with O₂ dependence | Low (niche) |
+| C3 | Click chemistry (SPAAC, thiol-ene, Diels-Alder) | Frontier of bio-orthogonal crosslinking; thiol-ene partially via A4.2 | Medium (thiol-ene); Low (rest) |
+| C4 | Two-step hybrid (functionalize-then-crosslink: AGE, allyl-agarose + UV) | Industrial (allyl-Sepharose) | Low (protocol complexity) |
+| C5 | Polyphenol-mediated (tannic acid, plant polyphenols) | Natural/green; mixed covalent + non-covalent | Low |
+
+#### A.7.10  Implementation priority (as of v9.2.2)
+
+**High priority (add next):** BDGE (A2.1) already in M2 — complete as L3
+primary. PEGDMA (A4.1) — trivial PEGDA analogue. PEG-NB/DTT (A4.2) —
+CIP-stability advantage. Squaric Acid (A1.1) — novel non-toxic amine
+crosslinker. Glyoxal (B2.1) — mild glutaraldehyde alternative.
+
+**Medium priority:** 4-Arm PEG-Ac (A4.3); GDE (A6.2); Periodate (A6.1);
+DAS (A1.2).
+
+**Low priority (educational / completeness):** Vanillin, Tannic Acid,
+enzymatic systems, Diels-Alder, mineral precipitation, formaldehyde.
+
+#### A.7.11  Crosslinker compatibility matrix
+
+| Primary (L3) | Secondary (M2) | Compatible? | Sequence | Notes |
+|---|---|---|---|---|
+| Genipin | PEGDA / PEGDMA / PEG-NB | YES | Genipin first (24 h, 37 °C), then UV | No chemical interference; different substrates |
+| Genipin | Glyoxal | **NO** | — | Both compete for same –NH₂ |
+| Genipin | BDGE / GDE | YES | Genipin, then bis-epoxide (alkaline) | Different substrates; alkaline may hydrolyze some genipin-amine bonds |
+| DVS | PEGDA | YES | DVS first (alkaline), then PEGDA UV | DVS crosslinks agarose; PEGDA is independent |
+| DVS | Genipin_secondary | YES | DVS, then genipin | DVS: –OH; genipin: remaining –NH₂ |
+| ECH | PEGDMA | YES | ECH first, then PEGDMA UV | Same pattern as DVS+UV |
+| ECH | PEG-NB / DTT | **Caution** | ECH first; wash thoroughly; then thiol-ene | DTT thiols may react with residual ECH epoxides |
+| TPP | Genipin | YES | TPP first (instant ionic), then genipin | TPP ionic stabilisation + genipin covalent |
+| Glutaraldehyde | Any UV | YES | Glutaraldehyde, wash, UV | Residual glutaraldehyde absorbs at 280 nm — must wash before UV |
+| PEGDA | Squaric Acid | YES | Either order | PEGDA independent; squaric → –NH₂ |
+
+#### A.7.12  IPN coupling coefficient (η_coupling) estimates
+
+| Combination | η_coupling | Rationale |
+|---|---|---|
+| Genipin → PEGDA / PEGDMA / PEG-NB-DTT | 0.0 (decoupled) | UV network independent from agarose-chitosan IPN |
+| Genipin → BDGE | +0.05 (weakly synergistic) | BDGE crosslinks both –OH and –NH₂ → inter-network bridges |
+| DVS → PEGDA | 0.0 (decoupled) | DVS agarose-only; PEGDA independent |
+| DVS → Genipin_secondary | +0.10 (synergistic) | DVS stiffens agarose; genipin stiffens chitosan; mutual constraint |
+| ECH → Squaric Acid | +0.05 | ECH couples both networks; squaric targets remaining –NH₂ |
+| Genipin → Periodate Schiff | +0.15 (moderately synergistic) | **Periodate creates DIRECT agarose-chitosan covalent bridges** — genuine network coupling |
+| TPP → Genipin | −0.05 (weakly antagonistic) | TPP occupies –NH₃⁺ sites genipin needs; reduces bridging |
+
+#### A.7.13  References (full set)
+
+1. Tietze 1991 *Chem. Ber.* 124:1215. 2. Storer 2011 *Angew. Chem. Int. Ed.*
+50:5899. 3. Mu 2020 *Int. J. Biol. Macromol.* 150:462. 4. Metz 2004
+*Bioconj. Chem.* 15:1456. 5. Migneault 2004 *BioTechniques* 37:790.
+6. Zhang 2019 *ACS AMI* 11:37424. 7. Shin 2019 *Biomacromolecules* 20:2023.
+8. Sundberg & Porath 1974 *J. Chromatogr.* 90:87. 9. Hermanson 1992
+*Immobilized Affinity Ligand Techniques*. 10. Porath & Axen 1976
+*Methods Enzymol.* 44:19. 11. Gellerstedt & Gatenholm 1999 *Cellulose*
+6:103. 12. Chen 2002 *Biomacromolecules* 3:456. 13. Anghileri 2007
+*J. Biotechnol.* 127:508. 14. Rocasalbas 2013 *Carbohydr. Polym.* 92:989.
+15. Hossain & Bhatt 2020 *Biotechnol. Adv.* 44:107630. 16. Yokoyama 2004
+*Appl. Microbiol. Biotechnol.* 64:447. 17. Lim 2020 *Food Hydrocoll.*
+108:106020. 18. Lin & Anseth 2009 *Pharm. Res.* 26:631. 19. Fairbanks 2009
+*Biomaterials* 30:6702. 20. Lin 2011 *Biomaterials* 32:9685. 21. Zustiak
+& Leach 2010 *Biomacromolecules* 11:1348. 22. Gandini 2013 *Prog. Polym.
+Sci.* 38:1. 23. Wei 2013 *Soft Matter* 9:2083. 24. Kristiansen 1998
+*Carbohydr. Res.* 311:55. 25. Fan 2001 *Polym. Int.* 50:67. 26. Oshima 2011
+*React. Funct. Polym.* 71:840. 27. Mayer 2020 *Carbohydr. Polym.* 228:115350.
+28. Paulino 2011 *Carbohydr. Polym.* 84:1286. 29. Beppu 1999 *Polym. Eng.
+Sci.* 39:1643. 30. Marin 2014 *Carbohydr. Polym.* 104:227. 31. Hutchens
+2006 *Biomaterials* 27:4661. 32. Madhumathi 2009 *J. Mater. Sci. Mater.
+Med.* 20:1251. 33. Jin 2007 *Biomaterials* 28:2791. 34. Lee 2014
+*Soft Matter* 10:6276. 35. Lee & Mooney 2012 *Prog. Polym. Sci.* 37:106.
+36. Draget 1997 *Int. J. Biol. Macromol.* 21:47.
+
+---
+
 **End of Appendix A.**
