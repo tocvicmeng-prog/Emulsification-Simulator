@@ -355,9 +355,10 @@ def _build_step_manifest(
         diagnostics["conservation_violations"] = list(conservation_violations)
 
     assumptions: list[str] = []
-    if getattr(reagent_profile, "k_ref", None) is not None:
+    _k_ref = getattr(reagent_profile, "k_ref", None)
+    if _k_ref is not None:
         assumptions.append(
-            f"Rate constant k_ref={reagent_profile.k_ref:g} from reagent profile "
+            f"Rate constant k_ref={_k_ref:g} from reagent profile "
             f"(literature value, not locally calibrated)."
         )
     if getattr(reagent_profile, "activity_retention", None) is not None:

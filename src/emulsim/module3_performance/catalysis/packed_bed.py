@@ -183,8 +183,8 @@ def solve_packed_bed(
         dSdt = np.zeros(n_z)
         dPdt = np.zeros(n_z)
 
-        # Enzyme activity at current time
-        a_t = first_order_deactivation(t, k_deact)
+        # Enzyme activity at current time — scalar t, so a_t is a scalar.
+        a_t = float(first_order_deactivation(t, k_deact))
         V_max_eff = V_max * a_t
 
         # Compute local effectiveness factor based on local S (vectorised)
@@ -305,7 +305,7 @@ def solve_packed_bed(
         effectiveness_factor=float(eta_feed),
         thiele_modulus=float(phi_gen),
         productivity=productivity,
-        activity_history=activity,
+        activity_history=np.asarray(activity),
         mass_balance_error=mass_balance_error,
         model_manifest=manifest,
     )

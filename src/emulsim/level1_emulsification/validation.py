@@ -74,7 +74,7 @@ def check_mass_conservation(result: EmulsificationResult,
 
 def check_non_negative(result: EmulsificationResult) -> bool:
     """Check all number densities are non-negative."""
-    return np.all(result.n_d >= 0)
+    return bool(np.all(result.n_d >= 0))
 
 
 def check_physical_bounds(result: EmulsificationResult,
@@ -135,10 +135,11 @@ def validate_result(result: EmulsificationResult) -> dict:
 
     Returns dict with check names as keys and (passed, detail) as values.
     """
-    checks = {}
+    checks: dict[str, tuple[bool, str]] = {}
     checks['non_negative'] = (check_non_negative(result), "")
     checks['physical_bounds'] = check_physical_bounds(result)
-    checks['steady_state'] = check_steady_state(result)
+    _steady_ok, _rel_err = check_steady_state(result)
+    checks['steady_state'] = (_steady_ok, f"rel_err={_rel_err:.3e}")
     return checks
 
 

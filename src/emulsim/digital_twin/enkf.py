@@ -124,9 +124,10 @@ def enkf_update(
         )
     K = P_xy / denom                    # (n_state,)
 
-    # Perturbed observations
+    # Perturbed observations — np.asarray() normalises the rng.normal return
+    # (which mypy types as float|ndarray) to a concrete ndarray.
     if R > 0.0:
-        eps = rng.normal(loc=0.0, scale=np.sqrt(R), size=N)
+        eps = np.asarray(rng.normal(loc=0.0, scale=np.sqrt(R), size=N))
     else:
         eps = np.zeros(N)
     y_pert = y_observed + eps            # (N,)

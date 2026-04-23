@@ -919,7 +919,7 @@ class RunReport:
             tier = m.evidence_tier
             tier_value = getattr(tier, "value", tier)
             try:
-                idx = _order_values.index(tier_value)
+                idx = _order_values.index(str(tier_value))
             except ValueError:
                 idx = _order_values.index(ModelEvidenceTier.UNSUPPORTED.value)
             if idx > worst_idx:

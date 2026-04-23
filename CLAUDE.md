@@ -48,6 +48,6 @@ gradients, entrance animations, etc.).
     binding equilibrium is time-varying)
   - `module3_performance/orchestrator.py::run_gradient_elution` → BDF
     (always gradient path)
-- **CI gates**: ruff must be 0; mypy is capped at `MYPY_MAX=32`
-  (regression-only — PRs that ADD type errors fail). Lower the cap
-  in `.github/workflows/ci.yml` as future cleanup lands.
+- **CI gates**: ruff must be 0; mypy must be 0 (cap lowered from 32
+  to 0 in the v9.2.2 cleanup PR). PRs that add type errors fail CI;
+  fix them in the same PR rather than raising the cap.

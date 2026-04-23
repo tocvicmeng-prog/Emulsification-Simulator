@@ -360,8 +360,11 @@ class PipelineOrchestrator:
             # CalibrationStore.apply_to_model_params logs.
             _diagnostics["calibrations_applied"] = list(applied_calibrations)
             _diagnostics["calibration_count"] = len(applied_calibrations)
+        # Drop None entries from _manifests (some pipeline stages may not
+        # produce a manifest; RunReport.model_graph is typed list[ModelManifest]).
+        _manifests_nonnull = [m for m in _manifests if m is not None]
         run_report = RunReport(
-            model_graph=_manifests,
+            model_graph=_manifests_nonnull,
             trust_level=trust.level,
             trust_warnings=list(trust.warnings),
             trust_blockers=list(trust.blockers),
@@ -708,7 +711,7 @@ class PipelineOrchestrator:
 
     def run_rpm_sweep(self, rpms: list[float],
                       base_params: Optional[SimulationParameters] = None,
-                      phi_d: float = None) -> list[dict]:
+                      phi_d: Optional[float] = None) -> list[dict]:
         """Run Level 1 for a list of RPM values."""
         base_params = base_params or SimulationParameters()
         if phi_d is None:

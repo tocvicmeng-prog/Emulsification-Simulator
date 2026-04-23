@@ -1784,8 +1784,10 @@ def get_mechanism(reagent_key: str) -> MechanismDescriptor:
         from emulsim.module2_functionalization.reagent_profiles import REAGENT_PROFILES
 
         if reagent_key in REAGENT_PROFILES:
-            profile = REAGENT_PROFILES[reagent_key]
-            note_text = profile.notes[:200] if profile.notes else "No mechanism notes available."
+            # Use a distinct variable name from the CROSSLINKERS branch above
+            # so mypy does not narrow the type across the two try/except blocks.
+            m2_profile = REAGENT_PROFILES[reagent_key]
+            note_text = m2_profile.notes[:200] if m2_profile.notes else "No mechanism notes available."
             fallback_step = ReactionStep(
                 step_number=1,
                 description=note_text,
@@ -1793,19 +1795,19 @@ def get_mechanism(reagent_key: str) -> MechanismDescriptor:
                 bond_broken="(not yet authored)",
                 equation_latex="",
                 conditions=(
-                    f"pH {profile.ph_optimum:.1f}, "
-                    f"T = {profile.temperature_default - 273.15:.0f} C, "
-                    f"t = {profile.time_default / 3600:.1f} h"
+                    f"pH {m2_profile.ph_optimum:.1f}, "
+                    f"T = {m2_profile.temperature_default - 273.15:.0f} C, "
+                    f"t = {m2_profile.time_default / 3600:.1f} h"
                 ),
                 notes="Auto-generated fallback from ReagentProfile.notes.",
             )
             hazard_note = (
-                f"Hazard class: {profile.hazard_class}"
-                if profile.hazard_class
+                f"Hazard class: {m2_profile.hazard_class}"
+                if m2_profile.hazard_class
                 else "No hazard classification provided."
             )
             # Derive buffer_system from profile pH (Codex fix 3)
-            _ph = getattr(profile, "ph_optimum", 7.4)
+            _ph = getattr(m2_profile, "ph_optimum", 7.4)
             if _ph >= 10.0:
                 _buffer = f"0.1 M NaOH/Na2CO3 pH {_ph:.0f}"
             elif _ph <= 5.5:
@@ -1814,9 +1816,9 @@ def get_mechanism(reagent_key: str) -> MechanismDescriptor:
                 _buffer = f"PBS pH {_ph:.1f}"
             return MechanismDescriptor(
                 reagent_key=reagent_key,
-                display_name=profile.name,
+                display_name=m2_profile.name,
                 overall_equation_latex="",
-                mechanism_type=profile.chemistry_class if profile.chemistry_class else "unknown",
+                mechanism_type=m2_profile.chemistry_class if m2_profile.chemistry_class else "unknown",
                 steps=[fallback_step],
                 byproducts=[],
                 reversibility="irreversible",
