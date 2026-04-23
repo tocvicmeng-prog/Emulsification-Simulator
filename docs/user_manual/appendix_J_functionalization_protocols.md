@@ -56,6 +56,29 @@ to use the page in front of you.*
   minutes at the nearest safety shower or eyewash, notify a supervisor,
   consult the SDS, do not finish the protocol without clearance.
 
+**How this appendix relates to the M1 Suggestion Derivation pages (v9.2.0)**
+
+After every M1 run the simulator produces optimization suggestions
+with **[📊 derivation]** hyperlinks (see §9 of the main manual). Those
+derivation pages answer *why* the system recommended a parameter
+change and *by how much*. This appendix answers *how to execute the
+change at the bench*. Two concrete cross-references:
+
+- If the M1 derivation page for **"adjust cooling rate"** reports a
+  rate the passive bath cannot deliver, the STMP two-phase protocol
+  (§J.1.7) is the canonical wet-lab strategy for decoupling reagent
+  loading from reaction activation — its "cold load / hot activate"
+  temperature profile sidesteps the passive-cooling ceiling.
+- If the derivation page for **"increase crosslinker"** reports a
+  required conversion p close to the stoichiometric ceiling, the
+  hydroxyl-activation protocols (§J.1.1 – §J.1.6) are alternatives
+  that target the agarose -OH network instead of the chitosan -NH₂
+  network, giving you a second crosslinkable surface to draw from.
+
+Each protocol card lists an **EmulSim M2 key** (e.g. `stmp`, `dvs`,
+`ech`) that lines up with the simulator's Module 2 backend and —
+when applicable — with the key shown on the derivation page URL.
+
 ---
 
 ## J.1 Hydroxyl Activation

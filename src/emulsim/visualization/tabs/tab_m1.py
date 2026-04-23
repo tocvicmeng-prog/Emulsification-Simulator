@@ -778,27 +778,59 @@ def render_tab_m1(
             else:
                 st.error(f"\U0001f534 **Poor match** (avg. deviation = {overall:.3f}). Significant parameter adjustment needed.")
 
-            recs = []
-            if obj[0] > 0.5:
-                if d_obj_val > d_obj_target:
-                    recs.append(f"**Increase RPM** (currently {rpm}) -- droplet size is {d_obj_val:.1f} um vs target {d_obj_target:.0f} um. "
-                               f"Try higher RPM or increase Span-80 concentration.")
-                else:
-                    recs.append(f"**Decrease RPM** -- droplet size is {d_obj_val:.1f} um, smaller than target {d_obj_target:.0f} um.")
-            if obj[1] > 0.5:
-                recs.append(f"**Adjust cooling rate** \u2014 pore size ({g.pore_size_mean*1e9:.0f} nm) deviates from "
-                            f"target ({target_pore} nm). Slower cooling \u2192 larger pores; faster \u2192 finer.")
-            if obj[2] > 0.5:
-                if m.G_DN / 1000 < target_G:
-                    recs.append(f"**Increase crosslinker concentration** or crosslinking time \u2014 G_DN ({m.G_DN/1000:.1f} kPa) below "
-                               f"target ({target_G} kPa). Current crosslinker is stoichiometry-limited at p={x.p_final:.1%}.")
-                else:
-                    recs.append(f"**Reduce polymer concentration** \u2014 G_DN ({m.G_DN/1000:.1f} kPa) exceeds target ({target_G} kPa).")
-            if not recs:
+            # Structured suggestions with derivation-page hyperlinks (v9.2.0).
+            # Each Suggestion carries its own SuggestionContext snapshot so the
+            # /suggestion_detail page can reconstruct the full derivation.
+            # The orchestrator does not expose the MaterialProperties it built;
+            # we reconstruct a fresh defaults instance (same values the solver
+            # used since the A+C path only overrides polymer_family).
+            from emulsim.datatypes import MaterialProperties as _MP
+            from emulsim.suggestions import generate_all
+            from emulsim.suggestions.serialization import suggestion_to_url
+            from emulsim.suggestions.types import SuggestionContext
+
+            _mp = _MP()
+            _sugg_ctx = SuggestionContext(
+                family=str(getattr(_family, 'value', _family)),
+                d32_actual=float(e.d32),
+                d50_actual=float(e.d50),
+                pore_actual=float(g.pore_size_mean),
+                l2_mode=str(locals().get('l2_mode', 'empirical')),
+                cooling_rate_effective=float(getattr(g, 'cooling_rate_effective', params.formulation.cooling_rate)),
+                p_final=float(x.p_final),
+                G_DN_actual=float(m.G_DN),
+                target_d32=float(target_d32) * 1e-6,
+                target_pore=float(target_pore) * 1e-9,
+                target_G=float(target_G) * 1000.0,
+                rpm=float(rpm),
+                T_oil=float(params.formulation.T_oil),
+                cooling_rate_input=float(params.formulation.cooling_rate),
+                c_agarose=float(params.formulation.c_agarose),
+                c_chitosan=float(params.formulation.c_chitosan),
+                c_crosslinker_mM=float(c_genipin_mM),
+                crosslinker_key=str(_xl_sel_key),
+                rho_oil=float(getattr(_mp, 'rho_oil', 850.0)),
+                mu_oil=float(getattr(_mp, 'mu_oil', 0.005)),
+                rho_d=float(getattr(_mp, 'rho_d', 1000.0)),
+                cp_d=float(getattr(_mp, 'cp_d', 4180.0)),
+                k_oil=float(getattr(_mp, 'k_oil', 0.15)),
+                h_coeff=float(getattr(_mp, 'h_coeff', 500.0)),
+                T_bath=float(getattr(_mp, 'T_bath', 293.15)),
+                T_gel=float(getattr(_mp, 'T_gel', 311.15)),
+                DDA=float(getattr(_mp, 'DDA', 0.85)),
+                M_GlcN=float(getattr(_mp, 'M_GlcN', 161.16)),
+                f_bridge=float(getattr(_mp, 'f_bridge', 0.4)),
+                impeller_D=float(getattr(params.emulsification, 'impeller_D', 0.05)),
+                phi_d=float(params.formulation.phi_d),
+                run_id=str(getattr(params, 'run_id', '')),
+            )
+            _suggestions = generate_all(_sugg_ctx)
+            if not _suggestions:
                 st.write("All objectives are within acceptable range. No adjustments needed.")
             else:
-                for i, rec in enumerate(recs, 1):
-                    st.write(f"{i}. {rec}")
+                for i, _s in enumerate(_suggestions, 1):
+                    _url = suggestion_to_url(_s)
+                    st.markdown(f"{i}. {_s.display_text} [\ud83d\udcca derivation]({_url})")
 
             # ── Trust Assessment ─────────────────────────────────────────────
             if "trust" in st.session_state:

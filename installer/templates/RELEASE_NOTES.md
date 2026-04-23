@@ -1,4 +1,4 @@
-# EmulSim 9.1.2 — Release Notes
+# EmulSim 9.2.0 — Release Notes
 
 **Release date:** 2026-04-24
 **Platform:** Windows 11 x64 (Windows 10 x64 supported down to build 17763)
@@ -7,12 +7,77 @@
 **Upstream:** https://github.com/tocvicmeng-prog/Emulsification-Simulator
 **Latest source code:** download from the "Releases" tab on GitHub
 
-## What's new in v9.1.2
+## What's new in v9.2.0
 
-A single-feature release. Adds **Sodium Trimetaphosphate (STMP, Na₃P₃O₉,
-CAS 7785-84-4)** as a new crosslinker, with a first-principles
-scientific audit, a triggerable two-phase wet-lab protocol, and
-homogeneity guardrails built into the UI.
+Adds **hyperlinked derivation pages** for every optimization suggestion the
+M1 tab produces after a run. Clicking the new [📊 derivation] link beside
+a suggestion opens a dedicated page that reconstructs the full reasoning
+chain: formulas, intermediate numbers, assumptions, confidence tier, and a
+nominal-plus-band numeric target the user can dial toward.
+
+### Why
+
+Before v9.2.0 the "Optimization Assessment" produced a flat list like
+*"Increase crosslinker concentration — G_DN 3 kPa below target 10 kPa"*
+without explaining *why* or *by how much*. Users had to guess at the
+magnitude of the change, cross-reference the manual, and hope their
+chosen delta was in the right ballpark. The new derivation pages turn
+each suggestion into a complete, auditable scientific argument.
+
+### What the derivation page contains
+
+Every page is built from three canonical sections:
+
+1. **Derivation logic and formula pathway** — a step-by-step reasoning
+   chain with LaTeX-rendered equations, the physical constants used,
+   and the intermediate numbers computed from your inputs.
+2. **Target value or range** — the nominal best-estimate plus a lower
+   and upper bound that bracket the acceptable outcome. Units and
+   feasibility-flag included.
+3. **Assumptions and confidence** — an honest statement of what the
+   derivation takes for granted, plus the confidence tier (VALIDATED,
+   SEMI_QUANTITATIVE, or QUALITATIVE_TREND).
+
+When the underlying model is only `QUALITATIVE_TREND` (e.g. the
+empirical L2 pore correlation), the page **refuses to show a numeric
+target** and explains why — matching the evidence tier rather than
+giving the illusion of quantitative accuracy.
+
+### Covered suggestions (v9.2.0, all five at once)
+
+| Key | Physics used |
+|---|---|
+| `increase_rpm` / `decrease_rpm` | Sprow (1967) Weber-number correlation inverted for d32; Kolmogorov-scale and Reynolds feasibility checks. |
+| `adjust_cooling_rate` | Lumped-capacitance heat transfer + Cahn-Hilliard spinodal-dwell scaling inverted for target pore size. |
+| `increase_crosslinker` | Rubber elasticity G = ν_e·RT inverted for crosslink fraction, then stoichiometric relation for [crosslinker]. |
+| `reduce_polymer` | Semi-dilute G ~ c² inverted for a uniform scaling factor α on both polymer concentrations. |
+
+### Where it appears
+
+- M1 tab → Optimization Assessment section: each suggestion now renders
+  as a bullet ending in `[📊 derivation]`.
+- Click the icon → `/suggestion_detail?key=...&ctx...` opens in the same
+  window; a **← Back to Simulator** link returns you to the run.
+- URLs are self-contained (full parameter round-trip) so you can
+  bookmark a specific derivation or share it with a colleague.
+
+### Under the hood
+
+- New `src/emulsim/suggestions/` package (8 modules, ~750 LOC).
+- New `src/emulsim/properties/*_derivation.py` physics helpers
+  (3 modules, ~450 LOC).
+- New Streamlit page `pages/suggestion_detail.py`.
+- 55 new tests across 4 test files; all physics helpers include a
+  forward-inverse round-trip property test.
+- Zero solver-code changes; zero new dependencies.
+- ruff 0 findings; mypy 32 errors (at the regression cap, zero added).
+
+## What was in v9.1.2 ("STMP crosslinker")
+
+Added Sodium Trimetaphosphate (STMP, Na₃P₃O₉, CAS 7785-84-4) as a new
+crosslinker, with a first-principles scientific audit, a triggerable
+two-phase wet-lab protocol, and homogeneity guardrails built into the
+UI.
 
 ### Why STMP matters
 
@@ -31,24 +96,7 @@ CAS 7758-29-4) is the *linear* ionic crosslinker already in EmulSim's
 `tpp` entry — different chemistry entirely. Always check the CAS on
 every reagent bottle.
 
-### Scientific basis
-
-- Dual reactivity: phosphate diester with agarose -OH (dominant,
-  SEMI_QUANTITATIVE evidence tier); phosphoramide with chitosan -NH₂
-  (secondary, QUALITATIVE_TREND).
-- Triggerable two-phase protocol: Phase A cold/neutral (4 °C, pH 7,
-  30 min) loads STMP into the pre-gelled bead with ~zero reaction;
-  Phase B hot/alkaline (60 °C, pH 11, 2 h) opens the trimetaphosphate
-  ring and forms crosslinks.
-- Thiele-modulus analysis: homogeneous crosslinking for bead radius
-  < 500 µm (φ < 1). For R > 500 µm the M1 UI raises a warning and the
-  Appendix J troubleshooting section suggests either a smaller bead
-  or a shorter Phase B.
-- Kinetic parameters calibrated to Lim & Seib (1993) starch
-  phosphorylation: k₀ = 5.0×10⁵ m³/(mol·s), Eₐ = 75 kJ/mol,
-  f_bridge = 0.45.
-
-### What you get
+### What you got in v9.1.2
 
 - New primary (L3) crosslinker `stmp` and secondary (M2) crosslinker
   `stmp_secondary`, both visible in the `AGAROSE_CHITOSAN` family UI.
@@ -58,15 +106,8 @@ every reagent bottle.
   troubleshooting.
 - UI guardrails for the homogeneity window and the STMP/STPP
   disambiguation.
-
-### Under the hood
-
-- Zero new solver code paths. STMP reuses the existing
+- Zero new solver code paths; STMP reuses the existing
   `mechanism="hydroxyl"` dispatch (same as ECH, DVS, citric acid).
-- 16 new integration tests (`tests/test_stmp_integration.py`) cover
-  profile presence, kinetic parameter bounds, end-to-end L3 dispatch,
-  and M2 orchestrator validation.
-- ruff 0 findings. mypy 32 errors (at the regression cap; zero added).
 
 ## What was in v9.1.1 ("Backlog burndown")
 
@@ -152,7 +193,7 @@ directory or let the installer's post-install step do it for you.
 The canonical upstream repository is
 <https://github.com/tocvicmeng-prog/Emulsification-Simulator>.
 Each tagged release is published under the "Releases" tab.
-This release corresponds to tag `v9.1.1`.
+This release corresponds to tag `v9.2.0`.
 
 ## Licence
 
