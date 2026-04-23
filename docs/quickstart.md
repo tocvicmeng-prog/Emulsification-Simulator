@@ -79,7 +79,7 @@ n_bins = 20
 ## Choosing Reagents
 
 The UI provides dropdown selectors for:
-- **8 Crosslinkers**: Genipin, Glutaraldehyde, EDC/NHS, PEGDA+UV, TPP, Epichlorohydrin, DVS, Citric Acid
+- **9 Crosslinkers**: Genipin, Glutaraldehyde, EDC/NHS, PEGDA+UV, TPP, STMP, Epichlorohydrin, DVS, Citric Acid
 - **6 Surfactants**: Span-80, Span-60, Span-40, Span-85, PGPR, Lecithin
 
 Each reagent has literature-sourced kinetic parameters that automatically feed into the simulation.
