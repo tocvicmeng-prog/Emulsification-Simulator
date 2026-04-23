@@ -53,6 +53,7 @@ def render_tab_m2(tab_container, _smgr) -> None:
                     _reagent_options = {
                         "Genipin": "genipin_secondary",
                         "Glutaraldehyde": "glutaraldehyde_secondary",
+                        "Sodium Trimetaphosphate (STMP)": "stmp_secondary",
                     }
                 elif "Activation" in step_type:
                     _reagent_options = {
@@ -179,7 +180,10 @@ def render_tab_m2(tab_container, _smgr) -> None:
                     st.caption("Ranking only \u2014 activity retention and steric limits are illustrative defaults.")
 
                 _step_type_map = {
-                    "Secondary Crosslinking": (ModificationStepType.SECONDARY_CROSSLINKING, ACSSiteType.AMINE_PRIMARY),
+                    # Secondary Crosslinking: target_acs left to the reagent profile so
+                    # hydroxyl-targeted crosslinkers (stmp_secondary) work alongside
+                    # the amine-targeted default (genipin_secondary, glutaraldehyde_secondary).
+                    "Secondary Crosslinking": (ModificationStepType.SECONDARY_CROSSLINKING, None),
                     "Hydroxyl Activation": (ModificationStepType.ACTIVATION, ACSSiteType.HYDROXYL),
                     "Ligand Coupling": (ModificationStepType.LIGAND_COUPLING, None),
                     "Protein Coupling": (ModificationStepType.PROTEIN_COUPLING, None),

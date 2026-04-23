@@ -1,3 +1,19 @@
+# EmulSim 9.2.1 — Release Notes
+
+**Release date:** 2026-04-24
+
+**Hotfix** for two UI wiring bugs found in the v9.2.0 live smoke test:
+the `[📊 derivation]` emoji was stored as a UTF-16 surrogate pair that
+crashed the Optimization Assessment render, and the M2 Secondary
+Crosslinking reagent dropdown was missing the Sodium Trimetaphosphate
+(STMP) option shipped in v9.1.2. Both fixed in two- and four-line
+patches respectively. No API or data changes.
+
+See the v9.2.0 notes below for the Hyperlinked Derivation Pages
+feature itself.
+
+---
+
 # EmulSim 9.2.0 — Release Notes
 
 **Release date:** 2026-04-24

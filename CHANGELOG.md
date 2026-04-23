@@ -1,5 +1,44 @@
 # Changelog
 
+## v9.2.1 — UI wiring hotfix (2026-04-24)
+
+Two bugs caught during the v9.2.0 live smoke test. Ships as a hotfix.
+
+### Fixes
+
+- **`tab_m1.py:833`** — emoji in the `[📊 derivation]` markdown link was
+  stored as the UTF-16 surrogate-pair escape `📊`. Python
+  holds it as a string with lone surrogates, which cannot be encoded
+  to UTF-8, so Streamlit/Tornado crashed with
+  `UnicodeEncodeError: 'utf-8' codec can't encode characters in
+  position 122-123: surrogates not allowed` on any M1 run that
+  produced deviations. Fix: use the proper 32-bit Unicode escape
+  `\U0001f4ca`. Other emoji in the file already used the correct form —
+  this was the only regression introduced in v9.2.0.
+
+- **`tab_m2.py:52-56, 182-183`** — the M2 "Secondary Crosslinking"
+  reagent dropdown was hardcoded to only `genipin_secondary` and
+  `glutaraldehyde_secondary`, so the `stmp_secondary` profile shipped
+  in v9.1.2 was unreachable from the UI. Compounding the problem, the
+  `_step_type_map` hardcoded `target_acs=AMINE_PRIMARY` for Secondary
+  Crosslinking — adding STMP (which targets HYDROXYL) would have
+  tripped orchestrator rule 3 (reagent-target ACS mismatch).
+  Fix: (1) add `"Sodium Trimetaphosphate (STMP)": "stmp_secondary"`
+  to the dict; (2) change the Secondary Crosslinking tuple to `None`
+  so target_acs comes from the reagent profile, which naturally
+  routes genipin/glutaraldehyde to AMINE_PRIMARY and STMP to HYDROXYL.
+
+### .gitignore
+
+- Added `.gstack/` — auto-created by the `browse` skill used during
+  the smoke test; unrelated but clean to ship alongside.
+
+### Version hygiene
+
+- `pyproject.toml` 9.2.0 → 9.2.1
+- `src/emulsim/__init__.py` 9.2.0 → 9.2.1
+- `installer/templates/*` synchronised to 9.2.1
+
 ## v9.2.0 — Hyperlinked derivation pages for M1 suggestions (2026-04-24)
 
 Adds structured, hyperlinked derivation pages for every optimization
