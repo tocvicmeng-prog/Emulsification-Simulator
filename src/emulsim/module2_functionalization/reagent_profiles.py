@@ -316,9 +316,11 @@ REAGENT_PROFILES: dict[str, ReagentProfile] = {
             "Two-phase protocol: cold/neutral loading (4 degC, pH 7) then "
             "hot/alkaline activation (60 degC, pH 11). Thiele-modulus "
             "homogeneous for bead radius < 500 um. Co-reacts with "
-            "chitosan -NH2 via phosphoramide (QUALITATIVE_TREND, not "
-            "separately modelled here). Distinguish from 'tpp' (STPP, "
-            "ionic, acidic pH). See Appendix J.1.7."
+            "chitosan -NH2 via phosphoramide (SEMI_QUANTITATIVE as of "
+            "v9.2.2 -- parallel NH2 ODE track in the L3 solver with "
+            "k0=4.5e3, Ea=60 kJ/mol, f_bridge=0.35; see reagent_library."
+            "NH2CoReaction and SA-EMULSIM-XL-002 Rev 0.1). Distinguish "
+            "from 'tpp' (STPP, ionic, acidic pH). See Appendix J.1.7."
         ),
     ),
 

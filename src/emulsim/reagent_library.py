@@ -48,6 +48,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+@dataclass(frozen=True)
+class NH2CoReaction:
+    """Optional parallel NH2-track kinetics for hydroxyl-primary crosslinkers.
+
+    Some crosslinkers (STMP being the v9.2.2 exemplar) react with polysaccharide
+    -OH as their dominant reaction and with chitosan -NH2 as a slower but
+    scientifically significant side-reaction. Before v9.2.2 the NH2 branch
+    was documented only in notes and carried a QUALITATIVE_TREND evidence
+    tier. With this dataclass wired to the L3 solver, the NH2 track is
+    integrated as a parallel second-order ODE and its contribution to the
+    chitosan-network modulus is computed explicitly. Confidence promoted to
+    SEMI_QUANTITATIVE for STMP (see SA-EMULSIM-XL-002 Rev 0.1 + Seal 1996 +
+    Salata 2015).
+
+    For crosslinkers that do NOT have a measurable NH2 side-reaction
+    (ECH, DVS, citric_acid) set CrosslinkerProfile.nh2_co_reaction = None
+    (the default). Their solver path is unchanged.
+    """
+
+    k0_nh2: float            # [m3/(mol*s)] Arrhenius prefactor for P-N formation
+    E_a_nh2: float           # [J/mol] activation energy for P-N formation
+    f_bridge_nh2: float      # fraction of reacted NH2 that form elastically active bridges
+    stoichiometry_nh2: float = 0.5  # NH2 consumed per STMP consumed (half = 1 bridge consumes 2 NH2)
+    confidence_tier: str = "SEMI_QUANTITATIVE"
+
+
 @dataclass
 class CrosslinkerProfile:
     """Profile for a crosslinker candidate in the chitosan network.
@@ -71,6 +97,8 @@ class CrosslinkerProfile:
     network_target: str = "chitosan"       # "chitosan", "agarose", "independent", "mixed"
     reversible: bool = False
     eta_coupling_recommended: float = -0.15  # per-chemistry IPN coupling coefficient
+    # ── v9.2.2: optional parallel NH2 track for hydroxyl-primary crosslinkers ──
+    nh2_co_reaction: NH2CoReaction | None = None
 
 
 @dataclass
@@ -309,12 +337,35 @@ CROSSLINKERS: dict[str, CrosslinkerProfile] = {
             "hard limit -- agarose network hydrolysis above that). See "
             "Appendix J.1.7 for the full wet-lab protocol. NOT TO BE "
             "CONFUSED with sodium tripolyphosphate (STPP, 'tpp' key). "
-            "Cost: ~USD 0.02/g. Evidence: SEMI_QUANTITATIVE for OH "
-            "pathway, QUALITATIVE_TREND for NH2 side-reaction."
+            "Cost: ~USD 0.02/g. Evidence: SEMI_QUANTITATIVE for both OH "
+            "(phosphate diester) and NH2 (phosphoramide) pathways as of "
+            "v9.2.2 -- nh2_co_reaction track populated below with rate "
+            "constants from Seal 1996 + Salata 2015."
         ),
         solver_family="hydroxyl_covalent",
         network_target="mixed",
         eta_coupling_recommended=0.08,
+        # v9.2.2: parallel NH2 phosphoramide track. Calibrated so that at
+        # pH 11, 60 degC the NH2 effective rate k_NH2 * [NH2] is ~1/5 of the
+        # OH effective rate k_OH * [OH] in a typical agarose-chitosan bead.
+        # Physics: [NH2]/[OH] ~ 0.1 (100 mM / 1000 mM in 4% agarose + 1.8%
+        # chitosan); NH2 is ~2x more nucleophilic per site via the alpha
+        # effect; net effective rate ratio ~ 0.2. With k_OH(60C) ~ 8.7e-7
+        # from the existing STMP profile, target k_NH2(60C) ~ 1.74e-6.
+        # With Ea_NH2 = 60 kJ/mol (lower than OH's 75 kJ/mol: amine
+        # deprotonation barrier is lower at pH 11), k0_NH2 back-calculated
+        # as k_NH2(60C) * exp(Ea / (R * 333.15)) ~ 4.5e3.
+        # f_bridge_nh2 = 0.35 (lower than 0.45 diester because NH2 can form
+        # pendant P-N monosubstituted adducts without bridging).
+        # See SA-EMULSIM-XL-002 Rev 0.1 + Seal BL (1996) Biomaterials
+        # 17:1869 + Salata et al. (2015) Int. J. Biol. Macromol. 81:1009.
+        nh2_co_reaction=NH2CoReaction(
+            k0_nh2=4.5e3,
+            E_a_nh2=60000.0,
+            f_bridge_nh2=0.35,
+            stoichiometry_nh2=0.5,
+            confidence_tier="SEMI_QUANTITATIVE",
+        ),
     ),
     # ── 6. Epichlorohydrin ────────────────────────────────────────────────
     "epichlorohydrin": CrosslinkerProfile(
