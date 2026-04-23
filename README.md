@@ -238,9 +238,14 @@ Emulsification-Simulator/
     decisions/                # ADRs: Python policy, optimization stack pin, ...
     01_scientific_advisor_report.md
     02_computational_architecture.md
-    03_scientific_review.md
+    INDEX.md                  # navigation map for docs/
     04_calibration_protocol.md
-    ...                       # 30+ additional architecture / audit / planning docs
+    INDEX.md                  # navigation map for docs/
+    module2_history.md        # M2 architecture history + shipped audit findings
+    ui_evolution.md           # Family-First UI history + shipped backend fixes
+    19_ligand_protein_coupling_candidates.md
+    20_linker_arm_candidates.md
+    f1a_*, f1b_*, f1c_*, f2_*, f4b_*, f5_*  # per-platform protocols
     user_manual/              # First Edition + Appendix J PDFs (shipped in installer)
   installer/                  # Inno Setup installer sources (build_installer.bat, EmulSim.iss, ...)
   src/emulsim/
@@ -281,10 +286,10 @@ Emulsification-Simulator/
 
 ### Foundational scientific docs
 
-- **Scientific Advisor Report** (`docs/01_scientific_advisor_report.md`) — physical models, governing equations
+- **Scientific Advisor Report** (`docs/01_scientific_advisor_report.md`) — physical models, governing equations, plus **Appendix A** consolidating audit findings (§A.1, §A.4, §A.5), design-principle rationale (§A.2), Cluster F platform science (§A.3), the EDC/NHS mechanism + rate constants (§A.6), and the full crosslinker library provenance (§A.7)
 - **Computational Architecture** (`docs/02_computational_architecture.md`) — software design, data flow, solver implementations
-- **Scientific Review** (`docs/03_scientific_review.md`) — validation strategy, known limitations
 - **Calibration Protocol** (`docs/04_calibration_protocol.md`) — 5-study wet-lab calibration plan
+- **Documentation Index** (`docs/INDEX.md`) — navigation map for every file in `docs/`
 
 ### Architecture decisions (ADRs)
 
@@ -298,16 +303,23 @@ Emulsification-Simulator/
 - `docs/f1c_plga_protocol.md` — PLGA solvent evaporation
 - `docs/f2_digital_twin_protocol.md` — digital twin / EnKF replay
 - `docs/f4b_cvar_protocol.md` — CVaR-robust Bayesian optimization
-- `docs/node31_edc_nhs_scientific_brief.md` + `node31_protocol.md` — EDC/NHS kinetics
-- `docs/13_module2_module3_final_implementation_plan.md` — M2/M3 architecture
-- `docs/SA-EMULSIM-XL-001_Crosslinker_Evaluation.md` — crosslinker scientific advisor report
+- `docs/f5_md_ingest_protocol.md` — MARTINI MD parameter ingest
+- `docs/module2_history.md` — Module 2 (functionalization) architecture, current reagent library, audit findings shipped
+- `docs/ui_evolution.md` — Family-First UI architecture, v9.0 redesign backend-fix findings
+- `docs/19_ligand_protein_coupling_candidates.md` — scientific candidate screen for M2 ligand/protein additions (CAS, MW, kinetic parameters, suitability tiers)
+- `docs/20_linker_arm_candidates.md` — scientific candidate screen for M2 spacer arms (CAS, length, distal groups, compatibility matrix)
 
-### Audits and planning history
+### History
 
-The remaining `docs/05_*` through `docs/35_*` files are dated planning, audit,
-and remediation documents from prior releases (2026-04-10 through 2026-04-17).
-They're kept in the repo as historical record of the design-implement-audit
-cycle but are not user-facing — read CHANGELOG.md for "what shipped" instead.
+The repository previously kept a full `docs/05_*` through `docs/35_*` set of
+planning, audit, and remediation documents. Those were consolidated in the
+2026-04-24 content audit: version-specific planning docs for superseded
+releases (v5.8 / v5.9 / v6.0 / v7.x / v8.x) were removed; load-bearing
+scientific content was preserved as Appendix A of
+`docs/01_scientific_advisor_report.md`; M2 and UI iteration trails were
+consolidated into `docs/module2_history.md` and `docs/ui_evolution.md`.
+The pre-audit snapshot lives at tag `v9.2.2-pre-docs-audit`. For
+user-facing "what shipped in each release", read `CHANGELOG.md`.
 
 ### Installer
 

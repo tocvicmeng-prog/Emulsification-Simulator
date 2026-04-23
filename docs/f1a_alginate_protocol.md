@@ -3,7 +3,7 @@
 **Prepared by:** /architect (via dev-orchestrator)
 **Date:** 2026-04-17
 **Status:** Protocol only; implementation deferred to fresh session(s)
-**Scope basis:** `docs/node32_cluster_f_v8_roadmap.md` §2.1
+**Scope basis:** `docs/01_scientific_advisor_report.md §A.3` §2.1
 
 ---
 
@@ -209,7 +209,7 @@ before full G1 pass.
 
 A session picking up F1-a should:
 
-1. Read `docs/node32_cluster_f_v8_roadmap.md` §2.1 + this protocol.
+1. Read `docs/01_scientific_advisor_report.md §A.3` §2.1 + this protocol.
 2. Invoke `/scientific-advisor` with the §2 "Mechanism summary" +
    §5 parameter table for validation. Request: full literature review
    of ionic-Ca gelation in alginate microspheres; confirm or refine
