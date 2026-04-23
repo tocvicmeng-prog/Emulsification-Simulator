@@ -1,3 +1,20 @@
+# EmulSim 9.2.2 — Release Notes
+
+**Release date:** 2026-04-24
+
+**Feature release.** Promotes the STMP phosphoramide side-reaction model
+from `QUALITATIVE_TREND` to `SEMI_QUANTITATIVE` by adding a parallel
+NH₂ ODE track to the L3 solver. The simulator now explicitly accounts
+for the chitosan -NH₂ phosphoramide contribution to the chitosan
+network modulus, in addition to the agarose -OH diester contribution
+that was already modelled. Also bundles the upstream PR A mypy-cleanup
+that burned the baseline from 32 errors to 0 — CI now enforces zero
+type errors permanently.
+
+See the v9.2.1 notes below for the prior hotfix content.
+
+---
+
 # EmulSim 9.2.1 — Release Notes
 
 **Release date:** 2026-04-24

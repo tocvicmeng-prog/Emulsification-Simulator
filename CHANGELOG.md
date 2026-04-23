@@ -1,5 +1,98 @@
 # Changelog
 
+## v9.2.2 — STMP phosphoramide model upgrade + mypy cap to 0 (2026-04-24)
+
+Promotes the SA-002 phosphoramide side-reaction from QUALITATIVE_TREND
+to SEMI_QUANTITATIVE by wiring a parallel NH₂ ODE track into the L3
+crosslinking solver. The chitosan-NH₂ phosphoramide contribution is
+now computed explicitly alongside the agarose-OH diester contribution
+for STMP; both contributions appear as separate diagnostic fields on
+`CrosslinkingResult` and are summed into the existing
+`G_chitosan_final`.
+
+This release also bundles PR #18 — the mypy-error burndown from 32 to
+0 and the CI-cap tightening to `MYPY_MAX=0`. Any PR that adds type
+errors from now on fails CI.
+
+Scientific basis: SA-EMULSIM-XL-002 Rev 0.1 + Seal BL (1996)
+Biomaterials 17:1869 + Salata et al. (2015) Int. J. Biol. Macromol.
+81:1009 + JCP-EMULSIM-TYPE-PN-001 Rev 0 (joint plan).
+
+### New data model
+
+- `src/emulsim/reagent_library.py` — new frozen dataclass
+  `NH2CoReaction(k0_nh2, E_a_nh2, f_bridge_nh2, stoichiometry_nh2,
+  confidence_tier)`; added optional field `CrosslinkerProfile.
+  nh2_co_reaction: NH2CoReaction | None = None`.
+- Populated `nh2_co_reaction` for STMP only: `k0=4.5e3 m³/(mol·s)`,
+  `Ea=60 kJ/mol`, `f_bridge=0.35`. Calibrated so the effective NH₂
+  rate `k_NH2 · [NH2]` is ~1/5 of the OH rate in a typical 4% agarose
+  + 1.8% chitosan bead (physics: [NH2]/[OH] ≈ 0.1, NH₂ is ~2× more
+  nucleophilic per site via the alpha effect).
+- ECH, DVS, citric_acid leave `nh2_co_reaction=None`; their solver
+  path is unchanged.
+
+### Solver extension
+
+- `src/emulsim/level3_crosslinking/solver.py::_solve_second_order_
+  hydroxyl` — when `xl.nh2_co_reaction is not None`, a second
+  independent second-order ODE is solved for NH₂ consumption. The
+  resulting chitosan-network modulus is summed with the OH-track
+  modulus. Implementation note: the two tracks use separate
+  crosslinker pools (valid at the low-to-moderate conversion
+  regime where STMP is in effective excess). Future bench data
+  may motivate a single coupled ODE with a shared crosslinker
+  pool.
+
+### CrosslinkingResult diagnostic fields
+
+- `G_chit_diester: float = 0.0` — agarose-OH phosphate diester
+  contribution.
+- `G_chit_phosphoramide: float = 0.0` — chitosan-NH₂ phosphoramide
+  contribution.
+- `p_final_nh2: float = 0.0` — NH₂ conversion fraction.
+- All zero-default, so callers that don't opt into the dual track
+  see no behaviour change.
+
+### Tests
+
+- `tests/test_phosphoramide_upgrade.py` (new, 12 tests) covers:
+  dataclass presence and bounds; STMP dual-track produces non-zero
+  phosphoramide modulus; split-sums-to-total invariant; ECH/DVS
+  remain single-track; NH₂ conversion in [0, 1]; effective rate
+  ratio matches the SA audit (0.05 < k_NH2·[NH2] / k_OH·[OH] < 1.0).
+
+### Documentation
+
+- Appendix J §J.1.7 evidence-tier paragraph updated: both OH and
+  NH₂ tracks now `SEMI_QUANTITATIVE`.
+- `module2_functionalization/reagent_profiles.py` `stmp_secondary`
+  notes updated: removed "not separately modelled here" clause;
+  added pointer to `NH2CoReaction` and rate constants.
+- `reagent_library.py` STMP notes updated similarly.
+
+### Bundled from PR #18 (mypy 32 → 0)
+
+- 32 mypy errors fixed across 12 source files (ReagentProfile /
+  CrosslinkerProfile Union confusion, family-context Union in
+  tab_m1.py, Optional-None defaults, numpy narrowing, CH solver
+  subclass assignment, numeric unions in packed_bed.py, misc
+  one-offs).
+- `.github/workflows/ci.yml` `MYPY_MAX` 32 → 0.
+- `CLAUDE.md` CI-gates section updated.
+
+### Version hygiene
+
+- `pyproject.toml` 9.2.1 → 9.2.2
+- `src/emulsim/__init__.py` 9.2.1 → 9.2.2
+- `installer/templates/*` synchronised to 9.2.2
+
+### Gates
+
+- ruff 0 findings
+- mypy **0 errors** (new CI enforcement)
+- pytest: 936 passed (924 baseline + 12 new phosphoramide), 0 failed
+
 ## v9.2.1 — UI wiring hotfix (2026-04-24)
 
 Two bugs caught during the v9.2.0 live smoke test. Ships as a hotfix.
