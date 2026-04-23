@@ -822,3 +822,347 @@ Before proceeding with the full simulation pipeline, there is one **critical fea
 4. Accepting larger microspheres (~10-50 Âµm) and adjusting the target application accordingly
 
 This feasibility check should be **Step 0** of the computational program.
+
+---
+
+## Appendix A — Historical Scientific Audits and Design Rationale
+
+This appendix consolidates load-bearing scientific reasoning from design-phase
+documents produced during the v3.0 → v9.2.2 evolution. The source documents
+themselves were removed in the 2026-04-24 content audit (tag
+`v9.2.2-pre-docs-audit` preserves the pre-audit state). Their findings,
+principles, and platform-science substance are preserved here because they
+carry design rationale for the current architecture (polymer-family M1
+dispatch, L2a/L2b thermal-vs-microstructure split, chemistry-family L3
+solvers, dual-track STMP kinetics, etc.). Code-location references from the
+originals have been stripped since the code has drifted; the scientific
+reasoning is what matters.
+
+### A.1  Independent Scientific Audit (2026-04-10) — seven findings
+
+Source: `docs/05_independent_scientific_audit_2026-04-10.md` (pre-v6.0 snapshot).
+
+#### Finding 1 — Default pipeline not truly multiscale (CRITICAL, v3.0)
+
+The v3.0 default L2 solver (`solve_gelation_empirical`) computed pore size from
+agarose concentration, chitosan concentration, and cooling rate only. It did
+**not** use `R_droplet` in its pore model; `R_droplet` was only used to
+generate a synthetic radial grid. Runtime RPM sweeps showed identical pore
+predictions (`pore ≈ 199.87 nm`) at 3,000, 10,000, and 20,000 RPM despite
+d50 varying over 1–17 µm.
+
+**Scientific consequence:** the v3.0 pipeline did not propagate
+emulsification-size physics into pore formation; claims like "emulsification
+conditions control pore structure" or "full-pipeline optimization is
+mechanistically linked" were not supported by the default path.
+
+**Resolution:** in v7+ the empirical L2 was explicitly labelled as an
+uncoupled agarose-based pore heuristic; the mechanistic branch became the
+preferred path when multiscale coupling is claimed; RPM-sensitivity tests
+were added.
+
+#### Finding 2 — Mechanistic L2 could not represent agarose-chitosan demixing (CRITICAL)
+
+The v3.0 free-energy layer used a single scalar composition field `phi`; the
+2D solver evolved only `phi_0_dry = (c_agarose + c_chitosan) / 1400.0`. This
+was a binary polymer-solvent model, not a ternary agarose/chitosan/water
+model. It could simulate polymer-rich vs solvent-rich segregation but NOT
+agarose-rich vs chitosan-rich demixing, differential partitioning of the
+two polymers, or chemistry-specific domain templating.
+
+**Resolution:** v8.1-beta F1-b shipped a true ternary Cahn-Hilliard solver
+(`nips_cellulose.py`) with `χ_PS / χ_PN / χ_SN` parameters. The agarose/chitosan
+demixing hypothesis can now be tested in the mechanistic branch.
+
+#### Finding 3 — L_domain cap contaminated L4 bead radius (CRITICAL)
+
+The v3.0 2D solver capped the computational domain at
+`L_domain = min(2.0 * R_droplet, 1.5e-6)`. L4 mechanics then used
+`R = gelation.L_domain / 2.0` as the bead radius. For any droplet larger than
+1.5 µm diameter, the mechanistic solver ceased to represent the full droplet
+geometry but L4 still interpreted the local computational patch as the bead
+radius. This invalidated absolute Hertz force-displacement predictions.
+
+**Resolution:** current L4 receives the true bead radius from L1; local
+microstructure domain size is carried as a separate diagnostic field.
+
+#### Finding 4 — Chemistry framework overgeneralized incompatible reactions (HIGH)
+
+The v3.0 L3 solver reused a single concentration field (`c_genipin`) for amine
+bridge models, hydroxyl-reactive models, PEGDA+UV, and TPP ionic gelation. L4
+then treated every L3 output as one generic second-network modulus. The
+architecture was too chemically compressed for defensible comparisons among
+genipin / glutaraldehyde / EDC/NHS / ECH / DVS / citric acid / PEGDA+UV / TPP —
+chemistries that differ in target functional groups, reversibility,
+diffusivity, stoichiometric meaning, and whether they truly create a second
+interpenetrating network.
+
+**Resolution:** v7.1 Node 31 shipped mechanistic EDC/NHS for surface-COOH
+matrices with Hermanson/Wang/Cline rate constants. v9.0 Family-First M1
+dispatched polymer families independently. v9.2.2 STMP shipped with a dual-track
+(OH + NH₂) kinetic model. Chemistry families remain partially distinct in
+current code (`_solve_second_order_amine`, `_solve_second_order_hydroxyl`);
+future additions should continue the per-family separation pattern.
+
+#### Finding 5 — Default L1 kernel not directionally trustworthy (HIGH)
+
+The v3.0 legacy kernel config set `breakage_C3 = 0.0`, disabling the viscous
+breakup correction. The dispersed phase (4.2% agarose + 1.8% chitosan at 90°C)
+was exactly the kind of viscous polymer solution for which viscosity resistance
+matters. Default runs produced non-monotonic RPM trends:
+3,000 → 1.53 µm; 8,000 → 19.36 µm; 10,000 → 18.08 µm; 20,000 → 12.41 µm.
+
+**Resolution:** v6.1 PBE recalibration work + v7.0 `AssayRecord` wet-lab
+ingest framework + v7.0.1 batch variability over DSD quantiles + Node 14
+Numba JIT. Direction-sanity is now part of test gates; calibration is still
+limited by availability of wet-lab DSD datasets.
+
+#### Finding 6 — Uncertainty framework understated structural uncertainty (HIGH)
+
+The v3.0 uncertainty module hard-coded L2 to `mode='empirical'` while
+perturbing only parametric values (σ, μ_d, k_xlink_0, agarose modulus
+prefactor, bridge efficiency, coupling coefficient). Uncertainty in L2 model
+form, L1→L2 coupling, mechanistic phase-field parameters, and crosslinker
+family mismatch was excluded. 5-sample uncertainty runs produced identical
+pore predictions (`199.869 nm` in every sample) while d32 and G_DN varied —
+creating a false impression of confidence around pore.
+
+**Resolution:** v7.1 Node 30 shipped `UnifiedUncertaintyEngine`; Node 30b
+migrated the Streamlit panel; calibration posteriors are now absorbed.
+Reports now distinguish parametric from structural uncertainty in scope;
+fully structural-uncertainty aware acquisition is still a future extension.
+
+#### Finding 7 — L4 mechanics remain phenomenological (MODERATE-HIGH)
+
+The DN modulus `G_DN = G1 + G2 + η · sqrt(G1 · G2)` is phenomenological; it
+is not derived from fracture mechanics, damage evolution, or microstructural
+homogenization. Acceptable for ranking formulations; not yet defensible for
+predictive load-bearing design or rigorous bead fracture interpretation.
+
+**Resolution:** still phenomenological in v9.2.2. `MechanicalResult` carries
+a `network_type` metadata field (`ionic_reinforced`, `glassy_polymer`,
+`physical_entangled`, `covalent_DN`) so downstream optimisation knows what
+network physics backs the modulus. Full calibration against compression data
+remains a future wet-lab study.
+
+#### Audit priority recommendations (preserved)
+
+1. **Repair the model hierarchy** — make L2 genuinely dependent on L1 in any
+   workflow claiming full-pipeline prediction.
+2. **Decide what L2 is scientifically supposed to model** — pick either a
+   calibrated empirical engineering tool OR a mechanistic phase-separation
+   model with explicit ternary/two-order-parameter state.
+3. **Split crosslinkers by chemical family** — amine-covalent, hydroxyl-covalent,
+   ionic-reversible, independent-polymerizing secondary networks.
+4. **Recalibrate L1 before trusting optimization** — fit against measured DSD
+   datasets; validate trend direction; ensure default kernel settings produce
+   physically plausible behaviour.
+5. **Expand trust and uncertainty layers** — warn explicitly when empirical
+   L2 is used in a "full-pipeline" claim, mechanistic L2 runs on truncated
+   domain, chemistry family and constitutive model mismatch, or structural
+   uncertainty is excluded.
+
+**Audit verdict (preserved):** scientific originality moderate-to-high;
+software organization high; mechanistic completeness moderate-to-low;
+cross-level physical consistency (at v3.0) low; predictive readiness low;
+research/ideation platform usefulness high. The framing applicable at v3.0 was
+"a modular, partially mechanistic process-design and hypothesis-screening
+platform, not yet a fully validated predictive simulator." Current v9.2.2
+position is materially stronger but evidence-tier labelling still captures the
+residual gap honestly.
+
+---
+
+### A.2  Scientific Model Redesign — design principles (2026-04-10)
+
+Source: `docs/06_scientific_model_redesign_and_fix_plan_2026-04-10.md`
+(follow-on to A.1).
+
+#### Core diagnosis
+
+The v3.0 problem was not that individual formulas were wrong. The scientific
+hierarchy was incoherent: L1 presented as mechanistic, L2 defaulted to an
+empirical pore model largely independent of L1, L3 compressed chemically
+incompatible crosslinkers into one abstraction, L4 treated very different
+network constructions as interchangeable second networks. The pipeline was
+modular in software terms but not yet coherent in scientific terms.
+
+#### Five design principles (preserved)
+
+1. **Each layer must have a single scientific role.** L1: what droplet
+   population is produced? L2: what internal microstructure forms inside a
+   droplet of that size and thermal history? L3: what network topology and
+   crosslink density emerge from a specific chemistry? L4: what bulk bead
+   properties follow from that structure?
+
+2. **Empirical and mechanistic models must not be mixed silently.** Empirical
+   models state their calibration range and forbid interpretation outside it.
+   Mechanistic models preserve state variables and scale couplings; they
+   avoid hard-coded heuristics that override the mechanism.
+
+3. **Structural uncertainty must be explicit.** The largest uncertainty is
+   usually not parameter uncertainty — it is whether the chosen hierarchy is
+   the right one, whether a binary pore model is appropriate for the
+   chemistry, whether different crosslinkers can share one kinetic abstraction.
+
+4. **Local patch simulations must never be reused as full-bead geometry.** A
+   local microstructure domain used for numerical feasibility remains a local
+   descriptor. It must not overwrite bead radius, particle contact scale, or
+   packing mechanics scale (Finding 3 of A.1).
+
+5. **Chemistry families must be separated.** Amines, hydroxyls, ionic
+   crosslinks, and independently polymerized secondary networks are different
+   scientific objects and must be modelled as such.
+
+#### Three operating modes (architectural frame)
+
+- **Mode A — Empirical Engineering.** Fast, calibration-driven, only modest
+  mechanistic claims. Allowed: trend screening, calibrated interpolation,
+  design-space ranking. Not allowed: first-principles pore prediction,
+  mechanistic explanation of polymer demixing.
+
+- **Mode B — Hybrid Coupled.** Empirical where evidence exists; mechanistic
+  only where coupling is defensible. Preferred production mode.
+
+- **Mode C — Mechanistic Research.** Slower, explicitly exploratory,
+  hypothesis-testing only. Non-production.
+
+The current `RunReport.evidence_tier` taxonomy (VALIDATED_QUANTITATIVE /
+CALIBRATED_LOCAL / SEMI_QUANTITATIVE / QUALITATIVE_TREND / UNSUPPORTED) is the
+implementation of Principle 2 and the operating-mode framing: every result
+carries the weakest tier across L1–L4 + M2 + M3, and the Bayesian optimizer
+excludes QUALITATIVE_TREND and UNSUPPORTED candidates from the Pareto front by
+default.
+
+#### Proposed L2 split — thermal/gelation timing vs microstructure
+
+The redesign proposed splitting L2 into:
+
+- **L2a — thermal / gelation trajectory model.** When does the droplet gel?
+  How fast does gelation arrest coarsening? What is the relevant local cooling
+  history? Outputs: `T_history`, `t_gel_onset`, `alpha_final`,
+  `mobility_arrest_factor`.
+
+- **L2b — microstructure / pore-formation model.** What macropore size
+  distribution forms? What morphology class results? How does that depend on
+  droplet class and L2a arrest history?
+
+Scientific rationale: thermal history and gelation arrest are scientifically
+different from pore morphology. Separating them reduces conceptual overload
+and makes calibration easier. Current code retains gelation kinetics (Avrami)
+in `level2_gelation/` alongside pore models; the full L2a/L2b object split
+remains a future refactor.
+
+#### L3 chemistry families (implemented)
+
+The redesign proposed four L3 solver families:
+
+1. `amine_covalent` (genipin, glutaraldehyde on chitosan NH₂)
+2. `hydroxyl_covalent` (ECH, DVS, STMP, citric acid on agarose OH)
+3. `ionic_reversible` (TPP; Ca²⁺ for alginate)
+4. `independent_network_polymerization` (PEGDA+UV)
+
+Each family exposes: network target, stoichiometric basis, limiting reactant,
+effective elastically active fraction, diffusion-limited vs reaction-limited
+flag.
+
+**Current state:** polymer-family dispatch in M1 matches (AGAROSE_CHITOSAN,
+ALGINATE, CELLULOSE, PLGA). L3 solver has per-family `_solve_*` functions for
+amine and hydroxyl; alginate ionic-Ca runs through its own `ionic_ca.py`
+solver. EDC/NHS has its own mechanistic module
+(`module2_functionalization/edc_nhs_kinetics.py`). STMP's v9.2.2 upgrade
+honours the dual-track principle (OH diester + NH₂ phosphoramide on separate
+ODEs).
+
+#### L4 scope discipline (implemented)
+
+L4 was relabelled as a **phenomenological property estimator**, not a
+first-principles bead-mechanics solver. `MechanicalResult.network_type`
+captures the network identity from L3 so downstream analysis is not
+network-ambiguous.
+
+---
+
+### A.3  Cluster F v8.0 Roadmap — platform scientific substance (2026-04-17)
+
+Source: `docs/node32_cluster_f_v8_roadmap.md`. All v8.0 workstreams have
+shipped (v8.0 → v8.3). Scheduling / node counts have been pruned; platform
+science is preserved.
+
+#### Per-platform mechanism table (preserved)
+
+| Platform | Gelation mechanism | L2 solver family | Platform-specific inputs |
+|---|---|---|---|
+| **Alginate (Ca²⁺)** | Diffusion-limited ionic gelation; shrinking-core external mode, coupled GDL+CaCO₃ internal mode | Ionic-CH-like solver with concentration-dependent crosslink front | CaCl₂ bath concentration, ion transport coefficients, Ca²⁺–COO⁻ binding isotherm; GDL hydrolysis rate, CaCO₃ dissolution rate |
+| **PLGA (W/O/W + solvent extraction)** | Solvent–non-solvent phase inversion; not thermal TIPS | 1D spherical Fickian DCM-depletion solver with BDF + dense-output vitrification-time probe | Solvent partitioning coefficients, Hansen solubility parameters, extraction-rate kinetics; fixed-droplet-radius approximation with `R_shrunk = R_0 · φ_0^(1/3)` as post-processing diagnostic |
+| **Cellulose (NIPS)** | Non-solvent-induced phase separation; ternary CH applicable | 1D spherical ternary Cahn-Hilliard + Fickian solver | Three-component Flory-Huggins parameters χ_PS / χ_PN / χ_SN; Cahn-Hilliard gradient-energy regularisation on μ_φ; bath solvent kinetics |
+
+#### Digital twin (F2) scientific substance
+
+- **State estimation:** EnKF over an ensemble of pipeline runs, each with its
+  own MaterialProperties + KernelConfig perturbation. Update ensemble-member
+  state when live measurements (d32, torque, turbidity) arrive.
+- **Parameter estimation:** online Bayesian updates to `CalibrationStore`
+  posteriors as measurements accumulate. Node 30's posterior-propagation
+  machinery supports this at per-batch level; the digital twin turns it into a
+  streaming loop.
+- **Control handoff:** lightweight MPC that chooses next RPM / cooling-rate
+  step to drive predicted d32 trajectory toward target.
+
+Shipped as Phase-1 offline replay in v8.3.0-alpha. Online polling + full MPC
+are Phase-2+ deferred.
+
+#### Inverse design (F3) + robust optimisation (F4) scientific substance
+
+- **F3:** standard BO (GPyTorch / BoTorch) wrapping the existing pipeline.
+  Objective: weighted distance between predicted (d32, pore, G_DN, Kav) and
+  user-specified targets, under physical constraints (agarose-chitosan ratio,
+  phi_d limits, feasible RPM range). Acquisition: expected hypervolume
+  improvement (multi-obj), expected improvement (single-obj). Shipped
+  v8.0-alpha.
+- **F4:** mean-variance or CVaR acquisition on E[f(x + δ)] + λ·Var[f(x + δ)],
+  per-candidate MC ensemble over manufacturing perturbations δ drawn from the
+  unified UQ spec. Shipped v8.0-alpha (mean-variance) + v8.3.0-alpha (CVaR).
+
+**Key constraint (preserved):** F3 acquisition penalised by evidence tier
+(Node 6 trust-aware machinery) so the optimizer cannot silently reward
+candidates outside the model's validity domain.
+
+#### MD parameter estimation (F5) — extraction protocols
+
+- **χ (Flory-Huggins):** equilibrium MD on binary polymer mixtures;
+  Kirkwood-Buff integrals from radial distribution functions.
+- **M_0 (bare mobility):** non-equilibrium MD; forced-gradient method.
+- **f_bridge (bridge efficiency):** pulling MD; probability of crosslink
+  bridging two chains vs looping back.
+- **MARTINI mapping** for polysaccharide CG parameters (Lopez et al. 2015
+  JCTC 11:2714); chitosan mapping (GlcN) has published variants — validate
+  before production use.
+
+Shipped v8.3.0-alpha as ingest-only via `md_ingest.py` +
+`MartiniRecord` JSON schema; full MD job dispatch deferred.
+
+#### Dependency pattern (preserved)
+
+```
+                ┌──────────────────────┐
+                │ Unified UQ (Node 30) │
+                └─────────┬────────────┘
+                          │
+  ┌──────────────┬────────┴────────┬──────────────┬──────────────┐
+  │              │                 │              │              │
+  ▼              ▼                 ▼              ▼              ▼
+[F1]          [F2]              [F3]           [F4 needs F3]   [F5]
+Platforms   Digital Twin     Inverse Design     Robust Opt.     MD params
+```
+
+**Critical observation (still valid):** F3 and F4 can ship before F1/F2/F5 —
+they only need the current pipeline + unified UQ. Cluster F dependency
+structure is preserved here because it informs where new workstreams
+(post-v9.2.2) should plug in: any new platform gets its own F1-style module;
+any new optimiser gets F3/F4 as foundation; new calibration sources feed
+CalibrationStore via the F5 pattern.
+
+---
+
+**End of Appendix A.**
