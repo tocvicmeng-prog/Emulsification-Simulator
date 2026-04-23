@@ -1,9 +1,14 @@
-; EmulSim 9.1.1 -- Windows 11 x64 Inno Setup installer
+; EmulSim 9.2.1 -- Windows 11 x64 Inno Setup installer
 ; Build with: ISCC.exe installer\EmulSim.iss
-; Produces:  release\EmulSim-9.1.1-Setup.exe
+; Produces:  release\EmulSim-9.2.1-Setup.exe
 
 #define MyAppName       "EmulSim"
-#define MyAppVersion    "9.1.1"
+; MyAppVersion is preferably passed on the command line by build_installer.bat
+; (/DMyAppVersion=X.Y.Z, derived from the wheel filename). The fallback below
+; lets `ISCC.exe EmulSim.iss` still work when run by hand without the helper.
+#ifndef MyAppVersion
+#define MyAppVersion    "9.2.1"
+#endif
 #define MyAppPublisher  "Holocyte Pty Ltd"
 #define MyAppURL        "https://github.com/tocvicmeng-prog/Emulsification-Simulator"
 #define MyAppExeLauncher "launch_ui.bat"
