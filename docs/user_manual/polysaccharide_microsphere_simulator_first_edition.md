@@ -362,6 +362,82 @@ modulus. The mechanistic EDC/NHS path activates only when
 
 ---
 
+## 9. Reading the Suggestion Derivation Pages
+
+After every M1 run, the Optimization Assessment panel lists up to
+five suggestions — e.g. "Increase crosslinker concentration",
+"Adjust cooling rate", etc. As of **v9.2.0**, each suggestion ends
+with a **[📊 derivation]** icon. Clicking it opens a dedicated page
+that explains *why* the system produced that advice and *by how
+much* each parameter should change.
+
+### Three canonical sections
+
+Every derivation page is built from the same three sections:
+
+1. **Derivation logic and formula pathway.** A step-by-step chain
+   of physical reasoning rendered in LaTeX, with the intermediate
+   numbers (Biot number, Weber number, required conversion p,
+   etc.) computed from your run's inputs. This is the "why" —
+   the system showing its work.
+2. **Target value or range.** Three metrics: the **nominal** value
+   the system recommends, plus **lower** and **upper** bounds that
+   bracket the acceptable band (set by a ±10–20 % tolerance on the
+   optimization target). Units are shown alongside.
+3. **Assumptions and confidence.** The list of assumptions baked
+   into the derivation (e.g. "Lumped capacitance valid for Bi < 0.1")
+   plus the **confidence tier** — matching the simulator's global
+   trust-tier vocabulary (§1.3).
+
+### Qualitative-only behaviour
+
+When the underlying physical model is only **QUALITATIVE_TREND**,
+the page **refuses to show a numeric target** and tells you exactly
+why. The most common case: the L2 pore model is an empirical
+correlation rather than a first-principles derivation, so a
+numeric cooling-rate target would imply a level of physical
+grounding the model does not support. The page then offers the
+direction-only guidance (slower → larger pores; faster → finer)
+and a concrete path to unlock a numeric target (switch to a
+mechanistic L2 mode).
+
+### Why a range, not just one number
+
+Polysaccharide-microsphere preparation is a stochastic process —
+the pore size from a given cooling rate has a distribution, not a
+delta-function. The nominal value hits the target *on average*; the
+lower/upper bounds bracket where the outcome stays within a
+target-of-interest tolerance. Aim for the nominal; accept anywhere
+in the band.
+
+### URLs are shareable
+
+The full run context is URL-encoded, so you can bookmark a specific
+derivation page or send the link to a colleague. They'll see the
+same numbers you did, computed from the same inputs. If you tweak
+inputs in the M1 tab and re-run, a new link is generated — the old
+URL still works but reflects the earlier run.
+
+### Supported suggestions (v9.2.0)
+
+| Suggestion key | Physics inverted | Returns target in |
+|---|---|---|
+| `increase_rpm` / `decrease_rpm` | Sprow (1967) Weber correlation | rpm |
+| `adjust_cooling_rate` | Lumped capacitance + Cahn-Hilliard scaling | K/s |
+| `increase_crosslinker` | Rubber elasticity G = ν·RT | mol/m³ |
+| `reduce_polymer` | Semi-dilute G ~ c² | dimensionless α multiplier |
+
+### How this fits with Appendix J
+
+Some suggestions map directly to wet-lab protocols in Appendix J —
+for example, if the derivation page for `adjust_cooling_rate` sends
+you to a two-phase cooling strategy, the Appendix J STMP protocol
+(§J.1.7) shows you how to execute a related cold-load / hot-activate
+procedure at the bench. Derivation pages are the "what" and "how
+much"; Appendix J is the "how to do it in the lab". Read both.
+
+---
+
 # Part III — Appendices
 
 ## Appendix A. Detailed Input Requirements

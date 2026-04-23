@@ -1,5 +1,79 @@
 # Changelog
 
+## v9.2.0 — Hyperlinked derivation pages for M1 suggestions (2026-04-24)
+
+Adds structured, hyperlinked derivation pages for every optimization
+suggestion the M1 tab produces. Each suggestion now ends with a
+[📊 derivation] icon that opens a dedicated page with (1) the step-by-step
+physical reasoning, (2) a nominal + band numeric target, and (3) the
+assumptions + confidence tier.
+
+Scientific basis: JCP-EMULSIM-DERIV-001 Rev 0 (joint SA + architect +
+dev-orchestrator plan).
+
+### New package `src/emulsim/suggestions/`
+
+- `types.py` — frozen dataclasses `SuggestionContext`, `TargetRange`,
+  `Suggestion`.
+- `serialization.py` — full URL round-trip codec for SuggestionContext.
+- `__init__.py` — REGISTRY_KEYS dispatch + `generate_all(ctx)`.
+- `generators.py` — relocated text-generation logic from tab_m1.py.
+- `cooling_rate.py`, `rpm.py`, `crosslinker.py`, `polymer.py` — per-key
+  modules each exporting `generate`, `derive_target`, `render_derivation`.
+
+### New physics derivations `src/emulsim/properties/`
+
+- `thermal_derivation.py` — lumped-capacitance cooling + Cahn-Hilliard
+  spinodal-dwell scaling, inverted for required cooling rate given
+  target pore size.
+- `emulsification_derivation.py` — Sprow (1967) Weber-number correlation,
+  inverted for required RPM given target d32, with Kolmogorov-floor and
+  Reynolds-number feasibility checks.
+- `crosslink_derivation.py` — rubber-elasticity inversion for target G
+  via (a) required crosslinker concentration, (b) polymer-concentration
+  scaling factor alpha.
+
+### New Streamlit page
+
+- `pages/suggestion_detail.py` — reads URL query params, dispatches via
+  REGISTRY_KEYS to the right module's `render_derivation()`, renders the
+  canonical three-section layout.
+
+### M1 tab rewire
+
+- `tab_m1.py:772-792` — flat `recs: list[str]` replaced with
+  `generate_all(ctx)` returning structured `Suggestion` objects; each
+  rendered with a `[📊 derivation]` markdown link.
+
+### Qualitative-only guarding
+
+When the underlying model is `QUALITATIVE_TREND` (e.g. the empirical L2
+pore correlation), the derivation page refuses to show a numeric target
+and explains why. User gets direction-only guidance plus a clear path
+to unlock a numeric target (switch to a mechanistic L2 mode).
+
+### Tests
+
+- `tests/test_suggestions_framework.py` (20 tests) — registry, URL
+  round-trip, `generate_all` dispatch behaviour.
+- `tests/test_cooling_rate_derivation.py` (16 tests) — physics +
+  round-trip property check + qualitative-tier guarding.
+- `tests/test_rpm_derivation.py` (10 tests) — Weber scaling + round-trip.
+- `tests/test_crosslinker_derivation.py` (13 tests) — rubber elasticity
+  inversion + polymer-scaling feasibility flags.
+
+### Version hygiene
+
+- `pyproject.toml` 9.1.2 → 9.2.0
+- `src/emulsim/__init__.py` 9.1.2 → 9.2.0
+- `installer/templates/*` all synchronised to 9.2.0
+
+### Gates
+
+- ruff 0 findings
+- mypy 32 errors (at MYPY_MAX cap; zero added)
+- pytest CI-equivalent: 908 → 963 passed, 0 failed (55 new tests)
+
 ## v9.1.2 — STMP (Sodium Trimetaphosphate) crosslinker (2026-04-24)
 
 Adds Sodium Trimetaphosphate (STMP, Na₃P₃O₉, CAS 7785-84-4) as a new
