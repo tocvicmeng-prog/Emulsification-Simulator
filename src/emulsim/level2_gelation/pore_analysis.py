@@ -342,8 +342,8 @@ def morphology_descriptors(phi_field: np.ndarray, grid_spacing: float,
         if chord > 0:
             v_chords.append(chord * grid_spacing)
 
-    mean_h = np.mean(h_chords) if h_chords else 1.0
-    mean_v = np.mean(v_chords) if v_chords else 1.0
+    mean_h = float(np.mean(h_chords)) if h_chords else 1.0
+    mean_v = float(np.mean(v_chords)) if v_chords else 1.0
     anisotropy = abs(mean_h - mean_v) / max(mean_h, mean_v) if max(mean_h, mean_v) > 0 else 0.0
 
     # 3. Connectivity: simple flood fill from top-left pore pixel

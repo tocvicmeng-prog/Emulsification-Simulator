@@ -31,7 +31,7 @@ __all__ = [
 ]
 
 
-def run_pipeline(params: SimulationParameters = None, **kwargs) -> FullResult:
+def run_pipeline(params: SimulationParameters | None = None, **kwargs) -> FullResult:
     """Run the full L1-L4 simulation pipeline.
 
     Convenience function for quick usage:

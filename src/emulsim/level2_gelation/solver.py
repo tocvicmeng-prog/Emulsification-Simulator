@@ -848,17 +848,17 @@ def solve_gelation(params: SimulationParameters, props: MaterialProperties,
         return solver.solve(params, props, R_droplet)
     elif mode == 'ch_ternary':
         from .ternary_solver import TernaryCahnHilliard2DSolver
-        solver = TernaryCahnHilliard2DSolver()
-        return solver.solve(params, props, R_droplet=R_droplet,
-                            N=params.solver.l2_n_grid)
+        solver_ternary = TernaryCahnHilliard2DSolver()
+        return solver_ternary.solve(params, props, R_droplet=R_droplet,
+                                    N=params.solver.l2_n_grid)
     elif mode == 'ch_1d':
-        solver = CahnHilliardSolver(
+        solver_1d = CahnHilliardSolver(
             N_r=params.solver.l2_n_r,
             dt_initial=params.solver.l2_dt_initial,
             dt_max=params.solver.l2_dt_max,
             arrest_exponent=params.solver.l2_arrest_exponent,
         )
-        return solver.solve(params, props, R_droplet)
+        return solver_1d.solve(params, props, R_droplet)
     else:
         raise ValueError(f"Unknown gelation mode: {mode!r}. "
                          "Use 'empirical', 'ch_2d', 'ch_ternary', or 'ch_1d'.")

@@ -99,15 +99,29 @@ def _render_non_ac_family(*, tab_container, family, is_stirred_default, model_mo
     # Compare families by .value to survive importlib.reload of datatypes
     # (see tab_m1.py family-dispatch comment and RunReport.compute_min_tier).
     family_value = getattr(family, "value", family)
+    # Type annotation as a Union so mypy accepts each of the three assignments
+    # below and so downstream code can use isinstance-narrowing to access
+    # family-specific fields.
+    from typing import Union
+    from emulsim.visualization.tabs.m1.formulation_alginate import (
+        AlginateContext,
+        render_formulation_alginate,
+    )
+    from emulsim.visualization.tabs.m1.formulation_cellulose import (
+        CelluloseContext,
+        render_formulation_cellulose,
+    )
+    from emulsim.visualization.tabs.m1.formulation_plga import (
+        PLGAContext,
+        render_formulation_plga,
+    )
+    fctx: Union[AlginateContext, CelluloseContext, PLGAContext]
     with m1_col_right:
         if family_value == PolymerFamily.ALGINATE.value:
-            from emulsim.visualization.tabs.m1.formulation_alginate import render_formulation_alginate
             fctx = render_formulation_alginate(is_stirred=is_stirred)
         elif family_value == PolymerFamily.CELLULOSE.value:
-            from emulsim.visualization.tabs.m1.formulation_cellulose import render_formulation_cellulose
             fctx = render_formulation_cellulose(is_stirred=is_stirred)
         elif family_value == PolymerFamily.PLGA.value:
-            from emulsim.visualization.tabs.m1.formulation_plga import render_formulation_plga
             fctx = render_formulation_plga(is_stirred=is_stirred)
         else:
             st.error(f"Unknown family: {family_value}")
@@ -154,7 +168,7 @@ def _render_non_ac_family(*, tab_container, family, is_stirred_default, model_mo
     )
 
     props_overrides: dict = {"polymer_family": family}
-    if family_value == PolymerFamily.ALGINATE.value:
+    if family_value == PolymerFamily.ALGINATE.value and isinstance(fctx, AlginateContext):
         formulation.c_alginate = fctx.c_alginate_kg_m3
         if fctx.c_Ca_bath_mM > 0:
             # External CaCl2 bath: direct concentration.
@@ -183,11 +197,11 @@ def _render_non_ac_family(*, tab_container, family, is_stirred_default, model_mo
                 )
             else:
                 formulation.c_Ca_bath = fctx.C_Ca_source_mM
-    elif family_value == PolymerFamily.CELLULOSE.value:
+    elif family_value == PolymerFamily.CELLULOSE.value and isinstance(fctx, CelluloseContext):
         formulation.phi_cellulose_0 = fctx.phi_cellulose_0
         formulation.solvent_system = fctx.solvent_system
         formulation.cooling_rate = fctx.cooling_rate_Cmin / 60.0 if fctx.cooling_rate_Cmin > 0 else 0.0
-    elif family_value == PolymerFamily.PLGA.value:
+    elif family_value == PolymerFamily.PLGA.value and isinstance(fctx, PLGAContext):
         formulation.phi_PLGA_0 = fctx.phi_PLGA_0
         formulation.plga_grade = fctx.plga_grade
 
@@ -355,7 +369,7 @@ def render_tab_m1(
                     l1_max_ext = st.number_input("Max extensions", 0, 5, 2, key="m1_max_ext",
                                                   help="Number of half-interval extensions if PBE not converged")  # type: ignore[assignment]
             else:
-                l1_t_max = 600.0
+                l1_t_max = 600
                 l1_conv_tol = 0.01
                 l1_max_ext = 2
 

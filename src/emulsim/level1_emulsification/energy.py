@@ -31,14 +31,26 @@ Geometry = Union[MixerGeometry, StirrerGeometry]
 def _get_diameter(geometry: Geometry) -> float:
     """Return the active impeller/rotor diameter [m] from any geometry."""
     # StirrerGeometry uses `impeller_diameter`; MixerGeometry uses `rotor_diameter`.
-    return getattr(geometry, "impeller_diameter",
-                   getattr(geometry, "rotor_diameter", None))
+    d = getattr(geometry, "impeller_diameter",
+                getattr(geometry, "rotor_diameter", None))
+    if d is None:
+        raise AttributeError(
+            f"Geometry {type(geometry).__name__} has neither impeller_diameter "
+            f"nor rotor_diameter"
+        )
+    return float(d)
 
 
 def _get_tank_volume(geometry: Geometry) -> float:
     """Return the tank/working volume [m3] from any geometry."""
-    return getattr(geometry, "working_volume",
-                   getattr(geometry, "tank_volume", None))
+    v = getattr(geometry, "working_volume",
+                getattr(geometry, "tank_volume", None))
+    if v is None:
+        raise AttributeError(
+            f"Geometry {type(geometry).__name__} has neither working_volume "
+            f"nor tank_volume"
+        )
+    return float(v)
 
 
 # ---------------------------------------------------------------------------
