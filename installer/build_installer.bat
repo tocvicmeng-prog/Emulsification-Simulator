@@ -79,11 +79,26 @@ if not exist "%ISCC%" (
     exit /b 3
 )
 
+REM Derive the version from the wheel filename so the installer name,
+REM the .iss AppVersion, and the final "Output:" echo all track the
+REM single source of truth (pyproject.toml -> the wheel just built).
+REM Wheel filename: emulsim-<VERSION>-py3-none-any.whl
+set "VERSION="
+for %%W in (installer\stage\wheels\emulsim-*-py3-none-any.whl) do (
+    set "_WHL_NAME=%%~nW"
+)
+for /f "tokens=2 delims=-" %%V in ("!_WHL_NAME!") do set "VERSION=%%V"
+if not defined VERSION (
+    echo [build-installer] ERROR: could not derive VERSION from wheel filename.
+    exit /b 5
+)
+echo [build-installer] Building installer for EmulSim %VERSION%.
+
 echo [build-installer] 4/4  Compiling installer
-"%ISCC%" installer\EmulSim.iss || exit /b 4
+"%ISCC%" /DMyAppVersion=%VERSION% installer\EmulSim.iss || exit /b 4
 
 echo.
 echo [build-installer] DONE.
-echo Output: release\EmulSim-9.1.1-Setup.exe
+echo Output: release\EmulSim-%VERSION%-Setup.exe
 endlocal
 exit /b 0
