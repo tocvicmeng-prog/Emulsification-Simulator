@@ -27,7 +27,9 @@ installer attached to each GitHub release.
 
 ### Prerequisites
 
-- **Python 3.11+** on `PATH` (for building the wheel).
+- **Python 3.11 or 3.12** on `PATH` (for building the wheel). See
+  `docs/decisions/ADR-001-python-version-policy.md` — 3.13+ is not
+  supported.
 - **Inno Setup 6** — install with
   `winget install -e --id JRSoftware.InnoSetup` or download from
   <https://jrsoftware.org/isdl.php>.
@@ -55,9 +57,11 @@ Output: `release\EmulSim-<version>-Setup.exe` (≈ 2.5 MB).
    step fail with Access Denied on venv creation.
 4. **Shortcuts options** — Start-Menu group (default), optional
    desktop shortcut.
-5. **Python presence check** — if Python 3.11+ is not on `PATH`,
+5. **Python presence check** — if Python 3.11 or 3.12 is not on `PATH`,
    the installer offers to open <https://www.python.org/downloads/windows/>
-   in the default browser before proceeding.
+   in the default browser before proceeding. (Per ADR-001, 3.13+ is
+   rejected because of scipy BDF + numba JIT + torch.jit.script
+   incompatibility.)
 6. **File extraction** — wheel, configs, docs, launchers, EULA,
    LICENSE, manual PDF.
 7. **Post-install step** — runs the bundled `install.bat`, which:

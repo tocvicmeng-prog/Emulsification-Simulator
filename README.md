@@ -27,8 +27,8 @@ drug delivery.
   - **PLGA** — solvent evaporation
 - **Hardware Mode** inside M1 Emulsification: stirred-vessel (Stirrer A
   pitched-blade or Stirrer B rotor-stator) and rotor-stator legacy
-- **8 crosslinkers** (Genipin, Glutaraldehyde, EDC/NHS, PEGDA+UV, TPP,
-  Epichlorohydrin, DVS, Citric Acid) with 4 kinetics models
+- **9 crosslinkers** (Genipin, Glutaraldehyde, EDC/NHS, PEGDA+UV, TPP,
+  STMP, Epichlorohydrin, DVS, Citric Acid) with 4 kinetics models
 - **6 surfactants** (Span-80/60/40/85, PGPR, Lecithin) with
   Szyszkowski-Langmuir IFT model
 
@@ -170,7 +170,7 @@ The UI provides:
          v
  +-------------------+
  | L3: Crosslinking  |   Multi-mechanism ODE kinetics
- | Kinetics          |   8 crosslinkers, Arrhenius rate law
+ | Kinetics          |   9 crosslinkers, Arrhenius rate law
  |                   |   -> conversion p, G_chitosan, mesh size
  +-------------------+
          |  G_chitosan, mesh size
@@ -264,7 +264,7 @@ Emulsification-Simulator/
     calibration/              # CalibrationStore + run-context injection
     protocols/                # Mechanism data + protocol generator (Appendix J)
     visualization/            # Streamlit app, tabs (M1/M2/M3), plots, panels
-  tests/                      # ~900 tests; smoke + slow markers
+  tests/                      # ~1,020 tests; smoke + slow markers
   release/                    # Installer .exe outputs (gitignored)
   CHANGELOG.md
   CLAUDE.md                   # Project instructions for Claude Code
@@ -298,6 +298,7 @@ Emulsification-Simulator/
 - `docs/f1c_plga_protocol.md` — PLGA solvent evaporation
 - `docs/f2_digital_twin_protocol.md` — digital twin / EnKF replay
 - `docs/f4b_cvar_protocol.md` — CVaR-robust Bayesian optimization
+- `docs/f5_md_ingest_protocol.md` — MARTINI MD parameter ingest
 - `docs/node31_edc_nhs_scientific_brief.md` + `node31_protocol.md` — EDC/NHS kinetics
 - `docs/13_module2_module3_final_implementation_plan.md` — M2/M3 architecture
 - `docs/SA-EMULSIM-XL-001_Crosslinker_Evaluation.md` — crosslinker scientific advisor report
