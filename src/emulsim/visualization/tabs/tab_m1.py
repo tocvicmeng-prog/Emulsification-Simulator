@@ -830,7 +830,7 @@ def render_tab_m1(
             else:
                 for i, _s in enumerate(_suggestions, 1):
                     _url = suggestion_to_url(_s)
-                    st.markdown(f"{i}. {_s.display_text} [\ud83d\udcca derivation]({_url})")
+                    st.markdown(f"{i}. {_s.display_text} [\U0001f4ca derivation]({_url})")
 
             # ── Trust Assessment ─────────────────────────────────────────────
             if "trust" in st.session_state:
