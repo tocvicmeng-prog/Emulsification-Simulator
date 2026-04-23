@@ -3,7 +3,7 @@
 **Prepared by:** /architect (via dev-orchestrator)
 **Date:** 2026-04-17
 **Status:** Protocol only; implementation deferred to fresh session(s)
-**Scope basis:** `docs/node32_cluster_f_v8_roadmap.md` §2.2
+**Scope basis:** `docs/01_scientific_advisor_report.md §A.3` §2.2
 
 ---
 
@@ -281,7 +281,7 @@ campaign) promotes to QUANTITATIVE.
 
 ## 9. Execution plan (fresh-session checklist)
 
-1. Read `docs/node32_cluster_f_v8_roadmap.md` §2.2 + this protocol.
+1. Read `docs/01_scientific_advisor_report.md §A.3` §2.2 + this protocol.
 2. Invoke `/scientific-advisor` with §2 mechanism + §5 parameter table;
    request full literature review of cellulose NIPS thermodynamics
    (binodal / spinodal loci) and Cahn-Hilliard numerics choices.

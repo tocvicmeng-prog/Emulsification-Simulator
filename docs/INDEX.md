@@ -18,7 +18,7 @@
 |---|---|
 | [`01_scientific_advisor_report.md`](01_scientific_advisor_report.md) | First-principles physics/chemistry decomposition (L1–L4). **Canonical scientific reference.** Includes appendices consolidated from older review/audit/brief docs in the 2026-04-24 content audit. |
 | [`02_computational_architecture.md`](02_computational_architecture.md) | Software design, data flow, solver implementations |
-| [`SA-EMULSIM-XL-001_Crosslinker_Evaluation.md`](SA-EMULSIM-XL-001_Crosslinker_Evaluation.md) | Scientific justification for the 9-crosslinker library (STMP provenance lives here) |
+| [`01_scientific_advisor_report.md` §A.7](01_scientific_advisor_report.md) | Crosslinker library scientific provenance (preserved from the 2026-04-16 SA-EMULSIM-XL-001 report as an appendix of the main scientific reference) |
 
 ## Architecture Decision Records
 

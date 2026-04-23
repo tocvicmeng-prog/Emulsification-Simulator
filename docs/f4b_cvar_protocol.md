@@ -3,7 +3,7 @@
 **Prepared by:** /architect (via dev-orchestrator)
 **Date:** 2026-04-17
 **Status:** Protocol + implementation shipped in same turn.
-**Scope basis:** `docs/node32_cluster_f_v8_roadmap.md` §4 (robust BO).
+**Scope basis:** `docs/01_scientific_advisor_report.md §A.3` §4 (robust BO).
 
 ---
 

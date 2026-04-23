@@ -3,7 +3,7 @@
 **Prepared by:** /architect (via dev-orchestrator)
 **Date:** 2026-04-17
 **Status:** Protocol + Phase 1 ready for fresh session(s); Phases 2-3 deferred
-**Scope basis:** `docs/node32_cluster_f_v8_roadmap.md` §2.3 (PLGA workstream)
+**Scope basis:** `docs/01_scientific_advisor_report.md §A.3` §2.3 (PLGA workstream)
 
 ---
 
